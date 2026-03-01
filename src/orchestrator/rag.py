@@ -1,13 +1,65 @@
 import os
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote, urlparse
+import psycopg
+from psycopg import sql
 from .logger import get_logger
 from .db import DbDao
 
 log = get_logger("rag")
 
 def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> List[Dict[str, str]]:
-    log.info("vector_store_stub", extra={"collection_id": collection_id, "top_k": top_k})
-    return [{"source":"stub://vector", "text":"RAG STUB: replace retrieve_from_vector_store() with your vector DB."}]
+    table_name = os.environ.get("VECTOR_DB_TABLE", "").strip()
+    db_url = os.environ.get("VECTOR_DB_URL", "").strip()
+    host = os.environ.get("VECTOR_DB_HOST", "").strip()
+    dbname = os.environ.get("VECTOR_DB_NAME", "").strip()
+    user = os.environ.get("VECTOR_DB_USER", "").strip()
+    password = os.environ.get("VECTOR_DB_PASSWORD", "").strip()
+    port = int(os.environ.get("VECTOR_DB_PORT", "5432"))
+
+    if db_url:
+        parsed = urlparse(db_url)
+        if parsed.scheme not in {"postgres", "postgresql"}:
+            log.warning("vector_db_url_invalid_scheme", extra={"scheme": parsed.scheme})
+            return []
+        host = parsed.hostname or host
+        dbname = (parsed.path or "").lstrip("/") or dbname
+        user = unquote(parsed.username or "") or user
+        password = unquote(parsed.password or "") or password
+        port = parsed.port or port
+
+    if not table_name:
+        log.warning("vector_store_not_configured", extra={"required": ["VECTOR_DB_TABLE"]})
+        return []
+
+    if not all([host, dbname, user, password]):
+        log.warning(
+            "vector_store_not_configured",
+            extra={"required": ["VECTOR_DB_HOST", "VECTOR_DB_NAME", "VECTOR_DB_USER", "VECTOR_DB_PASSWORD"]},
+        )
+        return []
+
+    try:
+        final_db_url = f"postgresql://{user}:{password}@{dbname}.{host}:{port}/{table_name}"
+        conn = psycopg.connect(final_db_url)
+
+        with conn:
+            with conn.cursor() as cur:
+                stmt = sql.SQL(
+                    """
+                    SELECT COALESCE(source, 'postgres://vector'), COALESCE(content, '')
+                    FROM {table}
+                    WHERE (%s = '' OR collection_id = %s)
+                      AND content ILIKE ('%%' || %s || '%%')
+                    LIMIT %s
+                    """
+                ).format(table=sql.Identifier(table_name))
+                cur.execute(stmt, (collection_id, collection_id, query, top_k))
+                rows = cur.fetchall()
+                return [{"source": str(r[0]), "text": str(r[1])} for r in rows]
+    except Exception:
+        log.exception("vector_store_query_failed", extra={"collection_id": collection_id, "top_k": top_k})
+        return []
 
 def get_rag_context(request_obj: Dict[str, Any], team_globals: Dict[str, Any], owner: str, dao: Optional[DbDao] = None) -> str:
     rag = (team_globals or {}).get("rag") or {}
