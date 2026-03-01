@@ -1,0 +1,53 @@
+name: Deploy TeamWeave Backend (SAM)
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  STACK_NAME: tarun-content-team
+  TEAM_CONFIG_PREFIX: teams
+  VECTOR_DB_TABLE: resume-rag-db
+  GEMINI_SECRET_ARN: arn:aws:secretsmanager:us-east-1:239571291755:secret:gemini/api_key-SKx2NV
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::239571291755:role/teamweave-github-actions-sam-deployer
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup SAM
+        uses: aws-actions/setup-sam@v2
+
+      - name: SAM Build
+        run: |
+          cd infra
+          sam build -t template.yml
+
+      - name: SAM Deploy
+        run: |
+          cd infra
+          sam deploy \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --resolve-s3 \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              "TeamConfigPrefix=${TEAM_CONFIG_PREFIX}" \
+              "VectorDbTable=${VECTOR_DB_TABLE}" \
+              "GeminiSecretArn=${GEMINI_SECRET_ARN}"
