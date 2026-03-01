@@ -12,7 +12,7 @@ Parameters:
   TeamConfigPrefix:
     Type: String
     Default: teams
-    Description: Prefix in config bucket for team configs (default: teams)
+    Description: "Prefix in config bucket for team configs (default: teams)"
   VectorDbTable:
     Type: String
     Default: ""
