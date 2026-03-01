@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DailyTasksV1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "date": {
+      "type": "string"
+    },
+    "daily_tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "topic": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "estimate_minutes": {
+            "type": "integer"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "reflection_prompt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "topic",
+          "level",
+          "type",
+          "estimate_minutes",
+          "links",
+          "instructions",
+          "reflection_prompt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "date",
+    "daily_tasks"
+  ]
+}

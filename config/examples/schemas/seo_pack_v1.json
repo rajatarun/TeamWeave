@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SeoPackV1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "title_suggestions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "meta_description": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "keywords",
+    "title_suggestions",
+    "meta_description",
+    "notes"
+  ]
+}

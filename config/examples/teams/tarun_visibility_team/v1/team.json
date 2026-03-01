@@ -1,0 +1,202 @@
+{
+  "team": {
+    "name": "tarun_visibility_team",
+    "version": "v1",
+    "owner": "Tarun Raja"
+  },
+  "globals": {
+    "north_star": "Increase Tarun Raja's social visibility and authority in AI Orchestration, Cloud-Native Scalability, and Fintech Governance.",
+    "default_channel": "linkedin",
+    "hard_constraints": [
+      "No fabricated facts or citations.",
+      "If any claim is uncertain, label NEEDS_SOURCE.",
+      "Prefer concrete examples from Tarun's work using RAG context."
+    ],
+    "features": {
+      "gemini_research": false,
+      "explicit_rag": true
+    },
+    "rag": {
+      "mode": "explicit",
+      "rag_env_key": "VECTOR_DB_TABLE",
+      "top_k": 8
+    },
+    "artifact_store": {
+      "artifact_bucket_env": "ARTIFACT_BUCKET",
+      "dynamo_table_env": "DDB_TABLE"
+    },
+    "revision": {
+      "enabled": false,
+      "default_jump_to_step": "strategist"
+    }
+  },
+  "agents": [
+    {
+      "id": "director",
+      "name": "Content Marketing Director",
+      "bedrock": {
+        "agentId": "REPLACE_ME",
+        "aliasId": "REPLACE_ME"
+      },
+      "goal_template": "Define a measurable goal to increase Tarun Raja's social visibility. Produce a Creative Brief with acceptance criteria and risks.",
+      "schema_ref": "creative_brief_v1"
+    },
+    {
+      "id": "strategist",
+      "name": "Content Strategist",
+      "bedrock": {
+        "agentId": "REPLACE_ME",
+        "aliasId": "REPLACE_ME"
+      },
+      "goal_template": "Derive strategy from Director brief. Generate hooks, narrative angle, and outline optimized for reach.",
+      "schema_ref": "strategy_pack_v1"
+    },
+    {
+      "id": "writer_linkedin",
+      "name": "Content Writer - LinkedIn",
+      "bedrock": {
+        "agentId": "REPLACE_ME",
+        "aliasId": "REPLACE_ME"
+      },
+      "goal_template": "Write 2-3 LinkedIn draft variants aligned to Director acceptance criteria and Strategist outline.",
+      "schema_ref": "draft_pack_v1"
+    },
+    {
+      "id": "seo",
+      "name": "SEO Specialist",
+      "bedrock": {
+        "agentId": "REPLACE_ME",
+        "aliasId": "REPLACE_ME"
+      },
+      "goal_template": "Provide discoverability improvements, keyword set, and title/meta suggestions without stuffing.",
+      "schema_ref": "seo_pack_v1"
+    },
+    {
+      "id": "editor",
+      "name": "Managing Editor",
+      "bedrock": {
+        "agentId": "REPLACE_ME",
+        "aliasId": "REPLACE_ME"
+      },
+      "goal_template": "Polish to final copy: high-signal, voice-consistent, and constraint-compliant.",
+      "schema_ref": "final_copy_v1"
+    },
+    {
+      "id": "designer",
+      "name": "Designer",
+      "bedrock": {
+        "agentId": "REPLACE_ME",
+        "aliasId": "REPLACE_ME"
+      },
+      "goal_template": "Create carousel plan + hero image direction + image prompts aligned to final copy.",
+      "schema_ref": "design_pack_v1"
+    },
+    {
+      "id": "distribution",
+      "name": "Social Media / Distribution Manager",
+      "bedrock": {
+        "agentId": "REPLACE_ME",
+        "aliasId": "REPLACE_ME"
+      },
+      "goal_template": "Create channel variants + posting checklist optimized for engagement and reach.",
+      "schema_ref": "distribution_pack_v1"
+    },
+    {
+      "id": "director_approve",
+      "name": "Director Approval",
+      "bedrock": {
+        "agentId": "REPLACE_ME",
+        "aliasId": "REPLACE_ME"
+      },
+      "goal_template": "Approve or request revisions. Output APPROVED boolean and revision_notes if not approved.",
+      "schema_ref": "approval_v1"
+    }
+  ],
+  "workflow": [
+    {
+      "step": "director",
+      "inputs": [
+        "request",
+        "rag_context"
+      ]
+    },
+    {
+      "step": "strategist",
+      "inputs": [
+        "director.output",
+        "rag_context"
+      ]
+    },
+    {
+      "step": "writer_linkedin",
+      "inputs": [
+        "director.output",
+        "strategist.output",
+        "rag_context"
+      ]
+    },
+    {
+      "step": "seo",
+      "inputs": [
+        "writer_linkedin.output",
+        "strategist.output"
+      ]
+    },
+    {
+      "step": "editor",
+      "inputs": [
+        "seo.output",
+        "writer_linkedin.output",
+        "director.output",
+        "rag_context"
+      ]
+    },
+    {
+      "step": "designer",
+      "inputs": [
+        "editor.output"
+      ]
+    },
+    {
+      "step": "distribution",
+      "inputs": [
+        "editor.output",
+        "director.output"
+      ]
+    },
+    {
+      "step": "director_approve",
+      "inputs": [
+        "editor.output",
+        "distribution.output",
+        "director.output"
+      ]
+    }
+  ],
+  "schemas": {
+    "creative_brief_v1": {
+      "path": "config/examples/schemas/creative_brief_v1.json"
+    },
+    "strategy_pack_v1": {
+      "path": "config/examples/schemas/strategy_pack_v1.json"
+    },
+    "draft_pack_v1": {
+      "path": "config/examples/schemas/draft_pack_v1.json"
+    },
+    "seo_pack_v1": {
+      "path": "config/examples/schemas/seo_pack_v1.json"
+    },
+    "final_copy_v1": {
+      "path": "config/examples/schemas/final_copy_v1.json"
+    },
+    "design_pack_v1": {
+      "path": "config/examples/schemas/design_pack_v1.json"
+    },
+    "distribution_pack_v1": {
+      "path": "config/examples/schemas/distribution_pack_v1.json"
+    },
+    "approval_v1": {
+      "path": "config/examples/schemas/approval_v1.json"
+    }
+  }
+}

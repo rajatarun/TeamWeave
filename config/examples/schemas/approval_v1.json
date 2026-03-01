@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ApprovalV1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "APPROVED": {
+      "type": "boolean"
+    },
+    "revision_notes": {
+      "type": "string"
+    },
+    "jump_to_step": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "APPROVED",
+    "revision_notes",
+    "jump_to_step"
+  ]
+}
