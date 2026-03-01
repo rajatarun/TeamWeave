@@ -3,7 +3,8 @@ from typing import Any, Dict, List
 from .models import TeamConfig, AgentConfig
 
 def build_prompt(team: TeamConfig, agent: AgentConfig, step_inputs: Dict[str, Any],
-                 director_brief: Dict[str, Any], rag_context: str, gemini_brief: str) -> str:
+                 director_brief: Dict[str, Any], rag_context: str,
+                 owner_profile_context: str, gemini_brief: str) -> str:
     parts: List[str] = []
     parts.append(f"ROLE: {agent.name}")
     parts.append(f"TEAM_NORTH_STAR: {team.globals.north_star}")
@@ -25,6 +26,9 @@ def build_prompt(team: TeamConfig, agent: AgentConfig, step_inputs: Dict[str, An
         parts.append("")
     parts.append("RAG_CONTEXT:")
     parts.append(rag_context or "")
+    parts.append("")
+    parts.append("OWNER_PROFILE_CONTEXT:")
+    parts.append(owner_profile_context or "")
     parts.append("")
     parts.append("GEMINI_RESEARCH_BRIEF:")
     parts.append(gemini_brief or "")

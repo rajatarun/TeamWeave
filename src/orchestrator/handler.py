@@ -10,6 +10,7 @@ from .schema_validate import validate_output, format_validation_error
 from .storage import put_step, save_artifact, put_tasks, mark_task_done, list_tasks
 from .rag import get_rag_context
 from .gemini import gemini_research_brief
+from .profile_context import get_owner_profile_context
 from .models import StepFailed
 
 log = get_logger("handler")
@@ -67,11 +68,21 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
 
     owner = (team_raw.get("team") or {}).get("owner") or request_obj.get("owner") or "Tarun Raja"
 
-    rag_context = get_rag_context(request_obj, {"rag": team_cfg.globals.rag, "features": team_cfg.globals.features}, owner=owner)
-completed_topics = ""
-if rag_context.startswith("COMPLETED_TASKS_HISTORY"):
-    completed_topics = rag_context
-gemini_brief = gemini_research_brief({"features": team_cfg.globals.features}, request_obj, completed_topics=completed_topics)
+    rag_context = get_rag_context(
+        request_obj,
+        {"rag": team_cfg.globals.rag, "features": team_cfg.globals.features},
+        owner=owner,
+    )
+    owner_profile_context = get_owner_profile_context(request_obj, team_raw, owner)
+
+    completed_topics = ""
+    if rag_context.startswith("COMPLETED_TASKS_HISTORY"):
+        completed_topics = rag_context
+    gemini_brief = gemini_research_brief(
+        {"features": team_cfg.globals.features},
+        request_obj,
+        completed_topics=completed_topics,
+    )
 
     outputs: Dict[str, Any] = {}
     director_brief: Dict[str, Any] = {}
@@ -86,19 +97,29 @@ gemini_brief = gemini_research_brief({"features": team_cfg.globals.features}, re
         if not agent:
             raise StepFailed(step_id, f"Agent not found for step {step_id}")
 
-        step_inputs: Dict[str, Any] = {"request": request_obj, "owner": owner, "rag_context": rag_context, "gemini_brief": gemini_brief}
+        step_inputs: Dict[str, Any] = {"request": request_obj, "owner": owner, "rag_context": rag_context, "owner_profile_context": owner_profile_context, "gemini_brief": gemini_brief}
         for inp in step_def.get("inputs", []):
             if inp == "request":
                 step_inputs["request"] = request_obj
             elif inp == "rag_context":
                 step_inputs["rag_context"] = rag_context
+            elif inp == "owner_profile_context":
+                step_inputs["owner_profile_context"] = owner_profile_context
             elif inp.endswith(".output"):
                 key = inp.split(".")[0]
                 step_inputs[key] = outputs.get(key, {})
             else:
                 step_inputs[inp] = outputs.get(inp, {})
 
-        prompt = build_prompt(team_cfg, agent, step_inputs, director_brief, rag_context, gemini_brief)
+        prompt = build_prompt(
+            team_cfg,
+            agent,
+            step_inputs,
+            director_brief,
+            rag_context,
+            owner_profile_context,
+            gemini_brief,
+        )
 
         raw_text = invoke_agent(agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt)
 
