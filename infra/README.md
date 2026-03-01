@@ -7,6 +7,8 @@ sam build -t template.yaml
 sam deploy --guided
 ```
 
+If `ConfigBucketName` and `ArtifactBucketName` are not provided during deploy, the stack now creates and wires S3 buckets automatically.
+
 ## Upload example config (both teams)
 ```bash
 CONFIG_BUCKET="<your-config-bucket>"
