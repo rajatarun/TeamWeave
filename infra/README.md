@@ -9,6 +9,16 @@ sam deploy --guided
 
 If `ConfigBucketName` and `ArtifactBucketName` are not provided during deploy, the stack now creates and wires S3 buckets automatically.
 
+The stack also creates a Bedrock Guardrail (`AWS::Bedrock::Guardrail`) with:
+- Topic filtering (harmful content, personal information, inappropriate content)
+- Content filtering (sexual, violence, hate, insults, misconduct, prompt attack)
+- Word filtering (custom sensitive words + managed profanity list)
+- Sensitive info protections (PII blocking/anonymization + API key regex blocking)
+
+You can override guardrail metadata during deploy with:
+- `GuardrailName`
+- `GuardrailDescription`
+
 ## Upload example config (both teams)
 ```bash
 CONFIG_BUCKET="<your-config-bucket>"
