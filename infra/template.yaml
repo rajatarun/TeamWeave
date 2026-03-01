@@ -1,0 +1,150 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Bedrock multi-agent teams + personal improvement tasks (config-driven)
+
+Parameters:
+  ConfigBucketName:
+    Type: String
+    Description: S3 bucket that holds team configs (teams/{TEAM}/{VERSION}/team.json)
+  ArtifactBucketName:
+    Type: String
+    Description: S3 bucket for run artifacts (runs/{run_id}/{step_id}.json)
+  TeamConfigPrefix:
+    Type: String
+    Default: teams
+    Description: Prefix in config bucket for team configs (default: teams)
+  VectorDbTable:
+    Type: String
+    Default: ""
+    Description: Vector store collection/table identifier (used for explicit RAG mode)
+  GeminiSecretArn:
+    Type: String
+    Default: ""
+    Description: (Optional) Secrets Manager ARN storing Gemini API key JSON (e.g. {"key":"..."})
+  DdbTableName:
+    Type: String
+    Default: ""
+    Description: Optional. Leave blank to create a new DynamoDB table.
+
+Conditions:
+  CreateDdbTable: !Equals [!Ref DdbTableName, ""]
+  HasGeminiSecret: !Not [!Equals [!Ref GeminiSecretArn, ""]]
+
+Globals:
+  Function:
+    Runtime: python3.9
+    Timeout: 60
+    MemorySize: 1024
+    Tracing: Active
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+
+Resources:
+  ContentPipelineRunsTable:
+    Type: AWS::DynamoDB::Table
+    Condition: CreateDdbTable
+    Properties:
+      TableName: !Sub "${AWS::StackName}-CONTENT_PIPELINE_RUNS"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+
+  OrchestratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../
+      Handler: src/orchestrator/handler.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action: [s3:GetObject]
+            Resource: !Sub "arn:aws:s3:::${ConfigBucketName}/*"
+        - Statement:
+            Effect: Allow
+            Action: [s3:PutObject]
+            Resource: !Sub "arn:aws:s3:::${ArtifactBucketName}/*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:GetItem
+              - dynamodb:UpdateItem
+              - dynamodb:Query
+              - dynamodb:Scan
+            Resource:
+              - !If
+                - CreateDdbTable
+                - !GetAtt ContentPipelineRunsTable.Arn
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DdbTableName}"
+        - Statement:
+            Effect: Allow
+            Action: [bedrock-agent-runtime:InvokeAgent]
+            Resource: "*"
+        - !If
+          - HasGeminiSecret
+          - Statement:
+              Effect: Allow
+              Action: [secretsmanager:GetSecretValue]
+              Resource: !Ref GeminiSecretArn
+          - !Ref "AWS::NoValue"
+      Environment:
+        Variables:
+          CONFIG_BUCKET: !Ref ConfigBucketName
+          CONFIG_PREFIX: !Ref TeamConfigPrefix
+          ARTIFACT_BUCKET: !Ref ArtifactBucketName
+          DDB_TABLE: !If [CreateDdbTable, !Ref ContentPipelineRunsTable, !Ref DdbTableName]
+          VECTOR_DB_TABLE: !Ref VectorDbTable
+          GEMINI_SECRET_ARN: !Ref GeminiSecretArn
+          GEMINI_MODEL: gemini-2.0-flash
+
+  TeamApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowHeaders: ["content-type"]
+        AllowMethods: ["POST","GET","OPTIONS"]
+      Routes:
+        - Path: /team/task
+          Method: POST
+          Target: !Sub "integrations/${TeamApiIntegration}"
+        - Path: /improve/tasks
+          Method: GET
+          Target: !Sub "integrations/${TeamApiIntegration}"
+        - Path: /improve/task/done
+          Method: POST
+          Target: !Sub "integrations/${TeamApiIntegration}"
+
+  TeamApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref TeamApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt OrchestratorFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  TeamApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OrchestratorFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${TeamApi}/*/*/*"
+
+Outputs:
+  HttpApiUrl:
+    Value: !Sub "https://${TeamApi}.execute-api.${AWS::Region}.amazonaws.com"
+  OrchestratorFunctionName:
+    Value: !Ref OrchestratorFunction
+  DdbTable:
+    Value: !If [CreateDdbTable, !Ref ContentPipelineRunsTable, !Ref DdbTableName]
