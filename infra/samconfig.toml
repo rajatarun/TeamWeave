@@ -1,0 +1,16 @@
+version = 0.1
+
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "tarun-content-team"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+s3_prefix = "tarun-content-team"
+parameter_overrides = [
+  "TeamConfigPrefix=teams",
+  "VectorDbTable=",
+  "GeminiSecretArn="
+]
