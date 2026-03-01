@@ -5,9 +5,11 @@ Description: Bedrock multi-agent teams + personal improvement tasks (config-driv
 Parameters:
   ConfigBucketName:
     Type: String
+    Default: ""
     Description: S3 bucket that holds team configs (teams/{TEAM}/{VERSION}/team.json)
   ArtifactBucketName:
     Type: String
+    Default: ""
     Description: S3 bucket for run artifacts (runs/{run_id}/{step_id}.json)
   TeamConfigPrefix:
     Type: String
@@ -27,6 +29,8 @@ Parameters:
     Description: Optional. Leave blank to create a new DynamoDB table.
 
 Conditions:
+  CreateConfigBucket: !Equals [!Ref ConfigBucketName, ""]
+  CreateArtifactBucket: !Equals [!Ref ArtifactBucketName, ""]
   CreateDdbTable: !Equals [!Ref DdbTableName, ""]
   HasGeminiSecret: !Not [!Equals [!Ref GeminiSecretArn, ""]]
 
@@ -41,6 +45,14 @@ Globals:
         LOG_LEVEL: INFO
 
 Resources:
+  TeamConfigBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateConfigBucket
+
+  TeamArtifactBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateArtifactBucket
+
   ContentPipelineRunsTable:
     Type: AWS::DynamoDB::Table
     Condition: CreateDdbTable
@@ -68,11 +80,17 @@ Resources:
         - Statement:
             Effect: Allow
             Action: [s3:GetObject]
-            Resource: !Sub "arn:aws:s3:::${ConfigBucketName}/*"
+            Resource: !If
+              - CreateConfigBucket
+              - !Sub "${TeamConfigBucket.Arn}/*"
+              - !Sub "arn:aws:s3:::${ConfigBucketName}/*"
         - Statement:
             Effect: Allow
             Action: [s3:PutObject]
-            Resource: !Sub "arn:aws:s3:::${ArtifactBucketName}/*"
+            Resource: !If
+              - CreateArtifactBucket
+              - !Sub "${TeamArtifactBucket.Arn}/*"
+              - !Sub "arn:aws:s3:::${ArtifactBucketName}/*"
         - Statement:
             Effect: Allow
             Action:
@@ -99,9 +117,9 @@ Resources:
           - !Ref "AWS::NoValue"
       Environment:
         Variables:
-          CONFIG_BUCKET: !Ref ConfigBucketName
+          CONFIG_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
           CONFIG_PREFIX: !Ref TeamConfigPrefix
-          ARTIFACT_BUCKET: !Ref ArtifactBucketName
+          ARTIFACT_BUCKET: !If [CreateArtifactBucket, !Ref TeamArtifactBucket, !Ref ArtifactBucketName]
           DDB_TABLE: !If [CreateDdbTable, !Ref ContentPipelineRunsTable, !Ref DdbTableName]
           VECTOR_DB_TABLE: !Ref VectorDbTable
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
