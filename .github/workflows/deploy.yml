@@ -19,7 +19,6 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,7 +35,7 @@ jobs:
       - name: SAM Build
         run: |
           cd infra
-          sam build -t template.yml
+          sam build -t template.yaml
 
       - name: SAM Deploy
         run: |
@@ -44,7 +43,7 @@ jobs:
           sam deploy \
             --stack-name "${STACK_NAME}" \
             --region "${AWS_REGION}" \
-            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --capabilities CAPABILITY_IAM \
             --resolve-s3 \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
