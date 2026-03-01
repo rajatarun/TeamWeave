@@ -108,22 +108,21 @@ Resources:
           GEMINI_MODEL: gemini-2.0-flash
 
   TeamApi:
-    Type: AWS::Serverless::HttpApi
+    Type: AWS::ApiGatewayV2::Api
     Properties:
+      Name: TeamApi
+      ProtocolType: HTTP
       CorsConfiguration:
         AllowOrigins: ["*"]
         AllowHeaders: ["content-type"]
-        AllowMethods: ["POST","GET","OPTIONS"]
-      Routes:
-        - Path: /team/task
-          Method: POST
-          Target: !Sub "integrations/${TeamApiIntegration}"
-        - Path: /improve/tasks
-          Method: GET
-          Target: !Sub "integrations/${TeamApiIntegration}"
-        - Path: /improve/task/done
-          Method: POST
-          Target: !Sub "integrations/${TeamApiIntegration}"
+        AllowMethods: ["POST", "GET", "OPTIONS"]
+
+  TeamApiDefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref TeamApi
+      StageName: "$default"
+      AutoDeploy: true
 
   TeamApiIntegration:
     Type: AWS::ApiGatewayV2::Integration
@@ -132,6 +131,27 @@ Resources:
       IntegrationType: AWS_PROXY
       IntegrationUri: !GetAtt OrchestratorFunction.Arn
       PayloadFormatVersion: "2.0"
+
+  TeamTaskRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref TeamApi
+      RouteKey: "POST /team/task"
+      Target: !Sub "integrations/${TeamApiIntegration}"
+
+  ImproveTasksRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref TeamApi
+      RouteKey: "GET /improve/tasks"
+      Target: !Sub "integrations/${TeamApiIntegration}"
+
+  ImproveTaskDoneRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref TeamApi
+      RouteKey: "POST /improve/task/done"
+      Target: !Sub "integrations/${TeamApiIntegration}"
 
   TeamApiPermission:
     Type: AWS::Lambda::Permission
