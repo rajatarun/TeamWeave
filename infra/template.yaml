@@ -200,21 +200,21 @@ Resources:
       BlockedOutputsMessaging: I cannot provide this response as it contains content that violates our content policy. Please ask for information in a different way.
       TopicPolicyConfig:
         TopicsConfig:
-          - Name: Harmful Content
+          - Name: HarmfulContent
             Definition: Content that promotes violence, illegal activities, or harmful behavior
             Examples:
               - How to make explosives
               - Instructions for illegal activities
               - Content promoting self-harm
             Type: DENY
-          - Name: Personal Information
+          - Name: PersonalInformation
             Definition: Requests for or sharing of personal identifiable information
             Examples:
               - What is your social security number
               - Share personal contact details
               - Private financial information
             Type: DENY
-          - Name: Inappropriate Content
+          - Name: InappropriateContent
             Definition: Adult content, profanity, or inappropriate material
             Examples:
               - Explicit sexual content
@@ -240,7 +240,7 @@ Resources:
             OutputStrength: HIGH
           - Type: PROMPT_ATTACK
             InputStrength: HIGH
-            OutputStrength: NONE
+            OutputStrength: MEDIUM
       WordPolicyConfig:
         WordsConfig:
           - Text: confidential
@@ -264,9 +264,9 @@ Resources:
           - Type: NAME
             Action: ANONYMIZE
         RegexesConfig:
-          - Name: API Keys
+          - Name: APIKeys
             Description: Block API keys and tokens
-            Pattern: (?i)(api[_-]?key|access[_-]?token|secret[_-]?key)\s*[:=]\s*['"]?[a-zA-Z0-9]{20,}['"]?
+            Pattern: (api[_-]?key|access[_-]?token|secret[_-]?key)\s*[:=]\s*[A-Za-z0-9]{20,}
             Action: BLOCK
 
 Outputs:
