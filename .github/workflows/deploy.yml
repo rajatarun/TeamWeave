@@ -14,7 +14,7 @@ env:
   STACK_NAME: tarun-content-team
   TEAM_CONFIG_PREFIX: teams
   VECTOR_DB_TABLE: resume-rag-db
-  GEMINI_SECRET_ARN: arn:aws:secretsmanager:us-east-1:239571291755:secret:gemini/api_key-SKx2NV
+  GEMINI_SECRET_ARN: "arn:aws:secretsmanager:us-east-1:239571291755:secret:gemini/api_key-SKx2NV"
 
 jobs:
   deploy:
