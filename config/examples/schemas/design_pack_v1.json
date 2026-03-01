@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DesignPackV1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "carousel_plan": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "hero_image_direction": {
+      "type": "string"
+    },
+    "image_prompts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "carousel_plan",
+    "hero_image_direction",
+    "image_prompts"
+  ]
+}

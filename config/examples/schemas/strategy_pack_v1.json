@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StrategyPackV1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "hooks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "angle": {
+      "type": "string"
+    },
+    "outline": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cta": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "hooks",
+    "angle",
+    "outline",
+    "cta"
+  ]
+}

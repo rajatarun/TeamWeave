@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CreativeBriefV1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "goal": {
+      "type": "string"
+    },
+    "audience": {
+      "type": "string"
+    },
+    "channel": {
+      "type": "string"
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "success_metrics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "goal",
+    "audience",
+    "channel",
+    "acceptance_criteria",
+    "risks",
+    "success_metrics"
+  ]
+}

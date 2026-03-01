@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FinalCopyV1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "final_post": {
+      "type": "string"
+    },
+    "hashtags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "claim": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim",
+          "source_url"
+        ]
+      }
+    }
+  },
+  "required": [
+    "final_post",
+    "hashtags",
+    "claims"
+  ]
+}

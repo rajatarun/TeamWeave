@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LearningPlanV1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "weekly_themes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "daily_cadence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "weekly_themes",
+    "daily_cadence",
+    "checkpoints"
+  ]
+}
