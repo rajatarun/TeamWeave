@@ -17,8 +17,34 @@ Parameters:
     Description: "Prefix in config bucket for team configs (default: teams)"
   VectorDbTable:
     Type: String
-    Default: ""
+    Default: "postgres"
     Description: Vector store collection/table identifier (used for explicit RAG mode)
+  VectorDbHost:
+    Type: String
+    Default: "cplgkqp9qd3a.us-east-1.rds.amazonaws.com"
+    Description: PostgreSQL host for explicit RAG mode (pgvector)
+  VectorDbPort:
+    Type: String
+    Default: "5432"
+    Description: PostgreSQL port for explicit RAG mode
+  VectorDbName:
+    Type: String
+    Default: "resume-rag-db"
+    Description: PostgreSQL database name for explicit RAG mode
+  VectorDbUser:
+    Type: String
+    Default: "masteruser"
+    Description: PostgreSQL username for explicit RAG mode
+  VectorDbPassword:
+    Type: String
+    NoEcho: true
+    Default: "YourStrongPassword123!"
+    Description: PostgreSQL password for explicit RAG mode
+  VectorDbUrl:
+    Type: String
+    NoEcho: true
+    Default: "postgresql://masteruser:YourStrongPassword123!@resume-rag-db.cplgkqp9qd3a.us-east-1.rds.amazonaws.com:5432/postgres"
+    Description: Full PostgreSQL connection URL. When set, this overrides host/port/name/user/password parameters.
   GeminiSecretArn:
     Type: String
     Default: ""
@@ -100,10 +126,8 @@ Resources:
               - dynamodb:Query
               - dynamodb:Scan
             Resource:
-              - !If
-                - CreateDdbTable
-                - !GetAtt ContentPipelineRunsTable.Arn
-                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DdbTableName}"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*/index/*"
         - Statement:
             Effect: Allow
             Action: [bedrock-agent-runtime:InvokeAgent]
@@ -122,6 +146,12 @@ Resources:
           ARTIFACT_BUCKET: !If [CreateArtifactBucket, !Ref TeamArtifactBucket, !Ref ArtifactBucketName]
           DDB_TABLE: !If [CreateDdbTable, !Ref ContentPipelineRunsTable, !Ref DdbTableName]
           VECTOR_DB_TABLE: !Ref VectorDbTable
+          VECTOR_DB_HOST: !Ref VectorDbHost
+          VECTOR_DB_PORT: !Ref VectorDbPort
+          VECTOR_DB_NAME: !Ref VectorDbName
+          VECTOR_DB_USER: !Ref VectorDbUser
+          VECTOR_DB_PASSWORD: !Ref VectorDbPassword
+          VECTOR_DB_URL: !Ref VectorDbUrl
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
           GEMINI_MODEL: gemini-2.0-flash
 

@@ -23,3 +23,17 @@ POST /improve/task/done   body: {"owner":"Tarun Raja","task_id":"..."}
 
 ## Gemini research
 Create a Secrets Manager secret with JSON like {"key":"<GEMINI_API_KEY>"} and pass its ARN as GeminiSecretArn.
+
+## Explicit RAG with PostgreSQL/pgvector
+When `globals.rag.mode` is `explicit`, configure these deploy parameters so Lambda can connect:
+- `VectorDbTable`
+- `VectorDbHost`
+- `VectorDbPort` (default `5432`)
+- `VectorDbName`
+- `VectorDbUser`
+- `VectorDbPassword`
+- `VectorDbUrl` (optional override, full connection URL)
+
+If `VectorDbUrl` is set, the app parses it into host/port/name/user/password, then concatenates them into a normalized URL like `postgresql://<user>:<password>@<host>:<port>/<db>` before connecting.
+
+The runtime reads the same values from env vars `VECTOR_DB_*`.
