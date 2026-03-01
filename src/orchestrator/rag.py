@@ -1,7 +1,7 @@
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from .logger import get_logger
-from .storage import list_completed_topics
+from .db import DbDao
 
 log = get_logger("rag")
 
@@ -9,7 +9,7 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
     log.info("vector_store_stub", extra={"collection_id": collection_id, "top_k": top_k})
     return [{"source":"stub://vector", "text":"RAG STUB: replace retrieve_from_vector_store() with your vector DB."}]
 
-def get_rag_context(request_obj: Dict[str, Any], team_globals: Dict[str, Any], owner: str) -> str:
+def get_rag_context(request_obj: Dict[str, Any], team_globals: Dict[str, Any], owner: str, dao: Optional[DbDao] = None) -> str:
     rag = (team_globals or {}).get("rag") or {}
     mode = (rag.get("mode") or "kb").lower()
     top_k = int(rag.get("top_k") or 8)
@@ -31,7 +31,7 @@ def get_rag_context(request_obj: Dict[str, Any], team_globals: Dict[str, Any], o
         return "\n".join(blocks).strip()
 
     if mode == "history":
-        completed = list_completed_topics(owner=owner, limit=200)
+        completed = dao.list_completed_topic_levels(owner=owner, limit=200) if dao else []
         if not completed:
             return ""
         return "COMPLETED_TASKS_HISTORY:\n" + "\n".join([f"- {c}" for c in completed])
