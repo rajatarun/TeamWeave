@@ -119,23 +119,19 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
                     vector_literal = _pgvector_literal(qemb)
                     stmt = sql.SQL(
                         """
-                        WITH query_vector AS (
-                            SELECT %s::vector AS vec
-                        )
                         SELECT
-                            rc.doc_id,
-                            rc.chunk_id,
-                            rc.title,
-                            rc.content,
-                            (1 - (rc.embedding <=> qv.vec)) AS score
+                            doc_id,
+                            chunk_id,
+                            title,
+                            content,
+                            (1 - (embedding <=> %s::vector)) AS score
                         FROM {table} rc
-                        CROSS JOIN query_vector qv
-                        WHERE rc.embedding IS NOT NULL
-                        ORDER BY rc.embedding <=> qv.vec
+                        WHERE embedding IS NOT NULL
+                        ORDER BY embedding <=> %s::vector
                         LIMIT %s
                         """
                     ).format(table=sql.Identifier(table_name))
-                    cur.execute(stmt, (vector_literal, top_k))
+                    cur.execute(stmt, (vector_literal, vector_literal, top_k))
                 else:
                     stmt = sql.SQL(
                         """
