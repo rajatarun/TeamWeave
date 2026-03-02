@@ -26,7 +26,7 @@ Deploy:
 sam deploy \
   --template-file infra/bedrock-agents.yaml \
   --stack-name tarun-bedrock-agents \
-  --capabilities CAPABILITY_NAMED_IAM \
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
   --region us-east-1 \
   --resolve-s3 \
   --no-fail-on-empty-changeset \
