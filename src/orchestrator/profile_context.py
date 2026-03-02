@@ -1,10 +1,28 @@
 import os
+import re
 from typing import Any, Dict, List
 
 from .logger import get_logger
 from .rag import retrieve_from_vector_store
 
 log = get_logger("profile_context")
+
+
+_PII_REPLACEMENTS = [
+    (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "[REDACTED_EMAIL]"),
+    (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[REDACTED_SSN]"),
+    (
+        re.compile(r"(?<!\w)(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}(?!\w)"),
+        "[REDACTED_PHONE]",
+    ),
+]
+
+
+def _redact_pii(value: str) -> str:
+    redacted = value
+    for pattern, replacement in _PII_REPLACEMENTS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
 
 
 def _to_query(owner: str, team_raw: Dict[str, Any], request_obj: Dict[str, Any], perspective_template: str) -> str:
@@ -58,9 +76,8 @@ def get_owner_profile_context(
 
     blocks: List[str] = []
     for i, hit in enumerate(hits, start=1):
-        blocks.append(f"[OWNER_PROFILE #{i}] SOURCE: {hit.get('source', '')}")
-        blocks.append(hit.get("text", ""))
+        blocks.append(f"[OWNER_PROFILE #{i}] SOURCE: {_redact_pii(hit.get('source', ''))}")
+        blocks.append(_redact_pii(hit.get("text", "")))
         blocks.append("---")
 
     return "\n".join(blocks).strip()
-
