@@ -155,6 +155,8 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
             gemini_brief,
         )
 
+        log.info("agent_prompt_built step=%s run_id=%s prompt=%s", step_id, run_id, prompt)
+
         raw_text = invoke_agent(agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt)
 
         try:
