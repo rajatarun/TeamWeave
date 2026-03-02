@@ -11,8 +11,7 @@ This directory contains a CloudFormation template that provisions:
 ## Prerequisites
 - AWS account: `239571291755`
 - Region: `us-east-1`
-- Existing IAM role for all agents:
-  `arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun` (default parameter `AgentServiceRoleArn`)
+- IAM role for all agents is created by CloudFormation in this stack (`<stack-name>-bedrock-agent-service-role`).
 
 ## Deploy
 Set model via env var (optional):
@@ -32,8 +31,7 @@ sam deploy \
   --resolve-s3 \
   --no-fail-on-empty-changeset \
   --parameter-overrides \
-    FoundationModelId=${FOUNDATION_MODEL_ID:-amazon.nova-micro-v1:0} \
-    AgentServiceRoleArn=arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
+    FoundationModelId=${FOUNDATION_MODEL_ID:-amazon.nova-micro-v1:0}
 ```
 
 
