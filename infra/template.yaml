@@ -240,7 +240,7 @@ Resources:
             OutputStrength: HIGH
           - Type: PROMPT_ATTACK
             InputStrength: HIGH
-            OutputStrength: MEDIUM
+            OutputStrength: NONE
       WordPolicyConfig:
         WordsConfig:
           - Text: confidential
