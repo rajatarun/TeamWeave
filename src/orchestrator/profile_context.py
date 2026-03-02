@@ -17,7 +17,7 @@ def _to_query(owner: str, team_raw: Dict[str, Any], request_obj: Dict[str, Any],
         north_star=globals_obj.get("north_star", ""),
     )
     query_parts: List[str] = [
-        f"Profile and achievements of {owner}",
+        f"achievements of {owner}",
         perspective,
         request_obj.get("topic", ""),
         request_obj.get("objective", ""),
