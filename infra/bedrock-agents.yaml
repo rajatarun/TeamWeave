@@ -78,7 +78,7 @@ Resources:
             InputStrength: HIGH
             OutputStrength: HIGH
           - Type: PROMPT_ATTACK
-            InputStrength: HIGH
+            InputStrength: MEDIUM
             OutputStrength: NONE
       SensitiveInformationPolicyConfig:
         PiiEntitiesConfig:
@@ -88,7 +88,6 @@ Resources:
             Action: ANONYMIZE
       WordPolicyConfig:
         WordsConfig:
-          - Text: exploit
           - Text: malware
           - Text: credential theft
 
