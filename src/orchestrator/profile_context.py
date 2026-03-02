@@ -2,7 +2,7 @@ import os
 import re
 from typing import Any, Dict, List
 
-from .logger import get_logger
+from .logger import get_logger, jdump
 from .rag import retrieve_from_vector_store
 
 log = get_logger("profile_context")
@@ -69,6 +69,11 @@ def get_owner_profile_context(
     query = _to_query(owner, team_raw, request_obj, perspective_template)
     if not query:
         return ""
+
+    log.info(
+        "owner_profile_context_retrieval %s",
+        jdump({"collection_id": collection_id, "top_k": top_k, "owner": owner}),
+    )
 
     hits = retrieve_from_vector_store(collection_id, query, top_k)
     if not hits:
