@@ -37,6 +37,7 @@ jobs:
       - name: SAM Build
         run: |
           cd infra
+          rm -rf .aws-sam
           sam build -t template.yaml
 
       - name: Validate SAM Template
