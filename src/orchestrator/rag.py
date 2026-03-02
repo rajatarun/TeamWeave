@@ -76,6 +76,7 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
 
     try:
         final_db_url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+        log.info("vector_db_connecting", extra={"db_url": final_db_url})
         connect_kwargs = {"sslmode": ssl_mode}
         if ssl_root_cert and ssl_mode.lower() != "disable":
             if os.path.exists(ssl_root_cert):
