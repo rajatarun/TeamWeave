@@ -414,8 +414,6 @@ Resources:
       AgentId: !Ref VisibilityStrategistAgent
       AgentAliasName: production
       Description: Production alias for tarun_visibility_team strategist
-      RoutingConfiguration:
-        - AgentVersion: DRAFT
       Tags:
         team: tarun_visibility_team
         role: strategist
@@ -427,8 +425,6 @@ Resources:
       AgentId: !Ref VisibilityWriterLinkedinAgent
       AgentAliasName: production
       Description: Production alias for tarun_visibility_team writer_linkedin
-      RoutingConfiguration:
-        - AgentVersion: DRAFT
       Tags:
         team: tarun_visibility_team
         role: writer_linkedin
@@ -440,8 +436,6 @@ Resources:
       AgentId: !Ref VisibilitySeoAgent
       AgentAliasName: production
       Description: Production alias for tarun_visibility_team seo
-      RoutingConfiguration:
-        - AgentVersion: DRAFT
       Tags:
         team: tarun_visibility_team
         role: seo
@@ -453,8 +447,6 @@ Resources:
       AgentId: !Ref VisibilityEditorAgent
       AgentAliasName: production
       Description: Production alias for tarun_visibility_team editor
-      RoutingConfiguration:
-        - AgentVersion: DRAFT
       Tags:
         team: tarun_visibility_team
         role: editor
@@ -466,8 +458,6 @@ Resources:
       AgentId: !Ref VisibilityDesignerAgent
       AgentAliasName: production
       Description: Production alias for tarun_visibility_team designer
-      RoutingConfiguration:
-        - AgentVersion: DRAFT
       Tags:
         team: tarun_visibility_team
         role: designer
@@ -479,8 +469,6 @@ Resources:
       AgentId: !Ref VisibilityDistributionAgent
       AgentAliasName: production
       Description: Production alias for tarun_visibility_team distribution
-      RoutingConfiguration:
-        - AgentVersion: DRAFT
       Tags:
         team: tarun_visibility_team
         role: distribution
@@ -492,8 +480,6 @@ Resources:
       AgentId: !Ref VisibilityDirectorApproveAgent
       AgentAliasName: production
       Description: Production alias for tarun_visibility_team director_approve
-      RoutingConfiguration:
-        - AgentVersion: DRAFT
       Tags:
         team: tarun_visibility_team
         role: director_approve
@@ -505,8 +491,6 @@ Resources:
       AgentId: !Ref ImprovementStrategistAgent
       AgentAliasName: production
       Description: Production alias for tarun_improvement_team strategist
-      RoutingConfiguration:
-        - AgentVersion: DRAFT
       Tags:
         team: tarun_improvement_team
         role: strategist
@@ -518,8 +502,6 @@ Resources:
       AgentId: !Ref ImprovementAdvisorAgent
       AgentAliasName: production
       Description: Production alias for tarun_improvement_team advisor
-      RoutingConfiguration:
-        - AgentVersion: DRAFT
       Tags:
         team: tarun_improvement_team
         role: advisor
@@ -661,8 +643,6 @@ Resources:
       AgentId: !Ref VisibilityDirectorAgent
       AgentAliasName: production
       Description: Production alias for tarun_visibility_team director
-      RoutingConfiguration:
-        - AgentVersion: DRAFT
       Tags:
         team: tarun_visibility_team
         role: director
@@ -674,8 +654,6 @@ Resources:
       AgentId: !Ref ImprovementCoachAgent
       AgentAliasName: production
       Description: Production alias for tarun_improvement_team coach
-      RoutingConfiguration:
-        - AgentVersion: DRAFT
       Tags:
         team: tarun_improvement_team
         role: coach

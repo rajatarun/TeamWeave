@@ -3,7 +3,7 @@
 This directory contains a CloudFormation template that provisions:
 - 1 shared Bedrock guardrail + explicit version (`v1 baseline`)
 - 11 Bedrock agents across two teams
-- 11 Bedrock agent aliases (`production` -> `DRAFT`)
+- 11 Bedrock agent aliases (`production`)
 - Multi-agent collaboration on the two supervisors:
   - `tarun_visibility_team-director`
   - `tarun_improvement_team-coach`
