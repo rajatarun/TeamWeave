@@ -93,18 +93,23 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
                     vector_literal = _pgvector_literal(qemb)
                     stmt = sql.SQL(
                         """
+                        WITH query_vector AS (
+                            SELECT %s::vector AS vec
+                        )
                         SELECT
-                            COALESCE(source, title, 'postgres://vector') AS source,
-                            COALESCE(content, '') AS content,
-                            (1 - (embedding <=> %s::vector)) AS score
-                        FROM {table}
-                        WHERE (%s = '' OR collection_id = %s)
-                          AND embedding IS NOT NULL
-                        ORDER BY embedding <=> %s::vector
+                            rc.doc_id,
+                            rc.chunk_id,
+                            rc.title,
+                            rc.content,
+                            (1 - (rc.embedding <=> qv.vec)) AS score
+                        FROM {table} rc
+                        CROSS JOIN query_vector qv
+                        WHERE rc.embedding IS NOT NULL
+                        ORDER BY rc.embedding <=> qv.vec
                         LIMIT %s
                         """
                     ).format(table=sql.Identifier(table_name))
-                    cur.execute(stmt, (vector_literal, collection_id, collection_id, vector_literal, top_k))
+                    cur.execute(stmt, (vector_literal, top_k))
                 else:
                     stmt = sql.SQL(
                         """
@@ -120,6 +125,15 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
                     ).format(table=sql.Identifier(table_name))
                     cur.execute(stmt, (collection_id, collection_id, query, top_k))
                 rows = cur.fetchall()
+                if qemb:
+                    return [
+                        {
+                            "source": str(r[2] or r[0] or f"chunk:{r[1]}"),
+                            "text": str(r[3] or ""),
+                            "score": r[4],
+                        }
+                        for r in rows
+                    ]
                 return [{"source": str(r[0]), "text": str(r[1]), "score": r[2]} for r in rows]
     except Exception:
         log.exception("vector_store_query_failed", extra={"collection_id": collection_id, "top_k": top_k})
