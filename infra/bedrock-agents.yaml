@@ -1,0 +1,735 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Amazon Bedrock multi-agent collaboration for tarun_visibility_team and
+  tarun_improvement_team with a shared guardrail.
+
+Parameters:
+  FoundationModelId:
+    Type: String
+    Default: amazon.nova-micro-v1:0
+    Description: Foundation model ID used by all Bedrock agents.
+
+  AgentServiceRoleArn:
+    Type: String
+    Default: arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
+    Description: Existing IAM service role ARN used by all Bedrock agents.
+
+  CollaboratorAgentCollaborationMode:
+    Type: String
+    Default: DISABLED
+    AllowedValues:
+      - DISABLED
+    Description: Collaboration mode for non-supervisor agents.
+
+  VisibilitySupervisorCollaborationMode:
+    Type: String
+    Default: SUPERVISOR_ROUTER
+    AllowedValues:
+      - SUPERVISOR_ROUTER
+    Description: Collaboration mode for tarun_visibility_team director supervisor.
+
+  ImprovementSupervisorCollaborationMode:
+    Type: String
+    Default: SUPERVISOR_ROUTER
+    AllowedValues:
+      - SUPERVISOR_ROUTER
+    Description: Collaboration mode for tarun_improvement_team coach supervisor.
+
+Resources:
+  SharedGuardrail:
+    Type: AWS::Bedrock::Guardrail
+    Properties:
+      Name: tarun-shared-guardrail
+      Description: Shared safety + anti-fabrication guardrail for Tarun agents
+      BlockedInputMessaging: Please rephrase safely and avoid sensitive content.
+      BlockedOutputsMessaging: Output blocked by safety policy. Please revise request.
+      ContentPolicyConfig:
+        FiltersConfig:
+          - Type: HATE
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: INSULTS
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: SEXUAL
+            InputStrength: MEDIUM
+            OutputStrength: MEDIUM
+          - Type: VIOLENCE
+            InputStrength: MEDIUM
+            OutputStrength: MEDIUM
+          - Type: MISCONDUCT
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: PROMPT_ATTACK
+            InputStrength: HIGH
+            OutputStrength: NONE
+      SensitiveInformationPolicyConfig:
+        PiiEntitiesConfig:
+          - Type: EMAIL
+            Action: ANONYMIZE
+          - Type: PHONE
+            Action: ANONYMIZE
+      WordPolicyConfig:
+        WordsConfig:
+          - Text: exploit
+          - Text: malware
+          - Text: credential theft
+
+  SharedGuardrailVersion:
+    Type: AWS::Bedrock::GuardrailVersion
+    Properties:
+      GuardrailIdentifier: !Ref SharedGuardrail
+      Description: v1 baseline
+
+  VisibilityStrategistAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: tarun_visibility_team-strategist
+      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      FoundationModel: !Ref FoundationModelId
+      Description: !Sub "tarun_visibility_team strategist using model ${FoundationModelId}."
+      AutoPrepare: true
+      IdleSessionTTLInSeconds: 1800
+      AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
+      Instruction: |
+        Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
+        Keep outputs skimmable and action-oriented.
+        Do not reveal confidential/internal JPMorgan details.
+        North Star: Increase Tarun Raja's social visibility and authority in AI Orchestration, Cloud-Native Scalability, and Fintech Governance.
+        Output JSON schema:
+        {
+          "strategy": {
+            "topic": "string",
+            "angle": "string",
+            "audience": "string",
+            "hook_options": ["string"],
+            "outline": ["string"],
+            "risks": ["string"]
+          }
+        }
+      GuardrailConfiguration:
+        GuardrailIdentifier: !Ref SharedGuardrail
+        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      Tags:
+        team: tarun_visibility_team
+        role: strategist
+        collaboration: collaborator
+        owner: Tarun Raja
+        env: prod
+        model: !Ref FoundationModelId
+
+  VisibilityWriterLinkedinAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: tarun_visibility_team-writer_linkedin
+      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      FoundationModel: !Ref FoundationModelId
+      Description: !Sub "tarun_visibility_team writer_linkedin using model ${FoundationModelId}."
+      AutoPrepare: true
+      IdleSessionTTLInSeconds: 1800
+      AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
+      Instruction: |
+        Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
+        Keep outputs skimmable and action-oriented.
+        Do not reveal confidential/internal JPMorgan details.
+        North Star: Increase Tarun Raja's social visibility and authority in AI Orchestration, Cloud-Native Scalability, and Fintech Governance.
+        Output JSON schema:
+        {
+          "drafts": [
+            {"variant":"A|B|C","linkedin_post":"string","hashtags":["string"],"cta_question":"string","char_count_estimate":0}
+          ]
+        }
+        Character target per draft: 1200-1800 characters (best effort).
+      GuardrailConfiguration:
+        GuardrailIdentifier: !Ref SharedGuardrail
+        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      Tags:
+        team: tarun_visibility_team
+        role: writer_linkedin
+        collaboration: collaborator
+        owner: Tarun Raja
+        env: prod
+        model: !Ref FoundationModelId
+
+  VisibilitySeoAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: tarun_visibility_team-seo
+      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      FoundationModel: !Ref FoundationModelId
+      Description: !Sub "tarun_visibility_team seo using model ${FoundationModelId}."
+      AutoPrepare: true
+      IdleSessionTTLInSeconds: 1800
+      AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
+      Instruction: |
+        Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
+        Keep outputs skimmable and action-oriented.
+        Do not reveal confidential/internal JPMorgan details.
+        North Star: Increase Tarun Raja's social visibility and authority in AI Orchestration, Cloud-Native Scalability, and Fintech Governance.
+        Output JSON schema:
+        {
+          "seo": {
+            "primary_keywords":["string"],
+            "secondary_keywords":["string"],
+            "title_options":["string"],
+            "meta_description":"string",
+            "improvements":["string"]
+          }
+        }
+      GuardrailConfiguration:
+        GuardrailIdentifier: !Ref SharedGuardrail
+        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      Tags:
+        team: tarun_visibility_team
+        role: seo
+        collaboration: collaborator
+        owner: Tarun Raja
+        env: prod
+        model: !Ref FoundationModelId
+
+  VisibilityEditorAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: tarun_visibility_team-editor
+      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      FoundationModel: !Ref FoundationModelId
+      Description: !Sub "tarun_visibility_team editor using model ${FoundationModelId}."
+      AutoPrepare: true
+      IdleSessionTTLInSeconds: 1800
+      AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
+      Instruction: |
+        Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
+        Keep outputs skimmable and action-oriented.
+        Do not reveal confidential/internal JPMorgan details.
+        North Star: Increase Tarun Raja's social visibility and authority in AI Orchestration, Cloud-Native Scalability, and Fintech Governance.
+        Output JSON schema:
+        {
+          "final": {
+            "linkedin_post":"string",
+            "hashtags":["string"],
+            "compliance_checks":{
+              "no_fabrication": true,
+              "no_confidential_info": true,
+              "no_corporate_speak": true
+            }
+          }
+        }
+      GuardrailConfiguration:
+        GuardrailIdentifier: !Ref SharedGuardrail
+        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      Tags:
+        team: tarun_visibility_team
+        role: editor
+        collaboration: collaborator
+        owner: Tarun Raja
+        env: prod
+        model: !Ref FoundationModelId
+
+  VisibilityDesignerAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: tarun_visibility_team-designer
+      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      FoundationModel: !Ref FoundationModelId
+      Description: !Sub "tarun_visibility_team designer using model ${FoundationModelId}."
+      AutoPrepare: true
+      IdleSessionTTLInSeconds: 1800
+      AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
+      Instruction: |
+        Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
+        Keep outputs skimmable and action-oriented.
+        Do not reveal confidential/internal JPMorgan details.
+        North Star: Increase Tarun Raja's social visibility and authority in AI Orchestration, Cloud-Native Scalability, and Fintech Governance.
+        Output JSON schema:
+        {
+          "design": {
+            "carousel_slides":[{"slide":1,"headline":"string","visual_direction":"string","copy":"string"}],
+            "hero_image_direction":"string",
+            "image_prompts":["string"]
+          }
+        }
+      GuardrailConfiguration:
+        GuardrailIdentifier: !Ref SharedGuardrail
+        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      Tags:
+        team: tarun_visibility_team
+        role: designer
+        collaboration: collaborator
+        owner: Tarun Raja
+        env: prod
+        model: !Ref FoundationModelId
+
+  VisibilityDistributionAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: tarun_visibility_team-distribution
+      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      FoundationModel: !Ref FoundationModelId
+      Description: !Sub "tarun_visibility_team distribution using model ${FoundationModelId}."
+      AutoPrepare: true
+      IdleSessionTTLInSeconds: 1800
+      AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
+      Instruction: |
+        Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
+        Keep outputs skimmable and action-oriented.
+        Do not reveal confidential/internal JPMorgan details.
+        North Star: Increase Tarun Raja's social visibility and authority in AI Orchestration, Cloud-Native Scalability, and Fintech Governance.
+        Output JSON schema:
+        {
+          "distribution": {
+            "posting_checklist":["string"],
+            "channel_variants":[{"channel":"linkedin|newsletter|blog","copy":"string"}],
+            "timing_suggestions":["string"]
+          }
+        }
+      GuardrailConfiguration:
+        GuardrailIdentifier: !Ref SharedGuardrail
+        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      Tags:
+        team: tarun_visibility_team
+        role: distribution
+        collaboration: collaborator
+        owner: Tarun Raja
+        env: prod
+        model: !Ref FoundationModelId
+
+  VisibilityDirectorApproveAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: tarun_visibility_team-director_approve
+      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      FoundationModel: !Ref FoundationModelId
+      Description: !Sub "tarun_visibility_team director_approve using model ${FoundationModelId}."
+      AutoPrepare: true
+      IdleSessionTTLInSeconds: 1800
+      AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
+      Instruction: |
+        Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
+        Keep outputs skimmable and action-oriented.
+        Do not reveal confidential/internal JPMorgan details.
+        North Star: Increase Tarun Raja's social visibility and authority in AI Orchestration, Cloud-Native Scalability, and Fintech Governance.
+        Output JSON schema:
+        {
+          "approval": {
+            "approved": true,
+            "revision_notes": ["string"],
+            "send_back_to": "strategist|writer_linkedin|seo|editor|designer|distribution"
+          }
+        }
+      GuardrailConfiguration:
+        GuardrailIdentifier: !Ref SharedGuardrail
+        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      Tags:
+        team: tarun_visibility_team
+        role: director_approve
+        collaboration: collaborator
+        owner: Tarun Raja
+        env: prod
+        model: !Ref FoundationModelId
+
+  ImprovementStrategistAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: tarun_improvement_team-strategist
+      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      FoundationModel: !Ref FoundationModelId
+      Description: !Sub "tarun_improvement_team strategist using model ${FoundationModelId}."
+      AutoPrepare: true
+      IdleSessionTTLInSeconds: 1800
+      AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
+      Instruction: |
+        Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
+        Keep outputs skimmable and action-oriented.
+        Do not reveal confidential/internal JPMorgan details.
+        North Star: Continuously improve Tarun Raja's technical depth and execution: daily learning tasks, curated resources, and reflection with progress tracking.
+        Output JSON schema:
+        {
+          "plan":{
+            "target_date":"string",
+            "milestones":[{"week":1,"goals":["string"]}],
+            "topics":[{"topic":"string","why":"string","difficulty":"beginner|intermediate|advanced"}]
+          }
+        }
+      GuardrailConfiguration:
+        GuardrailIdentifier: !Ref SharedGuardrail
+        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      Tags:
+        team: tarun_improvement_team
+        role: strategist
+        collaboration: collaborator
+        owner: Tarun Raja
+        env: prod
+        model: !Ref FoundationModelId
+
+  ImprovementAdvisorAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: tarun_improvement_team-advisor
+      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      FoundationModel: !Ref FoundationModelId
+      Description: !Sub "tarun_improvement_team advisor using model ${FoundationModelId}."
+      AutoPrepare: true
+      IdleSessionTTLInSeconds: 1800
+      AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
+      Instruction: |
+        Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
+        Keep outputs skimmable and action-oriented.
+        Do not reveal confidential/internal JPMorgan details.
+        North Star: Continuously improve Tarun Raja's technical depth and execution: daily learning tasks, curated resources, and reflection with progress tracking.
+        Never repeat same topic level/content already completed; assume supervisor provides completed_topics input.
+        Output JSON schema:
+        {
+          "daily_packet":{
+            "date":"string",
+            "read":["string"],
+            "practice":["string"],
+            "reflect":["string"],
+            "links":[{"title":"string","url":"string"}],
+            "avoid_topics":["string"]
+          }
+        }
+      GuardrailConfiguration:
+        GuardrailIdentifier: !Ref SharedGuardrail
+        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      Tags:
+        team: tarun_improvement_team
+        role: advisor
+        collaboration: collaborator
+        owner: Tarun Raja
+        env: prod
+        model: !Ref FoundationModelId
+
+  VisibilityStrategistAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref VisibilityStrategistAgent
+      AgentAliasName: production
+      Description: Production alias for tarun_visibility_team strategist
+      RoutingConfiguration:
+        - AgentVersion: DRAFT
+      Tags:
+        team: tarun_visibility_team
+        role: strategist
+        env: prod
+
+  VisibilityWriterLinkedinAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref VisibilityWriterLinkedinAgent
+      AgentAliasName: production
+      Description: Production alias for tarun_visibility_team writer_linkedin
+      RoutingConfiguration:
+        - AgentVersion: DRAFT
+      Tags:
+        team: tarun_visibility_team
+        role: writer_linkedin
+        env: prod
+
+  VisibilitySeoAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref VisibilitySeoAgent
+      AgentAliasName: production
+      Description: Production alias for tarun_visibility_team seo
+      RoutingConfiguration:
+        - AgentVersion: DRAFT
+      Tags:
+        team: tarun_visibility_team
+        role: seo
+        env: prod
+
+  VisibilityEditorAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref VisibilityEditorAgent
+      AgentAliasName: production
+      Description: Production alias for tarun_visibility_team editor
+      RoutingConfiguration:
+        - AgentVersion: DRAFT
+      Tags:
+        team: tarun_visibility_team
+        role: editor
+        env: prod
+
+  VisibilityDesignerAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref VisibilityDesignerAgent
+      AgentAliasName: production
+      Description: Production alias for tarun_visibility_team designer
+      RoutingConfiguration:
+        - AgentVersion: DRAFT
+      Tags:
+        team: tarun_visibility_team
+        role: designer
+        env: prod
+
+  VisibilityDistributionAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref VisibilityDistributionAgent
+      AgentAliasName: production
+      Description: Production alias for tarun_visibility_team distribution
+      RoutingConfiguration:
+        - AgentVersion: DRAFT
+      Tags:
+        team: tarun_visibility_team
+        role: distribution
+        env: prod
+
+  VisibilityDirectorApproveAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref VisibilityDirectorApproveAgent
+      AgentAliasName: production
+      Description: Production alias for tarun_visibility_team director_approve
+      RoutingConfiguration:
+        - AgentVersion: DRAFT
+      Tags:
+        team: tarun_visibility_team
+        role: director_approve
+        env: prod
+
+  ImprovementStrategistAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref ImprovementStrategistAgent
+      AgentAliasName: production
+      Description: Production alias for tarun_improvement_team strategist
+      RoutingConfiguration:
+        - AgentVersion: DRAFT
+      Tags:
+        team: tarun_improvement_team
+        role: strategist
+        env: prod
+
+  ImprovementAdvisorAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref ImprovementAdvisorAgent
+      AgentAliasName: production
+      Description: Production alias for tarun_improvement_team advisor
+      RoutingConfiguration:
+        - AgentVersion: DRAFT
+      Tags:
+        team: tarun_improvement_team
+        role: advisor
+        env: prod
+
+  VisibilityDirectorAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: tarun_visibility_team-director
+      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      FoundationModel: !Ref FoundationModelId
+      Description: !Sub "tarun_visibility_team director supervisor using model ${FoundationModelId}."
+      AutoPrepare: true
+      IdleSessionTTLInSeconds: 1800
+      AgentCollaboration: !Ref VisibilitySupervisorCollaborationMode
+      Instruction: |
+        Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
+        Keep outputs skimmable and action-oriented.
+        Do not reveal confidential/internal JPMorgan details.
+        You are the supervisor router for tarun_visibility_team.
+        Your job:
+        1) Clarify the goal and acceptance criteria.
+        2) Decide which collaborator(s) to invoke and in what order.
+        3) Integrate outputs into a final decision-ready package.
+        Always begin by invoking strategist, then writer_linkedin, then seo, then editor, then (optional) designer + distribution, then director_approve.
+        North Star: Increase Tarun Raja's social visibility and authority in AI Orchestration, Cloud-Native Scalability, and Fintech Governance.
+        Output JSON schema:
+        {
+          "creative_brief":{
+            "objective":"string",
+            "audience":"string",
+            "channel":"linkedin|newsletter|blog|other",
+            "acceptance_criteria":["string"],
+            "risks":["string"]
+          }
+        }
+      AgentCollaborators:
+        - CollaboratorName: tarun_visibility_team-strategist
+          AgentDescriptor:
+            AliasArn: !GetAtt VisibilityStrategistAlias.AgentAliasArn
+          RelayConversationHistory: TO_COLLABORATOR
+          CollaborationInstruction: Create reach-optimized strategy pack aligned to director brief. JSON only.
+        - CollaboratorName: tarun_visibility_team-writer_linkedin
+          AgentDescriptor:
+            AliasArn: !GetAtt VisibilityWriterLinkedinAlias.AgentAliasArn
+          RelayConversationHistory: TO_COLLABORATOR
+          CollaborationInstruction: Write 2-3 high-signal LinkedIn drafts. JSON only.
+        - CollaboratorName: tarun_visibility_team-seo
+          AgentDescriptor:
+            AliasArn: !GetAtt VisibilitySeoAlias.AgentAliasArn
+          RelayConversationHistory: TO_COLLABORATOR
+          CollaborationInstruction: Add discoverability improvements without keyword stuffing. JSON only.
+        - CollaboratorName: tarun_visibility_team-editor
+          AgentDescriptor:
+            AliasArn: !GetAtt VisibilityEditorAlias.AgentAliasArn
+          RelayConversationHistory: TO_COLLABORATOR
+          CollaborationInstruction: Polish final voice + compliance checks. JSON only.
+        - CollaboratorName: tarun_visibility_team-designer
+          AgentDescriptor:
+            AliasArn: !GetAtt VisibilityDesignerAlias.AgentAliasArn
+          RelayConversationHistory: TO_COLLABORATOR
+          CollaborationInstruction: Create carousel + hero image direction + prompts. JSON only.
+        - CollaboratorName: tarun_visibility_team-distribution
+          AgentDescriptor:
+            AliasArn: !GetAtt VisibilityDistributionAlias.AgentAliasArn
+          RelayConversationHistory: TO_COLLABORATOR
+          CollaborationInstruction: Create posting checklist + channel variants. JSON only.
+        - CollaboratorName: tarun_visibility_team-director_approve
+          AgentDescriptor:
+            AliasArn: !GetAtt VisibilityDirectorApproveAlias.AgentAliasArn
+          RelayConversationHistory: TO_COLLABORATOR
+          CollaborationInstruction: Approve or request revisions; provide revision notes + send_back_to. JSON only.
+      GuardrailConfiguration:
+        GuardrailIdentifier: !Ref SharedGuardrail
+        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      Tags:
+        team: tarun_visibility_team
+        role: director
+        collaboration: supervisor
+        owner: Tarun Raja
+        env: prod
+        model: !Ref FoundationModelId
+
+  ImprovementCoachAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: tarun_improvement_team-coach
+      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      FoundationModel: !Ref FoundationModelId
+      Description: !Sub "tarun_improvement_team coach supervisor using model ${FoundationModelId}."
+      AutoPrepare: true
+      IdleSessionTTLInSeconds: 1800
+      AgentCollaboration: !Ref ImprovementSupervisorCollaborationMode
+      Instruction: |
+        Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
+        Keep outputs skimmable and action-oriented.
+        Do not reveal confidential/internal JPMorgan details.
+        You are the supervisor router for tarun_improvement_team.
+        Start by invoking strategist to build a target-date plan.
+        Then invoke advisor to generate today's daily_packet based on completed_topics.
+        North Star: Continuously improve Tarun Raja's technical depth and execution: daily learning tasks, curated resources, and reflection with progress tracking.
+        Output JSON schema:
+        {
+          "coach_brief":{
+            "current_level":"string",
+            "goal":"string",
+            "target_date":"string",
+            "acceptance_criteria":["string"],
+            "completed_topics":["string"]
+          }
+        }
+      AgentCollaborators:
+        - CollaboratorName: tarun_improvement_team-strategist
+          AgentDescriptor:
+            AliasArn: !GetAtt ImprovementStrategistAlias.AgentAliasArn
+          RelayConversationHistory: TO_COLLABORATOR
+          CollaborationInstruction: Build milestone-based learning strategy to target date. JSON only.
+        - CollaboratorName: tarun_improvement_team-advisor
+          AgentDescriptor:
+            AliasArn: !GetAtt ImprovementAdvisorAlias.AgentAliasArn
+          RelayConversationHistory: TO_COLLABORATOR
+          CollaborationInstruction: Generate today's daily_packet from completed_topics; avoid repetition. JSON only.
+      GuardrailConfiguration:
+        GuardrailIdentifier: !Ref SharedGuardrail
+        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      Tags:
+        team: tarun_improvement_team
+        role: coach
+        collaboration: supervisor
+        owner: Tarun Raja
+        env: prod
+        model: !Ref FoundationModelId
+
+  VisibilityDirectorAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref VisibilityDirectorAgent
+      AgentAliasName: production
+      Description: Production alias for tarun_visibility_team director
+      RoutingConfiguration:
+        - AgentVersion: DRAFT
+      Tags:
+        team: tarun_visibility_team
+        role: director
+        env: prod
+
+  ImprovementCoachAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref ImprovementCoachAgent
+      AgentAliasName: production
+      Description: Production alias for tarun_improvement_team coach
+      RoutingConfiguration:
+        - AgentVersion: DRAFT
+      Tags:
+        team: tarun_improvement_team
+        role: coach
+        env: prod
+
+Outputs:
+  SharedGuardrailId:
+    Description: Shared guardrail identifier.
+    Value: !Ref SharedGuardrail
+
+  SharedGuardrailVersion:
+    Description: Shared guardrail version.
+    Value: !GetAtt SharedGuardrailVersion.Version
+
+  VisibilityDirectorAgentId:
+    Description: Supervisor agent id for tarun_visibility_team director.
+    Value: !Ref VisibilityDirectorAgent
+
+  ImprovementCoachAgentId:
+    Description: Supervisor agent id for tarun_improvement_team coach.
+    Value: !Ref ImprovementCoachAgent
+
+  VisibilityStrategistAliasArn:
+    Description: Collaborator alias ARN for visibility strategist.
+    Value: !GetAtt VisibilityStrategistAlias.AgentAliasArn
+
+  VisibilityWriterLinkedinAliasArn:
+    Description: Collaborator alias ARN for visibility writer_linkedin.
+    Value: !GetAtt VisibilityWriterLinkedinAlias.AgentAliasArn
+
+  VisibilitySeoAliasArn:
+    Description: Collaborator alias ARN for visibility seo.
+    Value: !GetAtt VisibilitySeoAlias.AgentAliasArn
+
+  VisibilityEditorAliasArn:
+    Description: Collaborator alias ARN for visibility editor.
+    Value: !GetAtt VisibilityEditorAlias.AgentAliasArn
+
+  VisibilityDesignerAliasArn:
+    Description: Collaborator alias ARN for visibility designer.
+    Value: !GetAtt VisibilityDesignerAlias.AgentAliasArn
+
+  VisibilityDistributionAliasArn:
+    Description: Collaborator alias ARN for visibility distribution.
+    Value: !GetAtt VisibilityDistributionAlias.AgentAliasArn
+
+  VisibilityDirectorApproveAliasArn:
+    Description: Collaborator alias ARN for visibility director_approve.
+    Value: !GetAtt VisibilityDirectorApproveAlias.AgentAliasArn
+
+  ImprovementStrategistAliasArn:
+    Description: Collaborator alias ARN for improvement strategist.
+    Value: !GetAtt ImprovementStrategistAlias.AgentAliasArn
+
+  ImprovementAdvisorAliasArn:
+    Description: Collaborator alias ARN for improvement advisor.
+    Value: !GetAtt ImprovementAdvisorAlias.AgentAliasArn
