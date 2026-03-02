@@ -53,6 +53,18 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional. Leave blank to create a new DynamoDB table.
+  VpcId:
+    Type: String
+    Default: "vpc-f3c92a8a"
+    Description: VPC ID for Lambda networking to RDS.
+  LambdaSubnetIds:
+    Type: String
+    Default: ""
+    Description: Comma-separated private subnet IDs for Lambda ENIs (required for VPC connectivity).
+  RdsSecurityGroupId:
+    Type: String
+    Default: "sg-06e6751625773c1bf"
+    Description: RDS security group ID (resume-rag-sg) to allow PostgreSQL traffic from Lambda.
   GuardrailName:
     Type: String
     Default: tarun-agents-guardrail
@@ -67,6 +79,10 @@ Conditions:
   CreateArtifactBucket: !Equals [!Ref ArtifactBucketName, ""]
   CreateDdbTable: !Equals [!Ref DdbTableName, ""]
   HasGeminiSecret: !Not [!Equals [!Ref GeminiSecretArn, ""]]
+  HasVpcConfig: !And
+    - !Not [!Equals [!Ref VpcId, ""]]
+    - !Not [!Equals [!Ref RdsSecurityGroupId, ""]]
+    - !Not [!Equals [!Ref LambdaSubnetIds, ""]]
 
 Globals:
   Function:
@@ -106,6 +122,8 @@ Resources:
 
   OrchestratorFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       CodeUri: ../
       Handler: src/orchestrator/handler.handler
@@ -130,6 +148,7 @@ Resources:
             Method: post
       Policies:
         - AWSLambdaBasicExecutionRole
+        - AWSLambdaVPCAccessExecutionRole
         - Statement:
             Effect: Allow
             Action: [s3:GetObject]
@@ -181,8 +200,43 @@ Resources:
           VECTOR_DB_USER: !Ref VectorDbUser
           VECTOR_DB_PASSWORD: !Ref VectorDbPassword
           VECTOR_DB_URL: !Ref VectorDbUrl
+          VECTOR_DB_SSLMODE: verify-full
+          VECTOR_DB_SSL_ROOT_CERT: /var/task/certs/rds-ca-bundle.pem
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
           GEMINI_MODEL: gemini-2.0-flash
+      VpcConfig: !If
+        - HasVpcConfig
+        - SecurityGroupIds:
+            - !Ref OrchestratorSecurityGroup
+          SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+        - !Ref AWS::NoValue
+
+  OrchestratorSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: HasVpcConfig
+    Properties:
+      GroupDescription: Lambda security group for outbound PostgreSQL access to RDS
+      VpcId: !Ref VpcId
+
+  OrchestratorToRdsEgress5432:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: HasVpcConfig
+    Properties:
+      GroupId: !Ref OrchestratorSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref RdsSecurityGroupId
+
+  RdsIngressFromOrchestrator5432:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasVpcConfig
+    Properties:
+      GroupId: !Ref RdsSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref OrchestratorSecurityGroup
 
   TeamWeaveApi:
     Type: AWS::Serverless::Api
