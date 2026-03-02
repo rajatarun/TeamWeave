@@ -12,6 +12,9 @@ permissions:
 env:
   AWS_REGION: us-east-1
   STACK_NAME: tarun-content-team
+  BEDROCK_AGENTS_STACK_NAME: tarun-bedrock-agents
+  FOUNDATION_MODEL_ID: amazon.nova-micro-v1:0
+  AGENT_SERVICE_ROLE_ARN: arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
   TEAM_CONFIG_PREFIX: teams
   VECTOR_DB_TABLE: resume-rag-db
   GEMINI_SECRET_ARN: arn:aws:secretsmanager:us-east-1:239571291755:secret:gemini/api_key-SKx2NV
@@ -56,11 +59,36 @@ jobs:
               "VectorDbTable=${VECTOR_DB_TABLE}" \
               "GeminiSecretArn=${GEMINI_SECRET_ARN}"
 
+
+      - name: Validate Bedrock Agents Template
+        run: |
+          cd infra
+          sam validate -t bedrock-agents.yaml --lint
+
+      - name: Deploy Bedrock Agents Stack
+        run: |
+          cd infra
+          sam deploy \
+            --template-file bedrock-agents.yaml \
+            --stack-name "${BEDROCK_AGENTS_STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --resolve-s3 \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              "FoundationModelId=${FOUNDATION_MODEL_ID}" \
+              "AgentServiceRoleArn=${AGENT_SERVICE_ROLE_ARN}"
+
       - name: Dump CloudFormation events on failure
         if: failure()
         run: |
-          echo "Deployment failed. Fetching recent CloudFormation events..."
+          echo "Deployment failed. Fetching recent CloudFormation events for SAM stack..."
           aws cloudformation describe-stack-events \
             --stack-name "${STACK_NAME}" \
             --region "${AWS_REGION}" \
-            --max-items 50
+            --max-items 50 || true
+          echo "Fetching recent CloudFormation events for Bedrock agents stack..."
+          aws cloudformation describe-stack-events \
+            --stack-name "${BEDROCK_AGENTS_STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --max-items 50 || true
