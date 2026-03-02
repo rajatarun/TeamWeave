@@ -70,6 +70,11 @@ def get_owner_profile_context(
     if not query:
         return ""
 
+    log.info(
+        "owner_profile_context_retrieval",
+        extra={"collection_id": collection_id, "top_k": top_k, "owner": owner},
+    )
+
     hits = retrieve_from_vector_store(collection_id, query, top_k)
     if not hits:
         return ""
