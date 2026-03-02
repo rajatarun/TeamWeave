@@ -49,6 +49,8 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
     user = os.environ.get("VECTOR_DB_USER", "").strip()
     password = os.environ.get("VECTOR_DB_PASSWORD", "").strip()
     port = int(os.environ.get("VECTOR_DB_PORT", "5432"))
+    ssl_mode = os.environ.get("VECTOR_DB_SSLMODE", "verify-full").strip() or "verify-full"
+    ssl_root_cert = os.environ.get("VECTOR_DB_SSL_ROOT_CERT", "/var/task/certs/rds-ca-bundle.pem").strip()
 
     if db_url:
         parsed = urlparse(db_url)
@@ -74,7 +76,14 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
 
     try:
         final_db_url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
-        conn = psycopg.connect(final_db_url)
+        connect_kwargs = {"sslmode": ssl_mode}
+        if ssl_root_cert and ssl_mode.lower() != "disable":
+            if os.path.exists(ssl_root_cert):
+                connect_kwargs["sslrootcert"] = ssl_root_cert
+            else:
+                log.warning("vector_db_ssl_root_cert_missing", extra={"path": ssl_root_cert})
+
+        conn = psycopg.connect(final_db_url, **connect_kwargs)
         qemb = _embed_text(query)
 
         with conn:
