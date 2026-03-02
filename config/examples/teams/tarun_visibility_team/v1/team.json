@@ -35,8 +35,8 @@
       "id": "director",
       "name": "Content Marketing Director",
       "bedrock": {
-        "agentId": "JZCZMVEKQC",
-        "aliasId": "TSTALIASID"
+        "agentId": "DJXMM267D0",
+        "aliasId": "5RURKQN07U"
       },
       "goal_template": "Define a measurable goal to increase Tarun Raja's social visibility. Produce a Creative Brief with acceptance criteria and risks.",
       "schema_ref": "creative_brief_v1"
@@ -45,8 +45,8 @@
       "id": "strategist",
       "name": "Content Strategist",
       "bedrock": {
-        "agentId": "JILSIRNJTZ",
-        "aliasId": "TSTALIASID"
+        "agentId": "TD1NAPD1TP",
+        "aliasId": "WL9B0MCAY5"
       },
       "goal_template": "Derive strategy from Director brief. Generate hooks, narrative angle, and outline optimized for reach.",
       "schema_ref": "strategy_pack_v1"
@@ -55,8 +55,8 @@
       "id": "writer_linkedin",
       "name": "Content Writer - LinkedIn",
       "bedrock": {
-        "agentId": "MBA0YQYQII",
-        "aliasId": "TSTALIASID"
+        "agentId": "3KBGBZWCNJ",
+        "aliasId": "7QQBLS9VOX"
       },
       "goal_template": "Write 2-3 LinkedIn draft variants aligned to Director acceptance criteria and Strategist outline.",
       "schema_ref": "draft_pack_v1"
@@ -65,8 +65,8 @@
       "id": "seo",
       "name": "SEO Specialist",
       "bedrock": {
-        "agentId": "PETVT0K9NJ",
-        "aliasId": "TSTALIASID"
+        "agentId": "AH0BHSCYRN",
+        "aliasId": "5LYD4EGSPD"
       },
       "goal_template": "Provide discoverability improvements, keyword set, and title/meta suggestions without stuffing.",
       "schema_ref": "seo_pack_v1"
@@ -75,8 +75,8 @@
       "id": "editor",
       "name": "Managing Editor",
       "bedrock": {
-        "agentId": "7UQCAN4RSQ",
-        "aliasId": "TSTALIASID"
+        "agentId": "HDURESDM8M",
+        "aliasId": "GBCZT7JRAO"
       },
       "goal_template": "Polish to final copy: high-signal, voice-consistent, and constraint-compliant.",
       "schema_ref": "final_copy_v1"
@@ -85,8 +85,8 @@
       "id": "designer",
       "name": "Designer",
       "bedrock": {
-        "agentId": "ZQXUSICGEH",
-        "aliasId": "TSTALIASID"
+        "agentId": "0JTIEM0ERQ",
+        "aliasId": "SYWND2QFHU"
       },
       "goal_template": "Create carousel plan + hero image direction + image prompts aligned to final copy.",
       "schema_ref": "design_pack_v1"
@@ -95,8 +95,8 @@
       "id": "distribution",
       "name": "Social Media / Distribution Manager",
       "bedrock": {
-        "agentId": "3PO7W7DWKF",
-        "aliasId": "TSTALIASID"
+        "agentId": "6VRJNU5IAO",
+        "aliasId": "ZSJJJQW882"
       },
       "goal_template": "Create channel variants + posting checklist optimized for engagement and reach.",
       "schema_ref": "distribution_pack_v1"
@@ -105,8 +105,8 @@
       "id": "director_approve",
       "name": "Director Approval",
       "bedrock": {
-        "agentId": "SBVG5CUMAZ",
-        "aliasId": "TSTALIASID"
+        "agentId": "SLZTGED99J",
+        "aliasId": "NKELOE2MCI"
       },
       "goal_template": "Approve or request revisions. Output APPROVED boolean and revision_notes if not approved.",
       "schema_ref": "approval_v1"
