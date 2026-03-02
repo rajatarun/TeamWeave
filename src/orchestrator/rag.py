@@ -1,12 +1,45 @@
 import os
+import json
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
+import boto3
 import psycopg
 from psycopg import sql
 from .logger import get_logger
 from .db import DbDao
 
 log = get_logger("rag")
+bedrock_runtime = boto3.client("bedrock-runtime")
+
+
+def _embed_text(text: str) -> Optional[List[float]]:
+    model_id = os.environ.get("VECTOR_EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v2:0").strip()
+    if not model_id or not text.strip():
+        return None
+
+    body = {
+        "inputText": text,
+    }
+
+    try:
+        resp = bedrock_runtime.invoke_model(
+            modelId=model_id,
+            body=json.dumps(body),
+            contentType="application/json",
+            accept="application/json",
+        )
+        raw = resp.get("body").read().decode("utf-8")
+        payload = json.loads(raw)
+        emb = payload.get("embedding")
+        if isinstance(emb, list) and emb:
+            return [float(v) for v in emb]
+    except Exception:
+        log.exception("vector_embedding_failed", extra={"model_id": model_id})
+    return None
+
+
+def _pgvector_literal(emb: List[float]) -> str:
+    return "[" + ",".join(f"{v:.8f}" for v in emb) + "]"
 
 def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> List[Dict[str, str]]:
     table_name = os.environ.get("VECTOR_DB_TABLE", "").strip()
@@ -40,23 +73,44 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
         return []
 
     try:
-        final_db_url = f"postgresql://{user}:{password}@{dbname}.{host}:{port}/{table_name}"
+        final_db_url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
         conn = psycopg.connect(final_db_url)
+        qemb = _embed_text(query)
 
         with conn:
             with conn.cursor() as cur:
-                stmt = sql.SQL(
-                    """
-                    SELECT COALESCE(source, 'postgres://vector'), COALESCE(content, '')
-                    FROM {table}
-                    WHERE (%s = '' OR collection_id = %s)
-                      AND content ILIKE ('%%' || %s || '%%')
-                    LIMIT %s
-                    """
-                ).format(table=sql.Identifier(table_name))
-                cur.execute(stmt, (collection_id, collection_id, query, top_k))
+                if qemb:
+                    vector_literal = _pgvector_literal(qemb)
+                    stmt = sql.SQL(
+                        """
+                        SELECT
+                            COALESCE(source, title, 'postgres://vector') AS source,
+                            COALESCE(content, '') AS content,
+                            (1 - (embedding <=> %s::vector)) AS score
+                        FROM {table}
+                        WHERE (%s = '' OR collection_id = %s)
+                          AND embedding IS NOT NULL
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                        """
+                    ).format(table=sql.Identifier(table_name))
+                    cur.execute(stmt, (vector_literal, collection_id, collection_id, vector_literal, top_k))
+                else:
+                    stmt = sql.SQL(
+                        """
+                        SELECT
+                            COALESCE(source, title, 'postgres://vector') AS source,
+                            COALESCE(content, '') AS content,
+                            NULL::double precision AS score
+                        FROM {table}
+                        WHERE (%s = '' OR collection_id = %s)
+                          AND content ILIKE ('%%' || %s || '%%')
+                        LIMIT %s
+                        """
+                    ).format(table=sql.Identifier(table_name))
+                    cur.execute(stmt, (collection_id, collection_id, query, top_k))
                 rows = cur.fetchall()
-                return [{"source": str(r[0]), "text": str(r[1])} for r in rows]
+                return [{"source": str(r[0]), "text": str(r[1]), "score": r[2]} for r in rows]
     except Exception:
         log.exception("vector_store_query_failed", extra={"collection_id": collection_id, "top_k": top_k})
         return []
