@@ -41,6 +41,22 @@ def _embed_text(text: str) -> Optional[List[float]]:
 def _pgvector_literal(emb: List[float]) -> str:
     return "[" + ",".join(f"{v:.8f}" for v in emb) + "]"
 
+
+def _embedding_dimension(cur: psycopg.Cursor, table_name: str) -> Optional[int]:
+    stmt = sql.SQL(
+        """
+        SELECT vector_dims(embedding)
+        FROM {table}
+        WHERE embedding IS NOT NULL
+        LIMIT 1
+        """
+    ).format(table=sql.Identifier(table_name))
+    cur.execute(stmt)
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    return int(row[0])
+
 def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> List[Dict[str, str]]:
     table_name = os.environ.get("VECTOR_DB_TABLE", "").strip()
     db_url = os.environ.get("VECTOR_DB_URL", "").strip()
@@ -89,6 +105,16 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
 
         with conn:
             with conn.cursor() as cur:
+                if qemb:
+                    stored_dim = _embedding_dimension(cur, table_name)
+                    query_dim = len(qemb)
+                    if stored_dim is not None and stored_dim != query_dim:
+                        log.warning(
+                            "vector_dimension_mismatch",
+                            extra={"stored_dimension": stored_dim, "query_dimension": query_dim},
+                        )
+                        qemb = None
+
                 if qemb:
                     vector_literal = _pgvector_literal(qemb)
                     stmt = sql.SQL(
