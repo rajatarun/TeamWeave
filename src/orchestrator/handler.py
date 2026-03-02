@@ -14,6 +14,7 @@ from .gemini import gemini_research_brief
 from .profile_context import get_owner_profile_context
 from .models import StepFailed
 from .db import DbDao
+from .json_utils import extract_json_payload
 
 log = get_logger("handler")
 
@@ -51,6 +52,9 @@ def _json_body(event: Dict[str, Any]) -> Dict[str, Any]:
         return json.loads(b) if isinstance(b, str) else b
     except Exception:
         return {}
+
+
+
 
 
 def _load_schema_objects(team_raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -154,7 +158,7 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
         raw_text = invoke_agent(agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt)
 
         try:
-            out_json = json.loads(raw_text)
+            out_json = extract_json_payload(raw_text)
         except Exception as e:
             artifact_uri = save_artifact(run_id, step_id, {"raw_output": raw_text})
             dao.put_step(run_id, step_id, "FAILED", step_inputs, None, error=f"JSON parse failed: {e}", artifact_uri=artifact_uri)
