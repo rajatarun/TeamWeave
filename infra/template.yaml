@@ -120,6 +120,81 @@ Resources:
         - AttributeName: sk
           KeyType: RANGE
 
+  OrchestratorExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-orchestrator-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: orchestrator-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
+              - Effect: Allow
+                Action: [s3:ListBucket]
+                Resource: !If
+                  - CreateConfigBucket
+                  - !GetAtt TeamConfigBucket.Arn
+                  - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}"
+              - Effect: Allow
+                Action: [s3:GetObject]
+                Resource: !If
+                  - CreateConfigBucket
+                  - !Sub "${TeamConfigBucket.Arn}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}/*"
+              - Effect: Allow
+                Action: [s3:PutObject]
+                Resource: !If
+                  - CreateArtifactBucket
+                  - !Sub "${TeamArtifactBucket.Arn}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*/index/*"
+              - Effect: Allow
+                Action:
+                  - bedrock-agent-runtime:InvokeAgent
+                  - bedrock:InvokeAgent
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/*"
+              - !If
+                - HasGeminiSecret
+                - Effect: Allow
+                  Action: [secretsmanager:GetSecretValue]
+                  Resource: !Ref GeminiSecretArn
+                - !Ref "AWS::NoValue"
+
   OrchestratorFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -127,6 +202,7 @@ Resources:
     Properties:
       CodeUri: ../
       Handler: src/orchestrator/handler.handler
+      Role: !GetAtt OrchestratorExecutionRole.Arn
       Events:
         TeamTaskEvent:
           Type: Api
@@ -146,53 +222,6 @@ Resources:
             RestApiId: !Ref TeamWeaveApi
             Path: /improve/task/done
             Method: post
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - AWSLambdaVPCAccessExecutionRole
-        - Statement:
-            Effect: Allow
-            Action: [s3:GetObject]
-            Resource: !If
-              - CreateConfigBucket
-              - !Sub "${TeamConfigBucket.Arn}/*"
-              - !Sub "arn:aws:s3:::${ConfigBucketName}/*"
-        - Statement:
-            Effect: Allow
-            Action: [s3:PutObject]
-            Resource: !If
-              - CreateArtifactBucket
-              - !Sub "${TeamArtifactBucket.Arn}/*"
-              - !Sub "arn:aws:s3:::${ArtifactBucketName}/*"
-        - Statement:
-            Effect: Allow
-            Action:
-              - dynamodb:PutItem
-              - dynamodb:GetItem
-              - dynamodb:UpdateItem
-              - dynamodb:Query
-              - dynamodb:Scan
-            Resource:
-              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
-              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*/index/*"
-        - Statement:
-            Effect: Allow
-            Action:
-              - bedrock-agent-runtime:InvokeAgent
-              - bedrock:InvokeAgent
-            Resource: "*"
-        - Statement:
-            Effect: Allow
-            Action:
-              - bedrock:InvokeModel
-            Resource:
-              - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
-        - !If
-          - HasGeminiSecret
-          - Statement:
-              Effect: Allow
-              Action: [secretsmanager:GetSecretValue]
-              Resource: !Ref GeminiSecretArn
-          - !Ref "AWS::NoValue"
       Environment:
         Variables:
           CONFIG_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
@@ -336,6 +365,8 @@ Outputs:
     Value: !Sub "https://${TeamWeaveApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
   OrchestratorFunctionName:
     Value: !Ref OrchestratorFunction
+  OrchestratorExecutionRoleArn:
+    Value: !GetAtt OrchestratorExecutionRole.Arn
   DdbTable:
     Value: !If [CreateDdbTable, !Ref ContentPipelineRunsTable, !Ref DdbTableName]
   BedrockGuardrailId:
