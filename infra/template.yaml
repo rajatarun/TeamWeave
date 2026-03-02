@@ -17,7 +17,7 @@ Parameters:
     Description: "Prefix in config bucket for team configs (default: teams)"
   VectorDbTable:
     Type: String
-    Default: "postgres"
+    Default: "rag_chunks"
     Description: Vector store collection/table identifier (used for explicit RAG mode)
   VectorDbHost:
     Type: String
