@@ -46,7 +46,6 @@ def get_owner_profile_context(
     top_k = int(profile_cfg.get("top_k") or 6)
     perspective_template = profile_cfg.get(
         "perspective_template",
-        "do not include any pii data about {owner}",
         "Insights about {owner} relevant for team {team_name} ({team_version}) with focus: {north_star}",
     )
     query = _to_query(owner, team_raw, request_obj, perspective_template)
