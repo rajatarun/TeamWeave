@@ -18,6 +18,16 @@ def invoke_agent(agent_id: str, alias_id: str, session_id: str, input_text: str,
     last_err: Optional[Exception] = None
     for attempt in range(0, max_retries + 1):
         try:
+            log.info(
+                "Invoking Bedrock agent",
+                extra={
+                    "agent_id": agent_id,
+                    "alias_id": alias_id,
+                    "session_id": session_id,
+                    "attempt": attempt,
+                    "input_text": input_text[:1000],
+                },
+            )
             resp = brt.invoke_agent(
                 agentId=agent_id,
                 agentAliasId=alias_id,
