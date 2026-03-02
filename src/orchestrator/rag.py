@@ -136,16 +136,17 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
                     stmt = sql.SQL(
                         """
                         SELECT
-                            COALESCE(source, title, 'postgres://vector') AS source,
+                            doc_id,
+                            chunk_id,
+                            title,
                             COALESCE(content, '') AS content,
                             NULL::double precision AS score
                         FROM {table}
-                        WHERE (%s = '' OR collection_id = %s)
-                          AND content ILIKE ('%%' || %s || '%%')
+                        WHERE content ILIKE ('%%' || %s || '%%')
                         LIMIT %s
                         """
                     ).format(table=sql.Identifier(table_name))
-                    cur.execute(stmt, (collection_id, collection_id, query, top_k))
+                    cur.execute(stmt, (query, top_k))
                 rows = cur.fetchall()
                 if qemb:
                     return [
@@ -156,7 +157,14 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
                         }
                         for r in rows
                     ]
-                return [{"source": str(r[0]), "text": str(r[1]), "score": r[2]} for r in rows]
+                return [
+                    {
+                        "source": str(r[2] or r[0] or f"chunk:{r[1]}"),
+                        "text": str(r[3] or ""),
+                        "score": r[4],
+                    }
+                    for r in rows
+                ]
     except Exception:
         log.exception("vector_store_query_failed", extra={"collection_id": collection_id, "top_k": top_k})
         return []
