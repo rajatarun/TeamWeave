@@ -36,6 +36,12 @@ jobs:
           cd infra
           sam build -t template.yaml
 
+      - name: Validate SAM Template
+        run: |
+          cd infra
+          sam validate --lint
+          aws cloudformation validate-template --template-body file://template.yaml
+
       - name: SAM Deploy
         run: |
           cd infra
@@ -49,3 +55,12 @@ jobs:
               "TeamConfigPrefix=${TEAM_CONFIG_PREFIX}" \
               "VectorDbTable=${VECTOR_DB_TABLE}" \
               "GeminiSecretArn=${GEMINI_SECRET_ARN}"
+
+      - name: Dump CloudFormation events on failure
+        if: failure()
+        run: |
+          echo "Deployment failed. Fetching recent CloudFormation events..."
+          aws cloudformation describe-stack-events \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --max-items 50
