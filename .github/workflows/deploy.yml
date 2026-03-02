@@ -93,3 +93,19 @@ jobs:
             --stack-name "${BEDROCK_AGENTS_STACK_NAME}" \
             --region "${AWS_REGION}" \
             --max-items 50 || true
+
+      - name: Test team task endpoint
+        run: |
+          curl -X POST https://449f9f7an9.execute-api.us-east-1.amazonaws.com/prod/team/task \
+            -H "Content-Type: application/json" \
+            -d '{
+              "team": "tarun_visibility_team",
+              "version": "v1",
+              "request": {
+                "topic": "Agentic AI governance in banking",
+                "channel": "linkedin",
+                "audience": "CTOs",
+                "objective": "Increase authority positioning",
+                "constraints": ["No fabricated citations"]
+              }
+            }'
