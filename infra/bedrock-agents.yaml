@@ -9,11 +9,6 @@ Parameters:
     Default: amazon.nova-micro-v1:0
     Description: Foundation model ID used by all Bedrock agents.
 
-  AgentServiceRoleArn:
-    Type: String
-    Default: arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
-    Description: Existing IAM service role ARN used by all Bedrock agents.
-
   CollaboratorAgentCollaborationMode:
     Type: String
     Default: DISABLED
@@ -36,6 +31,28 @@ Parameters:
     Description: Collaboration mode for tarun_improvement_team coach supervisor.
 
 Resources:
+  BedrockAgentServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-bedrock-agent-service-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: bedrock-agent-service-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:ApplyGuardrail
+                Resource: "*"
+
   SharedGuardrail:
     Type: AWS::Bedrock::Guardrail
     Properties:
@@ -85,7 +102,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-strategist
-      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team strategist using model ${FoundationModelId}."
       AutoPrepare: true
@@ -123,7 +140,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-writer_linkedin
-      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team writer_linkedin using model ${FoundationModelId}."
       AutoPrepare: true
@@ -157,7 +174,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-seo
-      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team seo using model ${FoundationModelId}."
       AutoPrepare: true
@@ -194,7 +211,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-editor
-      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team editor using model ${FoundationModelId}."
       AutoPrepare: true
@@ -233,7 +250,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-designer
-      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team designer using model ${FoundationModelId}."
       AutoPrepare: true
@@ -268,7 +285,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-distribution
-      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team distribution using model ${FoundationModelId}."
       AutoPrepare: true
@@ -303,7 +320,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-director_approve
-      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team director_approve using model ${FoundationModelId}."
       AutoPrepare: true
@@ -338,7 +355,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_improvement_team-strategist
-      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_improvement_team strategist using model ${FoundationModelId}."
       AutoPrepare: true
@@ -373,7 +390,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_improvement_team-advisor
-      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_improvement_team advisor using model ${FoundationModelId}."
       AutoPrepare: true
@@ -511,7 +528,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-director
-      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team director supervisor using model ${FoundationModelId}."
       AutoPrepare: true
@@ -590,7 +607,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_improvement_team-coach
-      AgentResourceRoleArn: !Ref AgentServiceRoleArn
+      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_improvement_team coach supervisor using model ${FoundationModelId}."
       AutoPrepare: true
@@ -660,6 +677,10 @@ Resources:
         env: prod
 
 Outputs:
+  BedrockAgentServiceRoleArn:
+    Description: IAM role ARN assumed by all Bedrock agents in this stack.
+    Value: !GetAtt BedrockAgentServiceRole.Arn
+
   SharedGuardrailId:
     Description: Shared guardrail identifier.
     Value: !Ref SharedGuardrail
