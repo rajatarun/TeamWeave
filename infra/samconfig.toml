@@ -5,7 +5,7 @@ version = 0.1
 [default.deploy.parameters]
 stack_name = "tarun-content-team"
 region = "us-east-1"
-capabilities = "CAPABILITY_IAM"
+capabilities = "CAPABILITY_NAMED_IAM"
 confirm_changeset = false
 resolve_s3 = true
 s3_prefix = "tarun-content-team"
