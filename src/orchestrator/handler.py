@@ -1,5 +1,6 @@
 import json
 import uuid
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .logger import get_logger
@@ -53,13 +54,17 @@ def _json_body(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _load_schema_objects(team_raw: Dict[str, Any]) -> Dict[str, Any]:
+    repo_root = Path(__file__).resolve().parents[2]
     schemas = {}
     schema_map = (team_raw.get("schemas") or {})
     for ref, meta in schema_map.items():
-        path = (meta.get("path") or "").lstrip("/")
+        path = (meta.get("path") or "")
         if not path:
             continue
-        with open(path, "r", encoding="utf-8") as f:
+        path_obj = Path(path)
+        if not path_obj.is_absolute() and not path_obj.exists():
+            path_obj = repo_root / path
+        with path_obj.open("r", encoding="utf-8") as f:
             schemas[ref] = json.load(f)
     return schemas
 
