@@ -13,7 +13,7 @@ bedrock_runtime = boto3.client("bedrock-runtime")
 
 
 def _embed_text(text: str) -> Optional[List[float]]:
-    model_id = os.environ.get("VECTOR_EMBEDDING_MODEL_ID", "titan-embed-text-v1").strip()
+    model_id = os.environ.get("VECTOR_EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v1").strip()
     if not model_id or not text.strip():
         return None
 
