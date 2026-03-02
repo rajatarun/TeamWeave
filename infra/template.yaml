@@ -157,7 +157,9 @@ Resources:
               - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*/index/*"
         - Statement:
             Effect: Allow
-            Action: [bedrock-agent-runtime:InvokeAgent]
+            Action:
+              - bedrock-agent-runtime:InvokeAgent
+              - bedrock:InvokeAgent
             Resource: "*"
         - !If
           - HasGeminiSecret
