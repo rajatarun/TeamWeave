@@ -676,6 +676,14 @@ Outputs:
     Description: Supervisor agent id for tarun_improvement_team coach.
     Value: !Ref ImprovementCoachAgent
 
+  VisibilityDirectorAliasArn:
+    Description: Supervisor alias ARN for visibility director.
+    Value: !GetAtt VisibilityDirectorAlias.AgentAliasArn
+
+  ImprovementCoachAliasArn:
+    Description: Supervisor alias ARN for improvement coach.
+    Value: !GetAtt ImprovementCoachAlias.AgentAliasArn
+
   VisibilityStrategistAliasArn:
     Description: Collaborator alias ARN for visibility strategist.
     Value: !GetAtt VisibilityStrategistAlias.AgentAliasArn
