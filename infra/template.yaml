@@ -255,7 +255,7 @@ Resources:
             Action: BLOCK
           - Type: PHONE
             Action: BLOCK
-          - Type: SSN
+          - Type: US_SOCIAL_SECURITY_NUMBER
             Action: BLOCK
           - Type: CREDIT_DEBIT_CARD_NUMBER
             Action: BLOCK
