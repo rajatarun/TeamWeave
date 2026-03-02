@@ -47,6 +47,9 @@ The stack exports these key values:
 - `SharedGuardrailId` and `SharedGuardrailVersion`
 - `VisibilityDirectorAgentId`
 - `ImprovementCoachAgentId`
+- Supervisor alias ARNs:
+  - `VisibilityDirectorAliasArn`
+  - `ImprovementCoachAliasArn`
 - Collaborator alias ARNs for debugging:
   - `VisibilityStrategistAliasArn`
   - `VisibilityWriterLinkedinAliasArn`
