@@ -160,6 +160,12 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
         try:
             out_json = extract_json_payload(raw_text)
         except Exception as e:
+            log.error(
+                "json_parse_failed_full_response step=%s run_id=%s raw_response=%s",
+                step_id,
+                run_id,
+                raw_text,
+            )
             artifact_uri = save_artifact(run_id, step_id, {"raw_output": raw_text})
             dao.put_step(run_id, step_id, "FAILED", step_inputs, None, error=f"JSON parse failed: {e}", artifact_uri=artifact_uri)
             dao.put_run_meta(run_id, "FAILED", {"team": team, "version": version, "owner": owner, "error": f"JSON parse failed: {e}", "failed_step": step_id})
