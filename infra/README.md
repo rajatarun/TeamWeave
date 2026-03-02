@@ -1,49 +1,67 @@
-# Infra
+# Bedrock Multi-Agent Stack
+
+This directory contains a CloudFormation template that provisions:
+- 1 shared Bedrock guardrail + explicit version (`v1 baseline`)
+- 11 Bedrock agents across two teams
+- 11 Bedrock agent aliases (`production` -> `DRAFT`)
+- Multi-agent collaboration on the two supervisors:
+  - `tarun_visibility_team-director`
+  - `tarun_improvement_team-coach`
+
+## Prerequisites
+- AWS account: `239571291755`
+- Region: `us-east-1`
+- Existing IAM role for all agents:
+  `arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun` (default parameter `AgentServiceRoleArn`)
 
 ## Deploy
+Set model via env var (optional):
+
 ```bash
-cd infra
-sam build -t template.yaml
-sam deploy --guided
+export FOUNDATION_MODEL_ID=amazon.nova-micro-v1:0
 ```
 
-If `ConfigBucketName` and `ArtifactBucketName` are not provided during deploy, the stack now creates and wires S3 buckets automatically.
+Deploy:
 
-The stack also creates a Bedrock Guardrail (`AWS::Bedrock::Guardrail`) with:
-- Topic filtering (harmful content, personal information, inappropriate content)
-- Content filtering (sexual, violence, hate, insults, misconduct, prompt attack)
-- Word filtering (custom sensitive words + managed profanity list)
-- Sensitive info protections (PII blocking/anonymization + API key regex blocking)
-
-You can override guardrail metadata during deploy with:
-- `GuardrailName`
-- `GuardrailDescription`
-
-## Upload example config (both teams)
 ```bash
-CONFIG_BUCKET="<your-config-bucket>"
-aws s3 cp ../config/examples/ s3://$CONFIG_BUCKET/ --recursive
+sam deploy \
+  --template-file infra/bedrock-agents.yaml \
+  --stack-name tarun-bedrock-agents \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region us-east-1 \
+  --resolve-s3 \
+  --no-fail-on-empty-changeset \
+  --parameter-overrides \
+    FoundationModelId=${FOUNDATION_MODEL_ID:-amazon.nova-micro-v1:0} \
+    AgentServiceRoleArn=arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
 ```
 
-## Useful calls
-POST /team/task
-GET /improve/tasks?owner=Tarun%20Raja&limit=50
-POST /improve/task/done   body: {"owner":"Tarun Raja","task_id":"..."}
 
+Supervisor collaboration is enabled by default via parameters:
+- `VisibilitySupervisorCollaborationMode=SUPERVISOR_ROUTER` (director)
+- `ImprovementSupervisorCollaborationMode=SUPERVISOR_ROUTER` (coach)
+- Collaborators remain `DISABLED` and are invoked through supervisor `AgentCollaborators`.
 
-## Gemini research
-Create a Secrets Manager secret with JSON like {"key":"<GEMINI_API_KEY>"} and pass its ARN as GeminiSecretArn.
+## Outputs
+The stack exports these key values:
+- `SharedGuardrailId` and `SharedGuardrailVersion`
+- `VisibilityDirectorAgentId`
+- `ImprovementCoachAgentId`
+- Collaborator alias ARNs for debugging:
+  - `VisibilityStrategistAliasArn`
+  - `VisibilityWriterLinkedinAliasArn`
+  - `VisibilitySeoAliasArn`
+  - `VisibilityEditorAliasArn`
+  - `VisibilityDesignerAliasArn`
+  - `VisibilityDistributionAliasArn`
+  - `VisibilityDirectorApproveAliasArn`
+  - `ImprovementStrategistAliasArn`
+  - `ImprovementAdvisorAliasArn`
 
-## Explicit RAG with PostgreSQL/pgvector
-When `globals.rag.mode` is `explicit`, configure these deploy parameters so Lambda can connect:
-- `VectorDbTable`
-- `VectorDbHost`
-- `VectorDbPort` (default `5432`)
-- `VectorDbName`
-- `VectorDbUser`
-- `VectorDbPassword`
-- `VectorDbUrl` (optional override, full connection URL)
-
-If `VectorDbUrl` is set, the app parses it into host/port/name/user/password, then concatenates them into a normalized URL like `postgresql://<user>:<password>@<host>:<port>/<db>` before connecting.
-
-The runtime reads the same values from env vars `VECTOR_DB_*`.
+## Inspect stack outputs
+```bash
+aws cloudformation describe-stacks \
+  --stack-name tarun-bedrock-agents \
+  --region us-east-1 \
+  --query 'Stacks[0].Outputs'
+```
