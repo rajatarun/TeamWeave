@@ -52,7 +52,7 @@ jobs:
           sam deploy \
             --stack-name "${STACK_NAME}" \
             --region "${AWS_REGION}" \
-            --capabilities CAPABILITY_IAM \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
             --resolve-s3 \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
@@ -73,7 +73,7 @@ jobs:
             --template-file bedrock-agents.yaml \
             --stack-name "${BEDROCK_AGENTS_STACK_NAME}" \
             --region "${AWS_REGION}" \
-            --capabilities CAPABILITY_NAMED_IAM \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
             --resolve-s3 \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
