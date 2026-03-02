@@ -21,7 +21,7 @@ Parameters:
     Description: Vector store collection/table identifier (used for explicit RAG mode)
   VectorDbHost:
     Type: String
-    Default: "cplgkqp9qd3a.us-east-1.rds.amazonaws.com"
+    Default: "resume-rag-db.cplgkqp9qd3a.us-east-1.rds.amazonaws.com"
     Description: PostgreSQL host for explicit RAG mode (pgvector)
   VectorDbPort:
     Type: String
@@ -29,7 +29,7 @@ Parameters:
     Description: PostgreSQL port for explicit RAG mode
   VectorDbName:
     Type: String
-    Default: "resume-rag-db"
+    Default: "postgres"
     Description: PostgreSQL database name for explicit RAG mode
   VectorDbUser:
     Type: String
