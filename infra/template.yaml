@@ -180,6 +180,12 @@ Resources:
               - bedrock-agent-runtime:InvokeAgent
               - bedrock:InvokeAgent
             Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+            Resource:
+              - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
         - !If
           - HasGeminiSecret
           - Statement:
