@@ -93,12 +93,16 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
 
     dao.put_run_meta(run_id, "RUNNING", {"team": team, "version": version, "owner": owner, "request": request_obj})
 
-    rag_context = get_rag_context(
-        request_obj,
-        {"rag": team_cfg.globals.rag, "features": team_cfg.globals.features},
-        owner=owner,
-        dao=dao,
-    )
+    try:
+        rag_context = get_rag_context(
+            request_obj,
+            {"rag": team_cfg.globals.rag, "features": team_cfg.globals.features},
+            owner=owner,
+            dao=dao,
+        )
+    except Exception:
+        log.exception("rag_context_unavailable_proceeding_without_rag", extra={"run_id": run_id, "owner": owner})
+        rag_context = ""
     owner_profile_context = get_owner_profile_context(request_obj, team_raw, owner)
 
     completed_topics = ""
