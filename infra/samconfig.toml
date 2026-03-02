@@ -12,5 +12,8 @@ s3_prefix = "tarun-content-team"
 parameter_overrides = [
   "TeamConfigPrefix=teams",
   "VectorDbTable=",
+  "VpcId=vpc-f3c92a8a",
+  "RdsSecurityGroupId=sg-06e6751625773c1bf",
+  "LambdaSubnetIds=",
   "GeminiSecretArn="
 ]
