@@ -19,7 +19,7 @@
     "rag": {
       "mode": "history",
       "rag_env_key": "DDB_TABLE",
-      "top_k": 200
+      "top_k": 1
     },
     "artifact_store": {
       "artifact_bucket_env": "ARTIFACT_BUCKET",
