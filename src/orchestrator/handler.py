@@ -13,6 +13,7 @@ from .profile_context import get_owner_profile_context
 from .models import StepFailed
 from .db import DbDao
 from .json_utils import build_standard_response, extract_json_payload
+from .structured_transform import transform_json_to_schema
 
 log = get_logger("handler")
 
@@ -61,6 +62,33 @@ def _find_agent(team_cfg, agent_id: str):
             return a
     return None
 
+
+
+
+def _load_step_schema(team_raw: Dict[str, Any], schema_ref: str) -> Optional[Dict[str, Any]]:
+    schemas = team_raw.get("schemas") or {}
+    schema_cfg = schemas.get(schema_ref) or {}
+    if not isinstance(schema_cfg, dict):
+        return None
+
+    if isinstance(schema_cfg.get("schema"), dict):
+        return schema_cfg["schema"]
+
+    path = schema_cfg.get("path")
+    if not path:
+        return None
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        log.warning("unable_to_load_step_schema", extra={"schema_ref": schema_ref, "path": path})
+        return None
+
+
+
+def _build_transform_fallback(raw_text: str, error: Exception) -> Dict[str, Any]:
+    return build_standard_response(raw_text, f"schema transformation failed: {error}")
 
 def _dao_from_optional_team(team: Optional[str], version: Optional[str]) -> DbDao:
     if team and version:
@@ -150,6 +178,19 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
                 raw_text,
             )
             out_json = build_standard_response(raw_text, str(e))
+
+        step_schema = _load_step_schema(team_raw, agent.schema_ref)
+        if step_schema:
+            try:
+                out_json = transform_json_to_schema(out_json, step_schema)
+            except Exception as transform_error:
+                log.exception(
+                    "schema_transform_failed step=%s run_id=%s schema_ref=%s",
+                    step_id,
+                    run_id,
+                    agent.schema_ref,
+                )
+                out_json = _build_transform_fallback(raw_text, transform_error)
 
         artifact_uri = save_artifact(run_id, step_id, out_json)
         dao.put_step(run_id, step_id, "SUCCEEDED", step_inputs, out_json, error=None, artifact_uri=artifact_uri)
