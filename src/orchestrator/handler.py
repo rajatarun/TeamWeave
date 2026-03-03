@@ -12,7 +12,7 @@ from .gemini import gemini_research_brief
 from .profile_context import get_owner_profile_context
 from .models import StepFailed
 from .db import DbDao
-from .json_utils import extract_json_payload
+from .json_utils import build_standard_response, extract_json_payload
 
 log = get_logger("handler")
 
@@ -149,13 +149,7 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
                 run_id,
                 raw_text,
             )
-            out_json = {
-                "_meta": {
-                    "coerced_from_non_json": True,
-                    "reason": str(e),
-                },
-                "content": (raw_text or "").strip(),
-            }
+            out_json = build_standard_response(raw_text, str(e))
 
         artifact_uri = save_artifact(run_id, step_id, out_json)
         dao.put_step(run_id, step_id, "SUCCEEDED", step_inputs, out_json, error=None, artifact_uri=artifact_uri)

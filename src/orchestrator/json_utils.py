@@ -37,3 +37,18 @@ def extract_json_payload(raw_text: str) -> Any:
             continue
 
     raise ValueError("unable to locate valid JSON payload in model response")
+
+
+def build_standard_response(raw_text: str, reason: str) -> Any:
+    content = (raw_text or "").strip()
+    return {
+        "status": "fallback_response",
+        "message": "Model response was not valid JSON. Returning standardized payload.",
+        "data": {
+            "content": content,
+        },
+        "_meta": {
+            "coerced_from_non_json": True,
+            "reason": reason,
+        },
+    }
