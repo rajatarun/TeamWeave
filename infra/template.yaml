@@ -493,7 +493,7 @@ Resources:
     Condition: HasSamAssumeRoleName
     Properties:
       RoleName: !Ref SamAssumeRoleName
-      PolicyName: S3TeamUpload
+      PolicyName: !Sub "${AWS::StackName}-s3-team-upload"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
