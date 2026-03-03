@@ -23,6 +23,14 @@ class ExtractJsonPayloadTests(unittest.TestCase):
         raw = '{\”status\”:\”ok\”,\”count\”:2}'
         self.assertEqual(extract_json_payload(raw), {"status": "ok", "count": 2})
 
+    def test_parses_double_encoded_json_string(self):
+        raw = '"{\\n  \\\"status\\\": \\\"ok\\\", \\\"count\\\": 2}"'
+        self.assertEqual(extract_json_payload(raw), {"status": "ok", "count": 2})
+
+    def test_parses_embedded_double_encoded_json(self):
+        raw = 'prefix {"content":"{\\n  \\\"status\\\": \\\"ok\\\"\\n}"} suffix'
+        self.assertEqual(extract_json_payload(raw), {"content": {"status": "ok"}})
+
     def test_raises_when_no_json(self):
         with self.assertRaises(ValueError):
             extract_json_payload("no payload")
