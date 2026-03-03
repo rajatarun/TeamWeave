@@ -76,7 +76,7 @@ Parameters:
   SamDeployerRoleName:
     Type: String
     Default: ""
-    Description: Optional IAM role name used by CI/CD for SAM deployment. When set, stack creation grants Step Functions deployment permissions to this role.
+    Description: Optional IAM role name used by CI/CD for SAM deployment. When set, stack creation grants Step Functions deployment permissions to this role. The deployer principal must already allow iam:GetRolePolicy on that role.
 
 Conditions:
   CreateConfigBucket: !Equals [!Ref ConfigBucketName, ""]
