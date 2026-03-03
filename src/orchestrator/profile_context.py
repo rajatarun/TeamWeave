@@ -61,7 +61,7 @@ def get_owner_profile_context(
         log.info("owner_profile_context_skipped_missing_collection", extra={"env_key": env_key})
         return ""
 
-    top_k = int(profile_cfg.get("top_k") or 2)
+    top_k = int(profile_cfg.get("top_k") or 1)
     perspective_template = profile_cfg.get(
         "perspective_template",
         "Insights about {owner} relevant for team {team_name} ({team_version}) with focus: {north_star}",
