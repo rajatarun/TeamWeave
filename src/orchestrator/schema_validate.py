@@ -21,6 +21,8 @@ def validate_or_unwrap_output(output: Dict[str, Any], schema: Dict[str, Any]) ->
         if isinstance(output, dict) and len(output) == 1:
             inner = next(iter(output.values()))
             if isinstance(inner, dict):
+                if _looks_like_creative_brief_schema(schema):
+                    inner = _normalize_creative_brief_output(inner)
                 validate_output(inner, schema)
                 return inner
         raise

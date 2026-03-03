@@ -36,6 +36,25 @@ class CreativeBriefSchemaTests(unittest.TestCase):
         self.assertEqual(validated["goal"], payload["objective"])
         self.assertEqual(validated["objective"], payload["objective"])
 
+    def test_maps_objective_to_goal_when_payload_is_wrapped(self):
+        payload = {
+            "creative_brief": {
+                "objective": "Generate qualified inbound leads from LinkedIn",
+                "audience": "Fintech CTOs",
+                "channel": "linkedin",
+                "acceptance_criteria": ["Concrete example included"],
+                "risks": ["Overly broad positioning"],
+                "success_metrics": ["10% engagement rate"],
+            }
+        }
+        validated = validate_or_unwrap_output(payload, self.schema)
+        self.assertEqual(
+            validated["goal"], payload["creative_brief"]["objective"]
+        )
+        self.assertEqual(
+            validated["objective"], payload["creative_brief"]["objective"]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
