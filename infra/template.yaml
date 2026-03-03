@@ -73,6 +73,10 @@ Parameters:
     Type: String
     Default: Generic guardrail for all Tarun's Bedrock agents - content filtering and safety
     Description: Description for the Bedrock Guardrail.
+  SamDeployerRoleName:
+    Type: String
+    Default: ""
+    Description: Optional IAM role name used by CI/CD for SAM deployment. When set, stack creation grants Step Functions deployment permissions to this role.
 
 Conditions:
   CreateConfigBucket: !Equals [!Ref ConfigBucketName, ""]
@@ -83,6 +87,7 @@ Conditions:
     - !Not [!Equals [!Ref VpcId, ""]]
     - !Not [!Equals [!Ref RdsSecurityGroupId, ""]]
     - !Not [!Equals [!Ref LambdaSubnetIds, ""]]
+  HasSamDeployerRoleName: !Not [!Equals [!Ref SamDeployerRoleName, ""]]
 
 Globals:
   Function:
@@ -424,8 +429,45 @@ Resources:
             Path: /team/task/{run_id}
             Method: get
 
+  SamDeployerStateMachinePermissions:
+    Type: AWS::IAM::Policy
+    Condition: HasSamDeployerRoleName
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-sam-deployer-stepfunctions"
+      Roles:
+        - !Ref SamDeployerRoleName
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowStateMachineManagement
+            Effect: Allow
+            Action:
+              - states:CreateStateMachine
+              - states:UpdateStateMachine
+              - states:DeleteStateMachine
+              - states:DescribeStateMachine
+              - states:TagResource
+              - states:UntagResource
+            Resource:
+              - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*"
+          - Sid: AllowStateMachineDiscovery
+            Effect: Allow
+            Action:
+              - states:ListStateMachines
+            Resource: "*"
+          - Sid: AllowGetRolePolicyForCfnDriftChecks
+            Effect: Allow
+            Action:
+              - iam:GetRolePolicy
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-status-role"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-worker-role"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-stepfunctions-role"
+
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
+    DependsOn:
+      - SamDeployerStateMachinePermissions
     Properties:
       # ASSUMPTION: Express workflow is required for low-latency polling and high-throughput invocation.
       StateMachineType: EXPRESS
