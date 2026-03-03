@@ -97,6 +97,22 @@ jobs:
             --region "${AWS_REGION}" \
             --max-items 50 || true
 
+      - name: Resolve config bucket from CloudFormation outputs
+        run: |
+          CONFIG_BUCKET=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --region "${AWS_REGION}" --query "Stacks[0].Outputs[?OutputKey=='ConfigBucket'].OutputValue" --output text)
+
+          if [ -z "$CONFIG_BUCKET" ] || [ "$CONFIG_BUCKET" = "None" ]; then
+            echo "ConfigBucket output not found in stack ${STACK_NAME}" >&2
+            exit 1
+          fi
+
+          echo "CONFIG_BUCKET=$CONFIG_BUCKET" >> "$GITHUB_ENV"
+
+      - name: Provision team config artifacts
+        working-directory: config/examples
+        run: |
+          python provision_team.py --roles roles.json --depts departments.json --bucket "$CONFIG_BUCKET"
+
       - name: Test team task endpoint
         run: |
           curl --connect-timeout 10 --max-time 300 -X POST https://zua5drbgpi.execute-api.us-east-1.amazonaws.com/prod/team/task \
