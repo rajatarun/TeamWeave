@@ -233,6 +233,7 @@ Resources:
                 Resource: "*"
               - Effect: Allow
                 Action:
+                  - states:StartExecution
                   - sfn:StartExecution
                 Resource: !Ref StateMachine
               - Effect: Allow
@@ -292,6 +293,7 @@ Resources:
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
               - Effect: Allow
                 Action:
+                  - states:DescribeExecution
                   - sfn:DescribeExecution
                 Resource: "*"
 
