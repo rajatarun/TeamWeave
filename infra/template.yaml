@@ -466,8 +466,6 @@ Resources:
 
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
-    DependsOn:
-      - SamDeployerStateMachinePermissions
     Properties:
       # ASSUMPTION: Express workflow is required for low-latency polling and high-throughput invocation.
       StateMachineType: EXPRESS
