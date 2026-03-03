@@ -51,6 +51,7 @@ jobs:
       - name: SAM Deploy
         run: |
           cd infra
+          ASSUME_ROLE_NAME="${ASSUME_ROLE_ARN##*/}"
           sam deploy \
             --stack-name "${STACK_NAME}" \
             --region "${AWS_REGION}" \
@@ -61,7 +62,8 @@ jobs:
               "TeamConfigPrefix=${TEAM_CONFIG_PREFIX}" \
               "VectorDbTable=${VECTOR_DB_TABLE}" \
               "GeminiSecretArn=${GEMINI_SECRET_ARN}" \
-              "SamDeployerRoleName=${SAM_DEPLOYER_ROLE_NAME}"
+              "SamDeployerRoleName=${SAM_DEPLOYER_ROLE_NAME}" \
+              "SamAssumeRoleName=${ASSUME_ROLE_NAME}"
 
 
       - name: Validate Bedrock Agents Template
