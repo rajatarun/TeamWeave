@@ -11,6 +11,9 @@ def validate_output(output: Dict[str, Any], schema: Dict[str, Any]) -> None:
 
 def validate_or_unwrap_output(output: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
     """Validate output, unwrapping one-key envelopes when possible."""
+    if _looks_like_creative_brief_schema(schema):
+        output = _normalize_creative_brief_output(output)
+
     try:
         validate_output(output, schema)
         return output
@@ -21,6 +24,21 @@ def validate_or_unwrap_output(output: Dict[str, Any], schema: Dict[str, Any]) ->
                 validate_output(inner, schema)
                 return inner
         raise
+
+
+def _looks_like_creative_brief_schema(schema: Dict[str, Any]) -> bool:
+    return schema.get("title") == "CreativeBriefV1"
+
+
+def _normalize_creative_brief_output(output: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(output, dict):
+        return output
+    if "goal" in output or "objective" not in output:
+        return output
+
+    normalized = dict(output)
+    normalized["goal"] = normalized["objective"]
+    return normalized
 
 
 def format_validation_error(e: ValidationError) -> str:
