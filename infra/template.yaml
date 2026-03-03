@@ -433,12 +433,11 @@ Resources:
             Method: get
 
   SamDeployerStateMachinePermissions:
-    Type: AWS::IAM::Policy
+    Type: AWS::IAM::RolePolicy
     Condition: HasSamDeployerRoleName
     Properties:
+      RoleName: !Ref SamDeployerRoleName
       PolicyName: !Sub "${AWS::StackName}-sam-deployer-stepfunctions"
-      Roles:
-        - !Ref SamDeployerRoleName
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -463,6 +462,7 @@ Resources:
             Action:
               - iam:GetRolePolicy
             Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${SamDeployerRoleName}"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-trigger-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-status-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-worker-role"
