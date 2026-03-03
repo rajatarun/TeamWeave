@@ -220,18 +220,21 @@ Resources:
             RestApiId: !Ref TeamWeaveApi
             Path: /team/task
             Method: post
+            TimeoutInMillis: 300000
         ImproveTasksEvent:
           Type: Api
           Properties:
             RestApiId: !Ref TeamWeaveApi
             Path: /improve/tasks
             Method: get
+            TimeoutInMillis: 300000
         ImproveTaskDoneEvent:
           Type: Api
           Properties:
             RestApiId: !Ref TeamWeaveApi
             Path: /improve/task/done
             Method: post
+            TimeoutInMillis: 300000
       Environment:
         Variables:
           CONFIG_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
