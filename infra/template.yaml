@@ -460,6 +460,8 @@ Resources:
             Action:
               - iam:GetRolePolicy
             Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${SamDeployerRoleName}"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-trigger-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-status-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-worker-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-stepfunctions-role"
