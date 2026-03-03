@@ -4,6 +4,29 @@
     "version": "v3",
     "description": "Canonical role definitions for Personal Brand Management. Each role is invoked once per workflow run to perform exactly one task. primary_task defines what the agent does, what it consumes, and what it must return. All agents operate autonomously — they never ask clarifying questions and always produce their output based on best-guess reasoning from available inputs."
   },
+  "schemas": {
+    "creative_brief_v1": {
+      "path": "config/examples/schemas/creative_brief_v1.json"
+    },
+    "design_pack_v1": {
+      "path": "config/examples/schemas/design_pack_v1.json"
+    },
+    "strategy_pack_v1": {
+      "path": "config/examples/schemas/strategy_pack_v1.json"
+    },
+    "distribution_pack_v1": {
+      "path": "config/examples/schemas/distribution_pack_v1.json"
+    },
+    "draft_pack_v1": {
+      "path": "config/examples/schemas/draft_pack_v1.json"
+    },
+    "approval_v1": {
+      "path": "config/examples/schemas/approval_v1.json"
+    },
+    "seo_pack_v1": {
+      "path": "config/examples/schemas/seo_pack_v1.json"
+    }
+  },
   "roles": [
     {
       "role_id": "PBM-001",
