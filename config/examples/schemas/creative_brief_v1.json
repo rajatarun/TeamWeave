@@ -7,6 +7,9 @@
     "goal": {
       "type": "string"
     },
+    "objective": {
+      "type": "string"
+    },
     "audience": {
       "type": "string"
     },
