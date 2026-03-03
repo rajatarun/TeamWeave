@@ -15,6 +15,10 @@ class ExtractJsonPayloadTests(unittest.TestCase):
         raw = "Result summary: {\"status\":\"ok\",\"count\":2} End."
         self.assertEqual(extract_json_payload(raw), {"status": "ok", "count": 2})
 
+    def test_parses_json_with_escaped_newline_tab_artifacts(self):
+        raw = "{\n\t\"status\":\"ok\",\n\t\"count\":2\n}"
+        self.assertEqual(extract_json_payload(raw), {"status": "ok", "count": 2})
+
     def test_raises_when_no_json(self):
         with self.assertRaises(ValueError):
             extract_json_payload("no payload")
