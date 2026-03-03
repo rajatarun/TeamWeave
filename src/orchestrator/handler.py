@@ -7,7 +7,7 @@ from .logger import get_logger
 from .config_loader import load_team_config
 from .prompt_builder import build_prompt
 from .bedrock_invoke import invoke_agent
-from .schema_validate import validate_output, format_validation_error
+from .schema_validate import validate_or_unwrap_output, format_validation_error
 from .storage import save_artifact
 from .rag import get_rag_context
 from .gemini import gemini_research_brief
@@ -185,7 +185,7 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
 
         if not used_fallback_payload:
             try:
-                validate_output(out_json, schema)
+                out_json = validate_or_unwrap_output(out_json, schema)
             except Exception as e:
                 msg = str(e)
                 try:
