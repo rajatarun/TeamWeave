@@ -61,6 +61,8 @@ Resources:
               - Effect: Allow
                 Action:
                   - bedrock:InvokeModel
+                  - bedrock:InvokeAgent
+                  - bedrock:GetAgentAlias
                   - bedrock:ApplyGuardrail
                 Resource: "*"
 
