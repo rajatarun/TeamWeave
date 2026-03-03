@@ -50,7 +50,8 @@ GitHub Actions example:
           --depts  config/departments.json \
           --bucket ${{ secrets.ARTIFACT_BUCKET }} \
           --region us-east-1 \
-          --bedrock-role-arn ${{ secrets.BEDROCK_ROLE_ARN }}
+          --bedrock-role-arn ${{ secrets.BEDROCK_ROLE_ARN }} \
+          --assume-role-arn  arn:aws:iam::ACCOUNT:role/ROLE_NAME
       env:
         AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -79,6 +80,36 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# IAM role assumption
+# ---------------------------------------------------------------------------
+
+def assume_role(role_arn: str, region: str) -> boto3.Session:
+    """
+    Assume the given IAM role via STS and return a boto3 Session
+    pre-loaded with the temporary credentials.
+
+    All boto3 clients in this script must be created from this session
+    so that every AWS API call is signed with the assumed-role credentials.
+    """
+    log.info(f"Assuming IAM role: {role_arn}")
+    sts = boto3.client("sts", region_name=region)
+    resp = sts.assume_role(
+        RoleArn=role_arn,
+        RoleSessionName="provision_team_session",
+        DurationSeconds=3600,
+    )
+    creds = resp["Credentials"]
+    session = boto3.Session(
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+        region_name=region,
+    )
+    log.info(f"  ✓ Assumed role. Session expires: {creds['Expiration']}")
+    return session
 
 
 # ---------------------------------------------------------------------------
@@ -266,25 +297,19 @@ def validate_team(team: dict, role_index: dict, dept_index: dict) -> list[str]:
                 f"allowed_schemas: {dept.get('allowed_schemas')}"
             )
 
-        # agent id format: [TEAM-ID_]DEPT-XXX_PBM-XXX_<slug>
-        # Strip optional team_id prefix before checking DEPT/ROLE segments
+        # agent id format: [TEAM-ID_]<dept_id>_<role_id>_<slug>
+        # Match dept_id and role_id by their exact values — handles any prefix
+        # (DEPT-, TDEPT-, etc.) without hardcoding the pattern.
         id_parts = agent_id.split("_")
-        # Find where DEPT- segment starts (skip team_id prefix if present)
-        dept_idx = next((i for i, p in enumerate(id_parts) if p.startswith("DEPT-")), None)
-        if dept_idx is None or len(id_parts) < dept_idx + 3:
+        dept_idx = next((i for i, p in enumerate(id_parts) if p == dept_id), None)
+        role_idx = next((i for i, p in enumerate(id_parts) if p == role_id), None)
+        if (dept_idx is None or role_idx is None
+                or role_idx != dept_idx + 1
+                or len(id_parts) < dept_idx + 3):
             errors.append(
-                f"[{agent_id}] agent id must contain DEPT-ID_ROLE-ID_slug segments "
-                f"(optionally prefixed with TEAM-ID_)"
+                f"[{agent_id}] agent id must follow [TEAM-ID_]{dept_id}_{role_id}_slug — "
+                f"dept_id and role_id must appear as consecutive segments"
             )
-        else:
-            if id_parts[dept_idx] != dept_id:
-                errors.append(
-                    f"[{agent_id}] DEPT segment '{id_parts[dept_idx]}' does not match department_id '{dept_id}'"
-                )
-            if id_parts[dept_idx + 1] != role_id:
-                errors.append(
-                    f"[{agent_id}] ROLE segment '{id_parts[dept_idx + 1]}' does not match role_id '{role_id}'"
-                )
 
     return errors
 
@@ -382,8 +407,8 @@ def enrich_goal_templates(
 # Bedrock helpers
 # ---------------------------------------------------------------------------
 
-def get_bedrock_client(region: str):
-    return boto3.client("bedrock-agent", region_name=region)
+def get_bedrock_client(region: str, session: boto3.Session | None = None):
+    return (session or boto3).client("bedrock-agent", region_name=region)
 
 
 def find_existing_agent(client, agent_name: str) -> dict | None:
@@ -494,12 +519,13 @@ def push_to_s3(
     payload: dict,
     region: str,
     version: str,
+    session: boto3.Session | None = None,
 ) -> str:
     """
     Write payload to s3://{bucket}/{prefix}/{team_name}/{version}/team.json.
     Returns the full S3 URI.
     """
-    s3  = boto3.client("s3", region_name=region)
+    s3  = (session or boto3).client("s3", region_name=region)
     key = f"{prefix.rstrip('/')}/{team_name}/{version}/team.json"
     body = json.dumps(payload, indent=2).encode("utf-8")
 
@@ -539,23 +565,26 @@ def parse_args():
     parser.add_argument("--region", default=None,   help="AWS region (or AWS_REGION env var)")
     parser.add_argument("--bedrock-role-arn", default=None, dest="bedrock_role_arn",
                         help="IAM role ARN for Bedrock agents (or BEDROCK_ROLE_ARN env var)")
-    parser.add_argument("--foundation-model", default="anthropic.claude-sonnet-4-20250514-v1:0",
+    parser.add_argument("--foundation-model", default="amazon.nova-micro-v1:0",
                         dest="foundation_model", help="Bedrock foundation model ID")
+    parser.add_argument("--assume-role-arn", default=None, dest="assume_role_arn",
+                        help="IAM role ARN to assume via STS before making AWS calls (or ASSUME_ROLE_ARN env var)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate and enrich only — skip all AWS calls")
     return parser.parse_args()
 
 
 def process_team(
-    team_file:       dict,
-    role_index:      dict,
-    dept_index:      dict,
-    bucket:          str,
-    prefix:          str,
-    region:          str,
+    team_file:        dict,
+    role_index:       dict,
+    dept_index:       dict,
+    bucket:           str,
+    prefix:           str,
+    region:           str,
     bedrock_role_arn: str | None,
     foundation_model: str,
-    dry_run:         bool,
+    dry_run:          bool,
+    aws_session:      boto3.Session | None = None,
 ) -> bool:
     """
     Run the full pipeline for a single team file.
@@ -619,7 +648,7 @@ def process_team(
         return False
 
     log.info("  [3/4] Provisioning Bedrock agents...")
-    bedrock = get_bedrock_client(region)
+    bedrock = (aws_session or boto3).client("bedrock-agent", region_name=region)
 
     for i, agent in enumerate(output_team["agents"]):
         agent_id_slug = agent["id"]
@@ -675,6 +704,7 @@ def process_team(
         payload=output_team,
         region=region,
         version=s3_version,
+        session=aws_session,
     )
     log.info(f"  ✓ {s3_uri}\n")
     return True
@@ -686,6 +716,13 @@ def main():
     bucket           = args.bucket           or os.environ.get("ARTIFACT_BUCKET")
     region           = args.region           or os.environ.get("AWS_REGION", "us-east-1")
     bedrock_role_arn = args.bedrock_role_arn or os.environ.get("BEDROCK_ROLE_ARN")
+    assume_role_arn  = args.assume_role_arn  or os.environ.get("ASSUME_ROLE_ARN")
+
+    # Build the boto3 session — assume role if specified, else use ambient creds
+    if assume_role_arn:
+        aws_session = assume_role(assume_role_arn, region)
+    else:
+        aws_session = boto3.Session(region_name=region)
 
     if not bucket:
         log.error("S3 bucket not set. Use --bucket or ARTIFACT_BUCKET env var.")
@@ -715,6 +752,7 @@ def main():
             bedrock_role_arn=bedrock_role_arn,
             foundation_model=args.foundation_model,
             dry_run=args.dry_run,
+            aws_session=aws_session,
         )
         results[tf["path"].name] = success
 
