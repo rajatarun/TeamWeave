@@ -1,6 +1,6 @@
 import unittest
 
-from src.orchestrator.json_utils import extract_json_payload
+from src.orchestrator.json_utils import build_standard_response, extract_json_payload
 
 
 class ExtractJsonPayloadTests(unittest.TestCase):
@@ -18,6 +18,12 @@ class ExtractJsonPayloadTests(unittest.TestCase):
     def test_raises_when_no_json(self):
         with self.assertRaises(ValueError):
             extract_json_payload("no payload")
+
+    def test_build_standard_response(self):
+        payload = build_standard_response("raw output", "unable to locate valid JSON payload in model response")
+        self.assertEqual(payload["status"], "fallback_response")
+        self.assertEqual(payload["data"]["content"], "raw output")
+        self.assertTrue(payload["_meta"]["coerced_from_non_json"])
 
 
 if __name__ == "__main__":
