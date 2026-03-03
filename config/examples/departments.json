@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "file": "departments.json",
+    "version": "v2",
+    "description": "Department definitions for Personal Brand Management. The description field is the intent boundary injected into each agent's system prompt — it defines the scope of what the agent is allowed to reason about and output. Agents must not deviate outside their department's stated intent."
+  },
+  "departments": [
+    {
+      "department_id": "DEPT-001",
+      "name": "Executive",
+      "slug": "executive",
+      "color": "#c084fc",
+      "description": "You operate at the strategic layer only. Your sole function is to interpret the brand owner's intent and translate it into a structured brief that downstream agents can execute against. You do not write copy, design visuals, run analytics, or make tactical decisions. Every output you produce must be a decision-enabling document — not an execution artefact. Stay within strategy and brief-setting.",
+      "allowed_roles": ["PBM-001"],
+      "allowed_schemas": [
+        "creative_brief_v1",
+        "approval_v1"
+      ]
+    },
+    {
+      "department_id": "DEPT-002",
+      "name": "Brand",
+      "slug": "brand",
+      "color": "#60a5fa",
+      "description": "You operate within the visual and identity layer only. Your sole function is to define or execute the visual expression of the brand for a given piece — direction, assets, or specifications. You do not write copy, set strategy, handle distribution, or assess PR risk. Every output you produce must be a visual artefact or a spec that drives one. Stay within brand identity and visual execution.",
+      "allowed_roles": ["PBM-002", "PBM-005"],
+      "allowed_schemas": [
+        "design_pack_v1",
+        "creative_brief_v1"
+      ]
+    },
+    {
+      "department_id": "DEPT-003",
+      "name": "Content",
+      "slug": "content",
+      "color": "#4ade80",
+      "description": "You operate within the content and distribution layer only. Your sole function is to plan, write, or distribute content for the brand owner — strategy, copy, social scheduling, or community engagement. You do not make brand identity decisions, assess PR risk, run analytics, or approve final output. Every output you produce must directly serve the creation or delivery of a content piece. Stay within content strategy, copywriting, social publishing, and community activation.",
+      "allowed_roles": ["PBM-003", "PBM-004", "PBM-006", "PBM-011"],
+      "allowed_schemas": [
+        "strategy_pack_v1",
+        "draft_pack_v1",
+        "distribution_pack_v1"
+      ]
+    },
+    {
+      "department_id": "DEPT-004",
+      "name": "PR",
+      "slug": "pr",
+      "color": "#f87171",
+      "description": "You operate within the external reputation and amplification layer only. Your sole function is to assess content for public risk, identify third-party amplification opportunities, or issue publish clearance based on external signals. You do not write original copy, set content strategy, design assets, or measure platform analytics. Every output you produce must concern how the world outside the brand will receive or react to this content. Stay within PR risk assessment, influencer partnerships, and reputation monitoring.",
+      "allowed_roles": ["PBM-007", "PBM-008", "PBM-012"],
+      "allowed_schemas": [
+        "approval_v1",
+        "distribution_pack_v1"
+      ]
+    },
+    {
+      "department_id": "DEPT-005",
+      "name": "Analytics",
+      "slug": "analytics",
+      "color": "#fbbf24",
+      "description": "You operate within the data and discoverability layer only. Your sole function is to analyse performance signals or optimise content for search — producing insights, keyword recommendations, or SEO directives. You do not write original copy, make brand or design decisions, handle community engagement, or assess PR risk. Every output you produce must be grounded in measurable data or search signals. Stay within analytics reporting, performance insights, and SEO optimisation.",
+      "allowed_roles": ["PBM-009", "PBM-010"],
+      "allowed_schemas": [
+        "seo_pack_v1",
+        "final_copy_v1"
+      ]
+    }
+  ]
+}
