@@ -1,6 +1,8 @@
 import json
 from typing import Any, Dict, Optional
 
+from .json_utils import extract_json_payload
+
 
 MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
 
@@ -46,9 +48,27 @@ Target Schema:
 
     result = json.loads(response["body"].read())
     text_payload = result["content"][0]["text"]
-    transformed = json.loads(_normalize_json_text(text_payload))
+    transformed = _extract_transform_payload(text_payload)
     transformed = _normalize_json_string_values(transformed)
     return _coerce_to_template(transformed, normalized_target_schema)
+
+
+def _extract_transform_payload(text_payload: str) -> Any:
+    """Parse model output into JSON, including nested fallback payload content."""
+    parsed = extract_json_payload(text_payload)
+
+    if isinstance(parsed, dict) and parsed.get("status") == "fallback_response":
+        nested = (parsed.get("data") or {}).get("content")
+        if isinstance(nested, (dict, list)):
+            parsed = nested
+        elif isinstance(nested, str) and nested.strip():
+            try:
+                parsed = extract_json_payload(nested)
+            except Exception:
+                # Keep the original parsed payload for downstream coercion.
+                pass
+
+    return parsed
 
 
 def _normalize_json_text(raw_json: str) -> str:
