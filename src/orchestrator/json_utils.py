@@ -17,25 +17,60 @@ def _normalize_json_text(raw_text: str) -> str:
     return normalized.strip()
 
 
+def _decode_nested_json_string(value: Any, depth: int = 0) -> Any:
+    """Decode double-encoded JSON strings (common LLM artifact)."""
+    if depth >= 3:
+        return value
+
+    if isinstance(value, dict):
+        return {k: _decode_nested_json_string(v, depth) for k, v in value.items()}
+
+    if isinstance(value, list):
+        return [_decode_nested_json_string(item, depth) for item in value]
+
+    if not isinstance(value, str):
+        return value
+
+    candidate = _normalize_json_text(value)
+    if not candidate:
+        return value
+
+    if (candidate.startswith("{") and candidate.endswith("}")) or (
+        candidate.startswith("[") and candidate.endswith("]")
+    ):
+        try:
+            return _decode_nested_json_string(json.loads(candidate), depth + 1)
+        except Exception:
+            pass
+
+    if (candidate.startswith('"') and candidate.endswith('"')) or (candidate.startswith("'") and candidate.endswith("'")):
+        try:
+            return _decode_nested_json_string(json.loads(candidate), depth + 1)
+        except Exception:
+            pass
+
+    return value
+
+
 def _loads_with_normalization(candidate: str) -> Any:
     """Try parsing candidate text as JSON with normalization and unescape fallbacks."""
     last_error: Exception | None = None
 
     try:
-        return json.loads(candidate)
+        return _decode_nested_json_string(json.loads(candidate))
     except Exception as exc:
         last_error = exc
 
     normalized = _normalize_json_text(candidate)
     try:
-        return json.loads(normalized)
+        return _decode_nested_json_string(json.loads(normalized))
     except Exception as exc:
         last_error = exc
 
     if '\\"' in normalized or "\\”" in normalized or "\\“" in normalized:
         unescaped = normalized.replace('\\"', '"').replace("\\”", '"').replace("\\“", '"')
         try:
-            return json.loads(unescaped)
+            return _decode_nested_json_string(json.loads(unescaped))
         except Exception as exc:
             last_error = exc
 
@@ -79,7 +114,7 @@ def extract_json_payload(raw_text: str) -> Any:
                 normalized_candidate = _normalize_json_text(candidate)
                 parsed, end = decoder.raw_decode(normalized_candidate)
             if isinstance(parsed, (dict, list)):
-                return parsed
+                return _decode_nested_json_string(parsed)
         except Exception:
             continue
 
