@@ -68,7 +68,11 @@ Parameters:
   SamDeployerRoleName:
     Type: String
     Default: ""
-    Description: Optional IAM role name used by CI/CD for SAM deployment. When set, stack creation grants Step Functions deployment permissions to this role. The deployer principal must already allow iam:GetRolePolicy on that role.
+    Description: Optional IAM role name used by CI/CD for SAM deployment. When set, stack creation grants Step Functions deployment permissions to this role.
+  SamAssumeRoleName:
+    Type: String
+    Default: ""
+    Description: Optional IAM role name assumed during `sam deploy` that needs S3 team config upload permissions.
 
 Conditions:
   CreateConfigBucket: !Equals [!Ref ConfigBucketName, ""]
@@ -80,6 +84,7 @@ Conditions:
     - !Not [!Equals [!Ref RdsSecurityGroupId, ""]]
     - !Not [!Equals [!Ref LambdaSubnetIds, ""]]
   HasSamDeployerRoleName: !Not [!Equals [!Ref SamDeployerRoleName, ""]]
+  HasSamAssumeRoleName: !Not [!Equals [!Ref SamAssumeRoleName, ""]]
 
 Globals:
   Function:
@@ -483,11 +488,11 @@ Resources:
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-worker-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-stepfunctions-role"
 
-  SamDeployerS3TeamUploadPermissions:
+  SamAssumeRoleS3TeamUploadPermissions:
     Type: AWS::IAM::RolePolicy
-    Condition: HasSamDeployerRoleName
+    Condition: HasSamAssumeRoleName
     Properties:
-      RoleName: !Ref SamDeployerRoleName
+      RoleName: !Ref SamAssumeRoleName
       PolicyName: S3TeamUpload
       PolicyDocument:
         Version: "2012-10-17"
