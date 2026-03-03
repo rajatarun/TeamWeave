@@ -3,12 +3,20 @@ import time
 from typing import Optional
 
 import boto3
+from botocore.config import Config
 
 from .logger import get_logger
 from .models import StepFailed
 
 log = get_logger("bedrock_invoke")
-brt = boto3.client("bedrock-agent-runtime")
+brt = boto3.client(
+    "bedrock-agent-runtime",
+    config=Config(
+        read_timeout=1800,
+        connect_timeout=60,
+        retries={"max_attempts": 0},
+    ),
+)
 
 
 def invoke_agent(agent_id: str, alias_id: str, session_id: str, input_text: str, max_retries: int = 2) -> str:
