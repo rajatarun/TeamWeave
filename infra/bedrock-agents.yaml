@@ -9,6 +9,16 @@ Parameters:
     Default: amazon.nova-micro-v1:0
     Description: Foundation model ID used by all Bedrock agents.
 
+  AgentServiceRoleArn:
+    Type: String
+    Default: ""
+    Description: Optional existing IAM role ARN for Bedrock agents. If empty, this stack creates and uses its own role.
+
+  SamDeployerRoleName:
+    Type: String
+    Default: teamweave-github-actions-sam-deployer
+    Description: IAM role name used by CI/CD deployer to receive Bedrock agent provisioning permissions.
+
   EnableGuardrails:
     Type: String
     Default: "true"
@@ -40,10 +50,14 @@ Parameters:
 
 Conditions:
   UseGuardrails: !Equals [!Ref EnableGuardrails, "true"]
+  UseProvidedAgentServiceRoleArn: !Not [!Equals [!Ref AgentServiceRoleArn, ""]]
+  CreateBedrockAgentServiceRole: !Equals [!Ref AgentServiceRoleArn, ""]
+  HasSamDeployerRoleName: !Not [!Equals [!Ref SamDeployerRoleName, ""]]
 
 Resources:
   BedrockAgentServiceRole:
     Type: AWS::IAM::Role
+    Condition: CreateBedrockAgentServiceRole
     Properties:
       RoleName: !Sub "${AWS::StackName}-bedrock-agent-service-role"
       AssumeRolePolicyDocument:
@@ -116,7 +130,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-strategist
-      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
+      AgentResourceRoleArn: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team strategist using model ${FoundationModelId}."
       AutoPrepare: true
@@ -157,7 +171,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-writer_linkedin
-      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
+      AgentResourceRoleArn: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team writer_linkedin using model ${FoundationModelId}."
       AutoPrepare: true
@@ -194,7 +208,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-seo
-      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
+      AgentResourceRoleArn: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team seo using model ${FoundationModelId}."
       AutoPrepare: true
@@ -234,7 +248,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-editor
-      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
+      AgentResourceRoleArn: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team editor using model ${FoundationModelId}."
       AutoPrepare: true
@@ -276,7 +290,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-designer
-      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
+      AgentResourceRoleArn: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team designer using model ${FoundationModelId}."
       AutoPrepare: true
@@ -314,7 +328,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-distribution
-      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
+      AgentResourceRoleArn: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team distribution using model ${FoundationModelId}."
       AutoPrepare: true
@@ -352,7 +366,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-director_approve
-      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
+      AgentResourceRoleArn: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team director_approve using model ${FoundationModelId}."
       AutoPrepare: true
@@ -390,7 +404,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_improvement_team-strategist
-      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
+      AgentResourceRoleArn: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_improvement_team strategist using model ${FoundationModelId}."
       AutoPrepare: true
@@ -428,7 +442,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_improvement_team-advisor
-      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
+      AgentResourceRoleArn: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_improvement_team advisor using model ${FoundationModelId}."
       AutoPrepare: true
@@ -569,7 +583,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_visibility_team-director
-      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
+      AgentResourceRoleArn: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_visibility_team director supervisor using model ${FoundationModelId}."
       AutoPrepare: true
@@ -651,7 +665,7 @@ Resources:
     Type: AWS::Bedrock::Agent
     Properties:
       AgentName: tarun_improvement_team-coach
-      AgentResourceRoleArn: !GetAtt BedrockAgentServiceRole.Arn
+      AgentResourceRoleArn: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
       FoundationModel: !Ref FoundationModelId
       Description: !Sub "tarun_improvement_team coach supervisor using model ${FoundationModelId}."
       AutoPrepare: true
@@ -723,10 +737,31 @@ Resources:
         role: coach
         env: prod
 
+  SamDeployerBedrockAgentProvisionPermissions:
+    Type: AWS::IAM::RolePolicy
+    Condition: HasSamDeployerRoleName
+    Properties:
+      RoleName: !Ref SamDeployerRoleName
+      PolicyName: BedrockAgentProvision
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - bedrock:CreateAgent
+              - bedrock:PrepareAgent
+              - bedrock:GetAgent
+              - bedrock:ListAgents
+              - bedrock:CreateAgentAlias
+              - bedrock:ListAgentAliases
+              - bedrock:TagResource
+              - iam:PassRole
+            Resource: "*"
+
 Outputs:
   BedrockAgentServiceRoleArn:
     Description: IAM role ARN assumed by all Bedrock agents in this stack.
-    Value: !GetAtt BedrockAgentServiceRole.Arn
+    Value: !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
 
   SharedGuardrailId:
     Condition: UseGuardrails
