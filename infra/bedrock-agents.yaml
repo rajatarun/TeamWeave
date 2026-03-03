@@ -124,6 +124,7 @@ Resources:
       AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
       Instruction: |
         Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.
         Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
         Keep outputs skimmable and action-oriented.
         Do not reveal confidential/internal JPMorgan details.
@@ -164,6 +165,7 @@ Resources:
       AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
       Instruction: |
         Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.
         Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
         Keep outputs skimmable and action-oriented.
         Do not reveal confidential/internal JPMorgan details.
@@ -200,6 +202,7 @@ Resources:
       AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
       Instruction: |
         Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.
         Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
         Keep outputs skimmable and action-oriented.
         Do not reveal confidential/internal JPMorgan details.
@@ -239,6 +242,7 @@ Resources:
       AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
       Instruction: |
         Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.
         Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
         Keep outputs skimmable and action-oriented.
         Do not reveal confidential/internal JPMorgan details.
@@ -280,6 +284,7 @@ Resources:
       AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
       Instruction: |
         Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.
         Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
         Keep outputs skimmable and action-oriented.
         Do not reveal confidential/internal JPMorgan details.
@@ -317,6 +322,7 @@ Resources:
       AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
       Instruction: |
         Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.
         Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
         Keep outputs skimmable and action-oriented.
         Do not reveal confidential/internal JPMorgan details.
@@ -354,6 +360,7 @@ Resources:
       AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
       Instruction: |
         Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.
         Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
         Keep outputs skimmable and action-oriented.
         Do not reveal confidential/internal JPMorgan details.
@@ -391,6 +398,7 @@ Resources:
       AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
       Instruction: |
         Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.
         Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
         Keep outputs skimmable and action-oriented.
         Do not reveal confidential/internal JPMorgan details.
@@ -428,6 +436,7 @@ Resources:
       AgentCollaboration: !Ref CollaboratorAgentCollaborationMode
       Instruction: |
         Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.
         Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
         Keep outputs skimmable and action-oriented.
         Do not reveal confidential/internal JPMorgan details.
@@ -568,12 +577,13 @@ Resources:
       AgentCollaboration: !Ref VisibilitySupervisorCollaborationMode
       Instruction: |
         Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.
         Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
         Keep outputs skimmable and action-oriented.
         Do not reveal confidential/internal JPMorgan details.
         You are the supervisor router for tarun_visibility_team.
         Your job:
-        1) Clarify the goal and acceptance criteria.
+        1) Infer the goal and acceptance criteria from provided context; do not ask clarifying questions.
         2) Decide which collaborator(s) to invoke and in what order.
         3) Integrate outputs into a final decision-ready package.
         Always begin by invoking strategist, then writer_linkedin, then seo, then editor, then (optional) designer + distribution, then director_approve.
@@ -649,6 +659,7 @@ Resources:
       AgentCollaboration: !Ref ImprovementSupervisorCollaborationMode
       Instruction: |
         Return ONLY valid JSON. No markdown. No prose outside JSON.
+        Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.
         Never fabricate facts, numbers, or citations. If uncertain, mark fields as "NEEDS_SOURCE".
         Keep outputs skimmable and action-oriented.
         Do not reveal confidential/internal JPMorgan details.
