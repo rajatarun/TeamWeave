@@ -85,6 +85,26 @@ class StructuredTransformTests(unittest.TestCase):
 
         self.assertEqual(transformed, {"summary": "Done"})
 
+    def test_transform_extracts_json_from_text_wrapper(self):
+        input_json = {"name": "John"}
+        target_schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+        fake_client = _FakeClient('Here is the transformed result: {"summary":"Done"}')
+
+        transformed = transform_json_to_schema(input_json, target_schema, client=fake_client)
+
+        self.assertEqual(transformed, {"summary": "Done"})
+
+    def test_transform_extracts_nested_json_from_fallback_payload(self):
+        input_json = {"name": "John"}
+        target_schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+        fake_client = _FakeClient(
+            '{"status":"fallback_response","data":{"content":"{\\n  \\\"summary\\\": \\\"Done\\\"\\n}"},"_meta":{"coerced_from_non_json":true}}'
+        )
+
+        transformed = transform_json_to_schema(input_json, target_schema, client=fake_client)
+
+        self.assertEqual(transformed, {"summary": "Done"})
+
     def test_normalize_target_schema(self):
         self.assertEqual(
             normalize_target_schema({"type": "object", "properties": {"name": {"type": "string"}}}),
