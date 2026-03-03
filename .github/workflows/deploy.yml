@@ -79,7 +79,7 @@ jobs:
             --parameter-overrides \
               "FoundationModelId=${FOUNDATION_MODEL_ID}" \
               "AgentServiceRoleArn=${AGENT_SERVICE_ROLE_ARN}" \
-              "EnableGuardrails=true"
+              "EnableGuardrails=false"
 
       - name: Dump CloudFormation events on failure
         if: failure()
