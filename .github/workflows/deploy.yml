@@ -19,6 +19,7 @@ env:
   VECTOR_DB_TABLE: resume-rag-db
   GEMINI_SECRET_ARN: arn:aws:secretsmanager:us-east-1:239571291755:secret:gemini/api_key-SKx2NV
   SAM_DEPLOYER_ROLE_NAME: teamweave-github-actions-sam-deployer
+  ASSUME_ROLE_ARN: arn:aws:iam::239571291755:role/teamweave-github-actions-sam-deployer
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -29,7 +30,7 @@ jobs:
       - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::239571291755:role/teamweave-github-actions-sam-deployer
+          role-to-assume: ${{ env.ASSUME_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup SAM
@@ -83,6 +84,17 @@ jobs:
               "AgentServiceRoleArn=${AGENT_SERVICE_ROLE_ARN}" \
               "EnableGuardrails=false"
 
+      - name: Resolve Bedrock role from CloudFormation outputs
+        run: |
+          BEDROCK_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name "${BEDROCK_AGENTS_STACK_NAME}" --region "${AWS_REGION}" --query "Stacks[0].Outputs[?OutputKey=='BedrockAgentServiceRoleArn'].OutputValue" --output text)
+
+          if [ -z "$BEDROCK_ROLE_ARN" ] || [ "$BEDROCK_ROLE_ARN" = "None" ]; then
+            echo "BedrockAgentServiceRoleArn output not found in stack ${BEDROCK_AGENTS_STACK_NAME}" >&2
+            exit 1
+          fi
+
+          echo "BEDROCK_ROLE_ARN=$BEDROCK_ROLE_ARN" >> "$GITHUB_ENV"
+
       - name: Dump CloudFormation events on failure
         if: failure()
         run: |
@@ -111,7 +123,11 @@ jobs:
       - name: Provision team config artifacts
         working-directory: config/examples
         run: |
-          python provision_team.py --roles roles.json --depts departments.json --bucket "$CONFIG_BUCKET"
+          python provision_team.py \
+            --roles roles.json \
+            --depts departments.json \
+            --bucket "$CONFIG_BUCKET" \
+            --bedrock-role-arn "$BEDROCK_ROLE_ARN"
 
       - name: Test team task endpoint
         run: |
