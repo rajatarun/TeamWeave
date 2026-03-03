@@ -16,17 +16,30 @@
           "post": {
             "type": "string"
           },
+          "linkedin_post": {
+            "type": "string"
+          },
           "hashtags": {
             "type": "array",
             "items": {
               "type": "string"
             }
+          },
+          "char_count_estimate": {
+            "type": "integer"
+          },
+          "cta_question": {
+            "type": "string"
           }
         },
-        "required": [
-          "variant",
-          "post",
-          "hashtags"
+        "required": ["variant", "hashtags"],
+        "anyOf": [
+          {
+            "required": ["post"]
+          },
+          {
+            "required": ["linkedin_post"]
+          }
         ]
       }
     }
