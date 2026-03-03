@@ -1,6 +1,7 @@
 {
   "team": {
     "name": "tarun_visibility_team",
+    "team_id": "TVT",
     "version": "v1",
     "owner": "Tarun Raja"
   },
@@ -32,97 +33,97 @@
   },
   "agents": [
     {
-      "id": "DEPT-001_PBM-001_director",
+      "id": "TVT_DEPT-001_PBM-001_director",
       "name": "Content Marketing Director",
       "role_id": "PBM-001",
       "department_id": "DEPT-001",
       "bedrock": {
-        "agentId": "9QV7CTD9CD",
-        "aliasId": "SEUN4TSHUQ"
+        "agentId": "",
+        "aliasId": ""
       },
       "goal_template": "Define a measurable goal to increase Tarun Raja's social visibility. Produce a Creative Brief with acceptance criteria and risks.",
       "schema_ref": "creative_brief_v1"
     },
     {
-      "id": "DEPT-003_PBM-003_strategist",
+      "id": "TVT_DEPT-003_PBM-003_strategist",
       "name": "Content Strategist",
       "role_id": "PBM-003",
       "department_id": "DEPT-003",
       "bedrock": {
-        "agentId": "AFZWOHRKED",
-        "aliasId": "W43CPIZLP4"
+        "agentId": "",
+        "aliasId": ""
       },
       "goal_template": "Derive strategy from Director brief. Generate hooks, narrative angle, and outline optimized for reach.",
       "schema_ref": "strategy_pack_v1"
     },
     {
-      "id": "DEPT-003_PBM-006_writer_linkedin",
+      "id": "TVT_DEPT-003_PBM-006_writer_linkedin",
       "name": "Content Writer - LinkedIn",
       "role_id": "PBM-006",
       "department_id": "DEPT-003",
       "bedrock": {
-        "agentId": "GCFCYD7FPO",
-        "aliasId": "YUVNDS1MPB"
+        "agentId": "",
+        "aliasId": ""
       },
       "goal_template": "Write 2-3 LinkedIn draft variants aligned to Director acceptance criteria and Strategist outline.",
       "schema_ref": "draft_pack_v1"
     },
     {
-      "id": "DEPT-005_PBM-010_seo",
+      "id": "TVT_DEPT-005_PBM-010_seo",
       "name": "SEO Specialist",
       "role_id": "PBM-010",
       "department_id": "DEPT-005",
       "bedrock": {
-        "agentId": "WD28PRDAXY",
-        "aliasId": "UFD1VBX5FH"
+        "agentId": "",
+        "aliasId": ""
       },
       "goal_template": "Provide discoverability improvements, keyword set, and title/meta suggestions without stuffing.",
       "schema_ref": "seo_pack_v1"
     },
     {
-      "id": "DEPT-003_PBM-003_editor",
+      "id": "TVT_DEPT-003_PBM-003_editor",
       "name": "Managing Editor",
       "role_id": "PBM-003",
       "department_id": "DEPT-003",
       "bedrock": {
-        "agentId": "YOTXN6WCUZ",
-        "aliasId": "ICON4XIKNC"
+        "agentId": "",
+        "aliasId": ""
       },
       "goal_template": "Polish to final copy: high-signal, voice-consistent, and constraint-compliant.",
       "schema_ref": "final_copy_v1"
     },
     {
-      "id": "DEPT-002_PBM-005_designer",
+      "id": "TVT_DEPT-002_PBM-005_designer",
       "name": "Designer",
       "role_id": "PBM-005",
       "department_id": "DEPT-002",
       "bedrock": {
-        "agentId": "61NNMVPUWW",
-        "aliasId": "XBVTOUJP5C"
+        "agentId": "",
+        "aliasId": ""
       },
       "goal_template": "Create carousel plan + hero image direction + image prompts aligned to final copy.",
       "schema_ref": "design_pack_v1"
     },
     {
-      "id": "DEPT-003_PBM-004_distribution",
+      "id": "TVT_DEPT-003_PBM-004_distribution",
       "name": "Social Media / Distribution Manager",
       "role_id": "PBM-004",
       "department_id": "DEPT-003",
       "bedrock": {
-        "agentId": "OLQS6YSIL1",
-        "aliasId": "9ZKRIHTFOW"
+        "agentId": "",
+        "aliasId": ""
       },
       "goal_template": "Create channel variants + posting checklist optimized for engagement and reach.",
       "schema_ref": "distribution_pack_v1"
     },
     {
-      "id": "DEPT-001_PBM-001_director_approve",
+      "id": "TVT_DEPT-001_PBM-001_director_approve",
       "name": "Director Approval",
       "role_id": "PBM-001",
       "department_id": "DEPT-001",
       "bedrock": {
-        "agentId": "YKTSAES5IK",
-        "aliasId": "JPY7XIE4SU"
+        "agentId": "",
+        "aliasId": ""
       },
       "goal_template": "Approve or request revisions. Output APPROVED boolean and revision_notes if not approved.",
       "schema_ref": "approval_v1"
@@ -130,62 +131,62 @@
   ],
   "workflow": [
     {
-      "step": "DEPT-001_PBM-001_director",
+      "step": "TVT_DEPT-001_PBM-001_director",
       "inputs": [
         "request",
         "rag_context"
       ]
     },
     {
-      "step": "DEPT-003_PBM-003_strategist",
+      "step": "TVT_DEPT-003_PBM-003_strategist",
       "inputs": [
-        "DEPT-001_PBM-001_director.output",
+        "TVT_DEPT-001_PBM-001_director.output",
         "rag_context"
       ]
     },
     {
-      "step": "DEPT-003_PBM-006_writer_linkedin",
+      "step": "TVT_DEPT-003_PBM-006_writer_linkedin",
       "inputs": [
-        "DEPT-001_PBM-001_director.output",
-        "DEPT-003_PBM-003_strategist.output",
+        "TVT_DEPT-001_PBM-001_director.output",
+        "TVT_DEPT-003_PBM-003_strategist.output",
         "rag_context"
       ]
     },
     {
-      "step": "DEPT-005_PBM-010_seo",
+      "step": "TVT_DEPT-005_PBM-010_seo",
       "inputs": [
-        "DEPT-003_PBM-006_writer_linkedin.output",
-        "DEPT-003_PBM-003_strategist.output"
+        "TVT_DEPT-003_PBM-006_writer_linkedin.output",
+        "TVT_DEPT-003_PBM-003_strategist.output"
       ]
     },
     {
-      "step": "DEPT-003_PBM-003_editor",
+      "step": "TVT_DEPT-003_PBM-003_editor",
       "inputs": [
-        "DEPT-005_PBM-010_seo.output",
-        "DEPT-003_PBM-006_writer_linkedin.output",
-        "DEPT-001_PBM-001_director.output",
+        "TVT_DEPT-005_PBM-010_seo.output",
+        "TVT_DEPT-003_PBM-006_writer_linkedin.output",
+        "TVT_DEPT-001_PBM-001_director.output",
         "rag_context"
       ]
     },
     {
-      "step": "DEPT-002_PBM-005_designer",
+      "step": "TVT_DEPT-002_PBM-005_designer",
       "inputs": [
-        "DEPT-003_PBM-003_editor.output"
+        "TVT_DEPT-003_PBM-003_editor.output"
       ]
     },
     {
-      "step": "DEPT-003_PBM-004_distribution",
+      "step": "TVT_DEPT-003_PBM-004_distribution",
       "inputs": [
-        "DEPT-003_PBM-003_editor.output",
-        "DEPT-001_PBM-001_director.output"
+        "TVT_DEPT-003_PBM-003_editor.output",
+        "TVT_DEPT-001_PBM-001_director.output"
       ]
     },
     {
-      "step": "DEPT-001_PBM-001_director_approve",
+      "step": "TVT_DEPT-001_PBM-001_director_approve",
       "inputs": [
-        "DEPT-003_PBM-003_editor.output",
-        "DEPT-003_PBM-004_distribution.output",
-        "DEPT-001_PBM-001_director.output"
+        "TVT_DEPT-003_PBM-003_editor.output",
+        "TVT_DEPT-003_PBM-004_distribution.output",
+        "TVT_DEPT-001_PBM-001_director.output"
       ]
     }
   ],

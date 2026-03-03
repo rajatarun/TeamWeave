@@ -1,0 +1,107 @@
+{
+  "team": {
+    "name": "tarun_improvement_team",
+    "team_id": "TIT",
+    "version": "v1",
+    "owner": "Tarun Raja"
+  },
+  "globals": {
+    "north_star": "Accelerate Tarun Raja's personal technical growth with daily deliberate practice and reflection, aligned to a target date.",
+    "default_channel": "other",
+    "hard_constraints": [
+      "Make tasks specific, achievable, and measurable.",
+      "Avoid repeating the same topic and level that was marked DONE previously.",
+      "Prefer primary sources and official docs when possible."
+    ],
+    "features": {
+      "gemini_research": true,
+      "explicit_rag": false
+    },
+    "rag": {
+      "mode": "history",
+      "rag_env_key": "DDB_TABLE",
+      "top_k": 1
+    },
+    "artifact_store": {
+      "artifact_bucket_env": "ARTIFACT_BUCKET",
+      "dynamo_table_env": "DDB_TABLE"
+    },
+    "revision": {
+      "enabled": false,
+      "default_jump_to_step": "TIT_TDEPT-001_TIT-001_coach"
+    }
+  },
+  "agents": [
+    {
+      "id": "TIT_TDEPT-001_TIT-001_coach",
+      "name": "Technical Coach",
+      "role_id": "TIT-001",
+      "department_id": "TDEPT-001",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": ""
+      },
+      "goal_template": "Understand Tarun's current expertise and target date. Produce a Learning Map: skill gaps, milestones, and success rubric.",
+      "schema_ref": "learning_map_v1"
+    },
+    {
+      "id": "TIT_TDEPT-001_TIT-002_strategist",
+      "name": "Learning Strategist",
+      "role_id": "TIT-002",
+      "department_id": "TDEPT-001",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": ""
+      },
+      "goal_template": "Turn Learning Map into a calendar: weekly themes, daily cadence, and checkpoints. Keep it flexible.",
+      "schema_ref": "learning_plan_v1"
+    },
+    {
+      "id": "TIT_TDEPT-002_TIT-003_advisor",
+      "name": "Daily Advisor",
+      "role_id": "TIT-003",
+      "department_id": "TDEPT-002",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": ""
+      },
+      "goal_template": "Generate today's tasks: read, practice, reflect. Use COMPLETED_TASKS_HISTORY to avoid repeating same topic/level. Provide best links and a reflection prompt.",
+      "schema_ref": "daily_tasks_v1"
+    }
+  ],
+  "workflow": [
+    {
+      "step": "TIT_TDEPT-001_TIT-001_coach",
+      "inputs": [
+        "request",
+        "rag_context"
+      ]
+    },
+    {
+      "step": "TIT_TDEPT-001_TIT-002_strategist",
+      "inputs": [
+        "TIT_TDEPT-001_TIT-001_coach.output",
+        "rag_context"
+      ]
+    },
+    {
+      "step": "TIT_TDEPT-002_TIT-003_advisor",
+      "inputs": [
+        "TIT_TDEPT-001_TIT-002_strategist.output",
+        "TIT_TDEPT-001_TIT-001_coach.output",
+        "rag_context"
+      ]
+    }
+  ],
+  "schemas": {
+    "learning_map_v1": {
+      "path": "config/examples/schemas/learning_map_v1.json"
+    },
+    "learning_plan_v1": {
+      "path": "config/examples/schemas/learning_plan_v1.json"
+    },
+    "daily_tasks_v1": {
+      "path": "config/examples/schemas/daily_tasks_v1.json"
+    }
+  }
+}

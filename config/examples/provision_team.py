@@ -61,6 +61,7 @@ import copy
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -123,6 +124,32 @@ def needs_provisioning(data: dict) -> tuple[bool, int, int]:
     return missing > 0, total, missing
 
 
+def generate_team_id(team_name: str) -> str:
+    """
+    Derive a short team_id from team_name by taking the first letter of
+    each word (split on underscores or spaces), uppercased.
+
+    Examples:
+        tarun_visibility_team  → TVT
+        pr_only_team           → POT
+        content_growth         → CG
+    """
+    words = re.split(r'[_\s]+', team_name.strip())
+    return "".join(w[0].upper() for w in words if w)
+
+
+def resolve_team_id(team_block: dict) -> str:
+    """
+    Return the team_id from the team block.
+    If team_id is explicitly set in the file, use it.
+    Otherwise generate it from team.name and return it.
+    """
+    explicit = team_block.get("team_id", "").strip()
+    if explicit:
+        return explicit
+    return generate_team_id(team_block.get("name", ""))
+
+
 def scan_team_files(scan_dir: str) -> list[dict]:
     """
     Scan scan_dir for all files matching team*.json.
@@ -154,6 +181,7 @@ def scan_team_files(scan_dir: str) -> list[dict]:
             name       = team_block.get("name",    "").strip()
             version    = team_block.get("version", "").strip()
             owner      = team_block.get("owner",   "unknown")
+            team_id    = resolve_team_id(team_block)
 
             if not name:
                 log.warning(f"  SKIP {path.name} — missing team.name")
@@ -175,6 +203,7 @@ def scan_team_files(scan_dir: str) -> list[dict]:
             needs_work.append({
                 "path":               path,
                 "name":               name,
+                "team_id":            team_id,
                 "version":            version,
                 "owner":              owner,
                 "total_agents":       total,
@@ -182,7 +211,7 @@ def scan_team_files(scan_dir: str) -> list[dict]:
             })
             log.info(
                 f"  QUEUE {path.name:<34} "
-                f"name={name}  version={version}  "
+                f"name={name}  team_id={team_id}  version={version}  "
                 f"needs_ids={missing}/{total}"
             )
 
@@ -237,21 +266,24 @@ def validate_team(team: dict, role_index: dict, dept_index: dict) -> list[str]:
                 f"allowed_schemas: {dept.get('allowed_schemas')}"
             )
 
-        # agent id format: DEPT-XXX_PBM-XXX_<slug>
-        parts = agent_id.split("_")
-        if len(parts) < 3:
+        # agent id format: [TEAM-ID_]DEPT-XXX_PBM-XXX_<slug>
+        # Strip optional team_id prefix before checking DEPT/ROLE segments
+        id_parts = agent_id.split("_")
+        # Find where DEPT- segment starts (skip team_id prefix if present)
+        dept_idx = next((i for i, p in enumerate(id_parts) if p.startswith("DEPT-")), None)
+        if dept_idx is None or len(id_parts) < dept_idx + 3:
             errors.append(
-                f"[{agent_id}] agent id must follow format DEPT-ID_ROLE-ID_team-role-slug "
-                f"(at least 3 underscore-separated parts)"
+                f"[{agent_id}] agent id must contain DEPT-ID_ROLE-ID_slug segments "
+                f"(optionally prefixed with TEAM-ID_)"
             )
         else:
-            if parts[0] != dept_id:
+            if id_parts[dept_idx] != dept_id:
                 errors.append(
-                    f"[{agent_id}] id prefix '{parts[0]}' does not match department_id '{dept_id}'"
+                    f"[{agent_id}] DEPT segment '{id_parts[dept_idx]}' does not match department_id '{dept_id}'"
                 )
-            if parts[1] != role_id:
+            if id_parts[dept_idx + 1] != role_id:
                 errors.append(
-                    f"[{agent_id}] id second segment '{parts[1]}' does not match role_id '{role_id}'"
+                    f"[{agent_id}] ROLE segment '{id_parts[dept_idx + 1]}' does not match role_id '{role_id}'"
                 )
 
     return errors
@@ -310,23 +342,32 @@ def enrich_goal_templates(
     output_team: dict,
     role_index: dict,
     dept_index: dict,
-) -> dict:
+) -> int:
     """
-    Mutate output_team in-place: replace each agent's goal_template with the
-    enriched version built from dept description + role primary_task.
-
-    Also stores the original goal_template under original_goal_template so
-    the source of truth is never lost.
+    Mutate output_team in-place:
+      1. Stamp team_id onto each agent's id if not already prefixed.
+         Format becomes: {team_id}_{DEPT-ID}_{ROLE-ID}_{slug}
+      2. Replace goal_template with the enriched version built from
+         dept description + role primary_task + original goal_template.
+      3. Preserve the original goal_template under original_goal_template.
 
     Returns the number of agents enriched.
     """
+    team_id = resolve_team_id(output_team.get("team", {}))
     enriched_count = 0
+
     for agent in output_team["agents"]:
         role = role_index[agent["role_id"]]
         dept = dept_index[agent["department_id"]]
 
+        # ── Stamp team_id into agent id ───────────────────────────────
+        current_id = agent.get("id", "")
+        if not current_id.startswith(f"{team_id}_"):
+            agent["id"] = f"{team_id}_{current_id}"
+
+        # ── Enrich goal_template ──────────────────────────────────────
         original = agent.get("goal_template", "")
-        agent["original_goal_template"] = original          # preserve original
+        agent["original_goal_template"] = original
         agent["goal_template"] = build_goal_template(
             original_goal_template=original,
             dept=dept,
@@ -526,6 +567,7 @@ def process_team(
 
     log.info(f"{'═'*60}")
     log.info(f"  TEAM    : {team_name}")
+    log.info(f"  TEAM_ID : {team_file.get('team_id', resolve_team_id({'name': team_name}))}")
     log.info(f"  FILE    : {team_path.name}")
     log.info(f"  VERSION : {s3_version}")
     log.info(f"  NEEDS   : {team_file.get('agents_needing_ids', '?')}/{team_file.get('total_agents', '?')} agent(s) missing Bedrock IDs")
