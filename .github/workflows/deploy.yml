@@ -78,7 +78,8 @@ jobs:
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               "FoundationModelId=${FOUNDATION_MODEL_ID}" \
-              "AgentServiceRoleArn=${AGENT_SERVICE_ROLE_ARN}"
+              "AgentServiceRoleArn=${AGENT_SERVICE_ROLE_ARN}" \
+              "EnableGuardrails=true"
 
       - name: Dump CloudFormation events on failure
         if: failure()
