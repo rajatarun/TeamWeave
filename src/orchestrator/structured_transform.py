@@ -2,7 +2,7 @@ import json
 from typing import Any, Dict, Optional
 
 
-MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
 
 
 def transform_json_to_schema(
@@ -46,8 +46,29 @@ Target Schema:
 
     result = json.loads(response["body"].read())
     text_payload = result["content"][0]["text"]
-    transformed = json.loads(text_payload)
+    transformed = json.loads(_normalize_json_text(text_payload))
+    transformed = _normalize_json_string_values(transformed)
     return _coerce_to_template(transformed, normalized_target_schema)
+
+
+def _normalize_json_text(raw_json: str) -> str:
+    """Normalize raw JSON text before parsing."""
+    normalized = (raw_json or "").strip()
+    return normalized
+
+
+def _normalize_json_string_values(value: Any) -> Any:
+    """Normalize string values by removing newline/tab spacing artifacts."""
+    if isinstance(value, dict):
+        return {key: _normalize_json_string_values(item) for key, item in value.items()}
+
+    if isinstance(value, list):
+        return [_normalize_json_string_values(item) for item in value]
+
+    if isinstance(value, str):
+        return value.replace("\n", " ").replace("\t", " ").strip()
+
+    return value
 
 
 def normalize_target_schema(target_schema: Dict[str, Any]) -> Dict[str, Any]:
