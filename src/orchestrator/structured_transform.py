@@ -54,6 +54,12 @@ Target Schema:
 def _normalize_json_text(raw_json: str) -> str:
     """Normalize raw JSON text before parsing."""
     normalized = (raw_json or "").strip()
+    normalized = normalized.replace("```json", "").replace("```JSON", "").replace("```", "")
+    normalized = normalized.replace("\\n", " ").replace("\\t", " ")
+    normalized = normalized.replace("\n", " ").replace("\t", " ")
+    normalized = normalized.replace('\\"', '"')
+    normalized = normalized.replace("\\”", '"').replace("\\“", '"')
+    normalized = normalized.replace("”", '"').replace("“", '"')
     return normalized
 
 
