@@ -9,6 +9,14 @@ Parameters:
     Default: amazon.nova-micro-v1:0
     Description: Foundation model ID used by all Bedrock agents.
 
+  EnableGuardrails:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Whether to apply shared Bedrock guardrails to agents.
+
   CollaboratorAgentCollaborationMode:
     Type: String
     Default: DISABLED
@@ -29,6 +37,9 @@ Parameters:
     AllowedValues:
       - SUPERVISOR_ROUTER
     Description: Collaboration mode for tarun_improvement_team coach supervisor.
+
+Conditions:
+  UseGuardrails: !Equals [!Ref EnableGuardrails, "true"]
 
 Resources:
   BedrockAgentServiceRole:
@@ -54,6 +65,7 @@ Resources:
                 Resource: "*"
 
   SharedGuardrail:
+    Condition: UseGuardrails
     Type: AWS::Bedrock::Guardrail
     Properties:
       Name: tarun-shared-guardrail
@@ -92,6 +104,7 @@ Resources:
           - Text: credential theft
 
   SharedGuardrailVersion:
+    Condition: UseGuardrails
     Type: AWS::Bedrock::GuardrailVersion
     Properties:
       GuardrailIdentifier: !Ref SharedGuardrail
@@ -124,9 +137,11 @@ Resources:
             "risks": ["string"]
           }
         }
-      GuardrailConfiguration:
-        GuardrailIdentifier: !Ref SharedGuardrail
-        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      GuardrailConfiguration: !If
+        - UseGuardrails
+        - GuardrailIdentifier: !Ref SharedGuardrail
+          GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+        - !Ref AWS::NoValue
       Tags:
         team: tarun_visibility_team
         role: strategist
@@ -158,9 +173,11 @@ Resources:
           ]
         }
         Character target per draft: 1200-1800 characters (best effort).
-      GuardrailConfiguration:
-        GuardrailIdentifier: !Ref SharedGuardrail
-        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      GuardrailConfiguration: !If
+        - UseGuardrails
+        - GuardrailIdentifier: !Ref SharedGuardrail
+          GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+        - !Ref AWS::NoValue
       Tags:
         team: tarun_visibility_team
         role: writer_linkedin
@@ -195,9 +212,11 @@ Resources:
             "improvements":["string"]
           }
         }
-      GuardrailConfiguration:
-        GuardrailIdentifier: !Ref SharedGuardrail
-        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      GuardrailConfiguration: !If
+        - UseGuardrails
+        - GuardrailIdentifier: !Ref SharedGuardrail
+          GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+        - !Ref AWS::NoValue
       Tags:
         team: tarun_visibility_team
         role: seo
@@ -234,9 +253,11 @@ Resources:
             }
           }
         }
-      GuardrailConfiguration:
-        GuardrailIdentifier: !Ref SharedGuardrail
-        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      GuardrailConfiguration: !If
+        - UseGuardrails
+        - GuardrailIdentifier: !Ref SharedGuardrail
+          GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+        - !Ref AWS::NoValue
       Tags:
         team: tarun_visibility_team
         role: editor
@@ -269,9 +290,11 @@ Resources:
             "image_prompts":["string"]
           }
         }
-      GuardrailConfiguration:
-        GuardrailIdentifier: !Ref SharedGuardrail
-        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      GuardrailConfiguration: !If
+        - UseGuardrails
+        - GuardrailIdentifier: !Ref SharedGuardrail
+          GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+        - !Ref AWS::NoValue
       Tags:
         team: tarun_visibility_team
         role: designer
@@ -304,9 +327,11 @@ Resources:
             "timing_suggestions":["string"]
           }
         }
-      GuardrailConfiguration:
-        GuardrailIdentifier: !Ref SharedGuardrail
-        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      GuardrailConfiguration: !If
+        - UseGuardrails
+        - GuardrailIdentifier: !Ref SharedGuardrail
+          GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+        - !Ref AWS::NoValue
       Tags:
         team: tarun_visibility_team
         role: distribution
@@ -339,9 +364,11 @@ Resources:
             "send_back_to": "strategist|writer_linkedin|seo|editor|designer|distribution"
           }
         }
-      GuardrailConfiguration:
-        GuardrailIdentifier: !Ref SharedGuardrail
-        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      GuardrailConfiguration: !If
+        - UseGuardrails
+        - GuardrailIdentifier: !Ref SharedGuardrail
+          GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+        - !Ref AWS::NoValue
       Tags:
         team: tarun_visibility_team
         role: director_approve
@@ -374,9 +401,11 @@ Resources:
             "topics":[{"topic":"string","why":"string","difficulty":"beginner|intermediate|advanced"}]
           }
         }
-      GuardrailConfiguration:
-        GuardrailIdentifier: !Ref SharedGuardrail
-        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      GuardrailConfiguration: !If
+        - UseGuardrails
+        - GuardrailIdentifier: !Ref SharedGuardrail
+          GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+        - !Ref AWS::NoValue
       Tags:
         team: tarun_improvement_team
         role: strategist
@@ -413,9 +442,11 @@ Resources:
             "avoid_topics":["string"]
           }
         }
-      GuardrailConfiguration:
-        GuardrailIdentifier: !Ref SharedGuardrail
-        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      GuardrailConfiguration: !If
+        - UseGuardrails
+        - GuardrailIdentifier: !Ref SharedGuardrail
+          GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+        - !Ref AWS::NoValue
       Tags:
         team: tarun_improvement_team
         role: advisor
@@ -591,9 +622,11 @@ Resources:
             AliasArn: !GetAtt VisibilityDirectorApproveAlias.AgentAliasArn
           RelayConversationHistory: TO_COLLABORATOR
           CollaborationInstruction: Approve or request revisions; provide revision notes + send_back_to. JSON only.
-      GuardrailConfiguration:
-        GuardrailIdentifier: !Ref SharedGuardrail
-        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      GuardrailConfiguration: !If
+        - UseGuardrails
+        - GuardrailIdentifier: !Ref SharedGuardrail
+          GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+        - !Ref AWS::NoValue
       Tags:
         team: tarun_visibility_team
         role: director
@@ -642,9 +675,11 @@ Resources:
             AliasArn: !GetAtt ImprovementAdvisorAlias.AgentAliasArn
           RelayConversationHistory: TO_COLLABORATOR
           CollaborationInstruction: Generate today's daily_packet from completed_topics; avoid repetition. JSON only.
-      GuardrailConfiguration:
-        GuardrailIdentifier: !Ref SharedGuardrail
-        GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+      GuardrailConfiguration: !If
+        - UseGuardrails
+        - GuardrailIdentifier: !Ref SharedGuardrail
+          GuardrailVersion: !GetAtt SharedGuardrailVersion.Version
+        - !Ref AWS::NoValue
       Tags:
         team: tarun_improvement_team
         role: coach
@@ -681,10 +716,12 @@ Outputs:
     Value: !GetAtt BedrockAgentServiceRole.Arn
 
   SharedGuardrailId:
+    Condition: UseGuardrails
     Description: Shared guardrail identifier.
     Value: !Ref SharedGuardrail
 
   SharedGuardrailVersion:
+    Condition: UseGuardrails
     Description: Shared guardrail version.
     Value: !GetAtt SharedGuardrailVersion.Version
 
