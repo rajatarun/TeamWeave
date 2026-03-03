@@ -159,39 +159,45 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
 
         raw_text = invoke_agent(agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt)
 
+        used_fallback_payload = False
         try:
             out_json = extract_json_payload(raw_text)
         except Exception as e:
-            log.error(
-                "json_parse_failed_full_response step=%s run_id=%s raw_response=%s",
+            log.warning(
+                "json_parse_failed_coercing_to_payload step=%s run_id=%s raw_response=%s",
                 step_id,
                 run_id,
                 raw_text,
             )
-            artifact_uri = save_artifact(run_id, step_id, {"raw_output": raw_text})
-            dao.put_step(run_id, step_id, "FAILED", step_inputs, None, error=f"JSON parse failed: {e}", artifact_uri=artifact_uri)
-            dao.put_run_meta(run_id, "FAILED", {"team": team, "version": version, "owner": owner, "error": f"JSON parse failed: {e}", "failed_step": step_id})
-            raise StepFailed(step_id, f"JSON parse failed: {e}", raw_output=raw_text)
+            out_json = {
+                "_meta": {
+                    "coerced_from_non_json": True,
+                    "reason": str(e),
+                },
+                "content": (raw_text or "").strip(),
+            }
+            used_fallback_payload = True
 
         schema_ref = agent.schema_ref
         schema = schema_objs.get(schema_ref)
         if not schema:
             raise StepFailed(step_id, f"Schema not found for ref {schema_ref}")
 
-        try:
-            validate_output(out_json, schema)
-        except Exception as e:
-            msg = str(e)
+        if not used_fallback_payload:
             try:
-                from jsonschema.exceptions import ValidationError
-                if isinstance(e, ValidationError):
-                    msg = format_validation_error(e)
-            except Exception:
-                pass
-            artifact_uri = save_artifact(run_id, step_id, {"output": out_json, "schema_ref": schema_ref})
-            dao.put_step(run_id, step_id, "FAILED", step_inputs, out_json, error=f"Schema validation failed: {msg}", artifact_uri=artifact_uri)
-            dao.put_run_meta(run_id, "FAILED", {"team": team, "version": version, "owner": owner, "error": f"Schema validation failed: {msg}", "failed_step": step_id})
-            raise StepFailed(step_id, f"Schema validation failed: {msg}")
+                validate_output(out_json, schema)
+            except Exception as e:
+                msg = str(e)
+                try:
+                    from jsonschema.exceptions import ValidationError
+                    if isinstance(e, ValidationError):
+                        msg = format_validation_error(e)
+                except Exception:
+                    pass
+                artifact_uri = save_artifact(run_id, step_id, {"output": out_json, "schema_ref": schema_ref})
+                dao.put_step(run_id, step_id, "FAILED", step_inputs, out_json, error=f"Schema validation failed: {msg}", artifact_uri=artifact_uri)
+                dao.put_run_meta(run_id, "FAILED", {"team": team, "version": version, "owner": owner, "error": f"Schema validation failed: {msg}", "failed_step": step_id})
+                raise StepFailed(step_id, f"Schema validation failed: {msg}")
 
         artifact_uri = save_artifact(run_id, step_id, out_json)
         dao.put_step(run_id, step_id, "SUCCEEDED", step_inputs, out_json, error=None, artifact_uri=artifact_uri)
