@@ -341,7 +341,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/states/${AWS::StackName}-state-machine"
-      RetentionInDays: 14
+      RetentionInDays: 30
 
   TriggerFunction:
     Type: AWS::Serverless::Function
@@ -487,11 +487,11 @@ Resources:
       StateMachineType: EXPRESS
       RoleArn: !GetAtt StepFunctionsRole.Arn
       LoggingConfiguration:
-        Level: ALL
-        IncludeExecutionData: true
+        Level: ERROR
+        IncludeExecutionData: false
         Destinations:
           - CloudWatchLogsLogGroup:
-              LogGroupArn: !Sub "${StateMachineLogGroup.Arn}:*"
+              LogGroupArn: !GetAtt StateMachineLogGroup.Arn
       DefinitionString: !Sub |
         {
           "StartAt": "InvokeWorker",
