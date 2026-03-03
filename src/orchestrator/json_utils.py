@@ -2,13 +2,37 @@ import json
 from typing import Any
 
 
+def _normalize_json_text(raw_text: str) -> str:
+    """Normalize model text before attempting JSON parse."""
+    normalized = (raw_text or "").strip()
+    if not normalized:
+        return ""
+
+    # Remove markdown fences and normalize common escape artifacts.
+    normalized = normalized.replace("```json", "").replace("```JSON", "").replace("```", "")
+    normalized = normalized.replace("\\n", " ").replace("\\t", " ")
+    normalized = normalized.replace("\n", " ").replace("\t", " ")
+    return normalized.strip()
+
+
+def _loads_with_normalization(candidate: str) -> Any:
+    """Try parsing candidate text as JSON with a normalization fallback."""
+    try:
+        return json.loads(candidate)
+    except Exception:
+        normalized = _normalize_json_text(candidate)
+        if normalized != candidate:
+            return json.loads(normalized)
+        raise
+
+
 def extract_json_payload(raw_text: str) -> Any:
     raw_text = (raw_text or "").strip()
     if not raw_text:
         raise ValueError("empty response")
 
     try:
-        return json.loads(raw_text)
+        return _loads_with_normalization(raw_text)
     except Exception:
         pass
 
@@ -21,7 +45,7 @@ def extract_json_payload(raw_text: str) -> Any:
             if not candidate:
                 continue
             try:
-                return json.loads(candidate)
+                return _loads_with_normalization(candidate)
             except Exception:
                 continue
 
@@ -30,7 +54,12 @@ def extract_json_payload(raw_text: str) -> Any:
         if ch not in "[{":
             continue
         try:
-            parsed, end = decoder.raw_decode(raw_text[idx:])
+            candidate = raw_text[idx:]
+            try:
+                parsed, end = decoder.raw_decode(candidate)
+            except Exception:
+                normalized_candidate = _normalize_json_text(candidate)
+                parsed, end = decoder.raw_decode(normalized_candidate)
             if isinstance(parsed, (dict, list)):
                 return parsed
         except Exception:
