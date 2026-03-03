@@ -1,13 +1,11 @@
 import json
 import uuid
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .logger import get_logger
 from .config_loader import load_team_config
 from .prompt_builder import build_prompt
 from .bedrock_invoke import invoke_agent
-from .schema_validate import validate_or_unwrap_output, format_validation_error
 from .storage import save_artifact
 from .rag import get_rag_context
 from .gemini import gemini_research_brief
@@ -57,22 +55,6 @@ def _json_body(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 
-def _load_schema_objects(team_raw: Dict[str, Any]) -> Dict[str, Any]:
-    repo_root = Path(__file__).resolve().parents[2]
-    schemas = {}
-    schema_map = (team_raw.get("schemas") or {})
-    for ref, meta in schema_map.items():
-        path = (meta.get("path") or "")
-        if not path:
-            continue
-        path_obj = Path(path)
-        if not path_obj.is_absolute() and not path_obj.exists():
-            path_obj = repo_root / path
-        with path_obj.open("r", encoding="utf-8") as f:
-            schemas[ref] = json.load(f)
-    return schemas
-
-
 def _find_agent(team_cfg, agent_id: str):
     for a in team_cfg.agents:
         if a.id == agent_id:
@@ -91,7 +73,6 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
     run_id = str(uuid.uuid4())
     team_cfg, team_raw = load_team_config(team, version)
     dao = DbDao.from_team_config(team_raw)
-    schema_objs = _load_schema_objects(team_raw)
 
     owner = (team_raw.get("team") or {}).get("owner") or request_obj.get("owner") or "Tarun Raja"
 
@@ -159,7 +140,6 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
 
         raw_text = invoke_agent(agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt)
 
-        used_fallback_payload = False
         try:
             out_json = extract_json_payload(raw_text)
         except Exception as e:
@@ -176,28 +156,6 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
                 },
                 "content": (raw_text or "").strip(),
             }
-            used_fallback_payload = True
-
-        schema_ref = agent.schema_ref
-        schema = schema_objs.get(schema_ref)
-        if not schema:
-            raise StepFailed(step_id, f"Schema not found for ref {schema_ref}")
-
-        if not used_fallback_payload:
-            try:
-                out_json = validate_or_unwrap_output(out_json, schema)
-            except Exception as e:
-                msg = str(e)
-                try:
-                    from jsonschema.exceptions import ValidationError
-                    if isinstance(e, ValidationError):
-                        msg = format_validation_error(e)
-                except Exception:
-                    pass
-                artifact_uri = save_artifact(run_id, step_id, {"output": out_json, "schema_ref": schema_ref})
-                dao.put_step(run_id, step_id, "FAILED", step_inputs, out_json, error=f"Schema validation failed: {msg}", artifact_uri=artifact_uri)
-                dao.put_run_meta(run_id, "FAILED", {"team": team, "version": version, "owner": owner, "error": f"Schema validation failed: {msg}", "failed_step": step_id})
-                raise StepFailed(step_id, f"Schema validation failed: {msg}")
 
         artifact_uri = save_artifact(run_id, step_id, out_json)
         dao.put_step(run_id, step_id, "SUCCEEDED", step_inputs, out_json, error=None, artifact_uri=artifact_uri)
