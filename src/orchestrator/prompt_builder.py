@@ -41,4 +41,5 @@ def build_prompt(team: TeamConfig, agent: AgentConfig, step_inputs: Dict[str, An
     parts.append("")
     parts.append("OUTPUT CONTRACT:")
     parts.append("Return ONLY valid JSON. No markdown. Must match the schema for this step.")
+    parts.append("Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.")
     return "\n".join(parts)
