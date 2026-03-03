@@ -65,14 +65,6 @@ Parameters:
     Type: String
     Default: "sg-06e6751625773c1bf"
     Description: RDS security group ID (resume-rag-sg) to allow PostgreSQL traffic from Lambda.
-  GuardrailName:
-    Type: String
-    Default: tarun-agents-guardrail
-    Description: Name for the Bedrock Guardrail created by this stack.
-  GuardrailDescription:
-    Type: String
-    Default: Generic guardrail for all Tarun's Bedrock agents - content filtering and safety
-    Description: Description for the Bedrock Guardrail.
   SamDeployerRoleName:
     Type: String
     Default: ""
@@ -549,84 +541,6 @@ Resources:
         AllowHeaders: "'content-type'"
         AllowMethods: "'POST,GET,OPTIONS'"
 
-  TeamWeaveGuardrail:
-    Type: AWS::Bedrock::Guardrail
-    Properties:
-      Name: !Ref GuardrailName
-      Description: !Ref GuardrailDescription
-      BlockedInputMessaging: I cannot process this request as it contains content that violates our content policy. Please rephrase your request without sensitive or inappropriate content.
-      BlockedOutputsMessaging: I cannot provide this response as it contains content that violates our content policy. Please ask for information in a different way.
-      TopicPolicyConfig:
-        TopicsConfig:
-          - Name: HarmfulContent
-            Definition: Content that promotes violence, illegal activities, or harmful behavior
-            Examples:
-              - How to make explosives
-              - Instructions for illegal activities
-              - Content promoting self-harm
-            Type: DENY
-          - Name: PersonalInformation
-            Definition: Requests for or sharing of personal identifiable information
-            Examples:
-              - What is your social security number
-              - Share personal contact details
-              - Private financial information
-            Type: DENY
-          - Name: InappropriateContent
-            Definition: Adult content, profanity, or inappropriate material
-            Examples:
-              - Explicit sexual content
-              - Excessive profanity
-              - Inappropriate jokes
-            Type: DENY
-      ContentPolicyConfig:
-        FiltersConfig:
-          - Type: SEXUAL
-            InputStrength: HIGH
-            OutputStrength: HIGH
-          - Type: VIOLENCE
-            InputStrength: HIGH
-            OutputStrength: HIGH
-          - Type: HATE
-            InputStrength: HIGH
-            OutputStrength: HIGH
-          - Type: INSULTS
-            InputStrength: MEDIUM
-            OutputStrength: MEDIUM
-          - Type: MISCONDUCT
-            InputStrength: HIGH
-            OutputStrength: HIGH
-          - Type: PROMPT_ATTACK
-            InputStrength: HIGH
-            OutputStrength: NONE
-      WordPolicyConfig:
-        WordsConfig:
-          - Text: confidential
-          - Text: secret
-          - Text: password
-          - Text: private key
-        ManagedWordListsConfig:
-          - Type: PROFANITY
-      SensitiveInformationPolicyConfig:
-        PiiEntitiesConfig:
-          - Type: EMAIL
-            Action: BLOCK
-          - Type: PHONE
-            Action: BLOCK
-          - Type: US_SOCIAL_SECURITY_NUMBER
-            Action: BLOCK
-          - Type: CREDIT_DEBIT_CARD_NUMBER
-            Action: BLOCK
-          - Type: ADDRESS
-            Action: ANONYMIZE
-          - Type: NAME
-            Action: ANONYMIZE
-        RegexesConfig:
-          - Name: APIKeys
-            Description: Block API keys and tokens
-            Pattern: (api[_-]?key|access[_-]?token|secret[_-]?key)\s*[:=]\s*[A-Za-z0-9]{20,}
-            Action: BLOCK
-
 Outputs:
   HttpApiUrl:
     Value: !Sub "https://${TeamWeaveApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
@@ -642,7 +556,3 @@ Outputs:
     Value: !GetAtt WorkerRole.Arn
   DdbTable:
     Value: !If [CreateDdbTable, !Ref ContentPipelineRunsTable, !Ref DdbTableName]
-  BedrockGuardrailId:
-    Value: !Ref TeamWeaveGuardrail
-  BedrockGuardrailArn:
-    Value: !GetAtt TeamWeaveGuardrail.GuardrailArn
