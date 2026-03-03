@@ -99,7 +99,7 @@ jobs:
 
       - name: Test team task endpoint
         run: |
-          curl --connect-timeout 10 --max-time 300 -X POST https://449f9f7an9.execute-api.us-east-1.amazonaws.com/prod/team/task \
+          curl --connect-timeout 10 --max-time 300 -X POST https://zua5drbgpi.execute-api.us-east-1.amazonaws.com/prod/team/task \
             -H "Content-Type: application/json" \
             -d '{
               "team": "tarun_visibility_team",
