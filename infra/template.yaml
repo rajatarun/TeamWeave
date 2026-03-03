@@ -325,6 +325,23 @@ Resources:
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: "*"
+
+  StateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/states/${AWS::StackName}-state-machine"
+      RetentionInDays: 14
 
   TriggerFunction:
     Type: AWS::Serverless::Function
@@ -469,6 +486,12 @@ Resources:
       # ASSUMPTION: Express workflow is required for low-latency polling and high-throughput invocation.
       StateMachineType: EXPRESS
       RoleArn: !GetAtt StepFunctionsRole.Arn
+      LoggingConfiguration:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !Sub "${StateMachineLogGroup.Arn}:*"
       DefinitionString: !Sub |
         {
           "StartAt": "InvokeWorker",
