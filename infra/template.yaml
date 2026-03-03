@@ -586,3 +586,7 @@ Outputs:
     Value: !GetAtt WorkerRole.Arn
   DdbTable:
     Value: !If [CreateDdbTable, !Ref ContentPipelineRunsTable, !Ref DdbTableName]
+  ConfigBucket:
+    Value: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+  ArtifactBucket:
+    Value: !If [CreateArtifactBucket, !Ref TeamArtifactBucket, !Ref ArtifactBucketName]
