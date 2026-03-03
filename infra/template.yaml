@@ -416,6 +416,13 @@ Resources:
       CodeUri: ../
       Handler: src/orchestrator/status_handler.handler
       Role: !GetAtt StatusRole.Arn
+      Events:
+        TeamTaskStatusEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /team/task/{run_id}
+            Method: get
 
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
@@ -451,47 +458,6 @@ Resources:
             }
           }
         }
-
-  TeamResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref TeamWeaveApi
-      ParentId: !GetAtt TeamWeaveApi.RootResourceId
-      PathPart: team
-
-  TeamTaskResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref TeamWeaveApi
-      ParentId: !Ref TeamResource
-      PathPart: task
-
-  TeamTaskRunIdResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref TeamWeaveApi
-      ParentId: !Ref TeamTaskResource
-      PathPart: "{run_id}"
-
-  StatusFunctionPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !Ref StatusFunction
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${TeamWeaveApi}/*/GET/team/task/*"
-
-  StatusFunctionRoute:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref TeamWeaveApi
-      ResourceId: !Ref TeamTaskRunIdResource
-      HttpMethod: GET
-      AuthorizationType: NONE
-      Integration:
-        Type: AWS_PROXY
-        IntegrationHttpMethod: POST
-        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${StatusFunction.Arn}/invocations"
 
   OrchestratorSecurityGroup:
     Type: AWS::EC2::SecurityGroup
