@@ -196,7 +196,6 @@ Resources:
               - Effect: Allow
                 Action:
                   - bedrock-agent-runtime:InvokeAgent
-                  - bedrock:InvokeAgent
                 Resource: "*"
               - Effect: Allow
                 Action:
@@ -325,6 +324,13 @@ Resources:
                   - lambda:InvokeFunction
                 Resource:
                   - !GetAtt WorkerFunction.Arn
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: "*"
 
   TriggerFunction:
     Type: AWS::Serverless::Function
@@ -341,21 +347,18 @@ Resources:
             RestApiId: !Ref TeamWeaveApi
             Path: /team/task
             Method: post
-            TimeoutInMillis: 300000
         ImproveTasksEvent:
           Type: Api
           Properties:
             RestApiId: !Ref TeamWeaveApi
             Path: /improve/tasks
             Method: get
-            TimeoutInMillis: 300000
         ImproveTaskDoneEvent:
           Type: Api
           Properties:
             RestApiId: !Ref TeamWeaveApi
             Path: /improve/task/done
             Method: post
-            TimeoutInMillis: 300000
       Environment:
         Variables:
           CONFIG_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
@@ -460,7 +463,6 @@ Resources:
             Action:
               - iam:GetRolePolicy
             Resource:
-              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${SamDeployerRoleName}"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-trigger-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-status-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-worker-role"
@@ -517,6 +519,16 @@ Resources:
       FromPort: 5432
       ToPort: 5432
       DestinationSecurityGroupId: !Ref RdsSecurityGroupId
+
+  OrchestratorToAwsServicesEgress443:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: HasVpcConfig
+    Properties:
+      GroupId: !Ref OrchestratorSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: "0.0.0.0/0"
 
   RdsIngressFromOrchestrator5432:
     Type: AWS::EC2::SecurityGroupIngress
