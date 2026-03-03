@@ -2,6 +2,7 @@ import json
 import unittest
 
 from src.orchestrator.structured_transform import (
+    MODEL_ID,
     _coerce_to_template,
     normalize_target_schema,
     transform_json_to_schema,
@@ -19,8 +20,10 @@ class _FakeBody:
 class _FakeClient:
     def __init__(self, response_text: str):
         self.response_text = response_text
+        self.last_model_id = None
 
     def invoke_model(self, modelId, body):
+        self.last_model_id = modelId
         request_payload = json.loads(body)
         assert request_payload["messages"][0]["role"] == "user"
         result = {"content": [{"text": self.response_text}]}
@@ -51,6 +54,18 @@ class StructuredTransformTests(unittest.TestCase):
             transformed,
             {"fullName": "John Doe", "contact": {"phone": "512-000-0000", "location": ""}},
         )
+
+
+    def test_transform_uses_haiku_model_and_normalizes_newlines_tabs(self):
+        input_json = {"name": "John"}
+        target_schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+        fake_client = _FakeClient(json.dumps({"summary": "Line1\n\tLine2"}))
+
+        transformed = transform_json_to_schema(input_json, target_schema, client=fake_client)
+
+        self.assertEqual(fake_client.last_model_id, MODEL_ID)
+        self.assertEqual(MODEL_ID, "anthropic.claude-3-haiku-20240307-v1:0")
+        self.assertEqual(transformed, {"summary": "Line1  Line2"})
 
     def test_normalize_target_schema(self):
         self.assertEqual(
