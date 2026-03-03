@@ -483,6 +483,30 @@ Resources:
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-worker-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-stepfunctions-role"
 
+  SamDeployerS3TeamUploadPermissions:
+    Type: AWS::IAM::RolePolicy
+    Condition: HasSamDeployerRoleName
+    Properties:
+      RoleName: !Ref SamDeployerRoleName
+      PolicyName: S3TeamUpload
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !If
+                - CreateConfigBucket
+                - !GetAtt TeamConfigBucket.Arn
+                - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}"
+              - !If
+                - CreateConfigBucket
+                - !Sub "${TeamConfigBucket.Arn}/*"
+                - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}/*"
+
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
