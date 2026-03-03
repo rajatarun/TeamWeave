@@ -76,6 +76,15 @@ class StructuredTransformTests(unittest.TestCase):
 
         self.assertEqual(transformed, {"summary": "Done"})
 
+    def test_transform_normalizes_escaped_smart_quotes_in_json_text(self):
+        input_json = {"name": "John"}
+        target_schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
+        fake_client = _FakeClient('{\”summary\”:\”Done\”}')
+
+        transformed = transform_json_to_schema(input_json, target_schema, client=fake_client)
+
+        self.assertEqual(transformed, {"summary": "Done"})
+
     def test_normalize_target_schema(self):
         self.assertEqual(
             normalize_target_schema({"type": "object", "properties": {"name": {"type": "string"}}}),

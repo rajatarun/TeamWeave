@@ -12,18 +12,36 @@ def _normalize_json_text(raw_text: str) -> str:
     normalized = normalized.replace("```json", "").replace("```JSON", "").replace("```", "")
     normalized = normalized.replace("\\n", " ").replace("\\t", " ")
     normalized = normalized.replace("\n", " ").replace("\t", " ")
+    normalized = normalized.replace('\\"', '"').replace("\\”", '"').replace("\\“", '"')
+    normalized = normalized.replace("”", '"').replace("“", '"')
     return normalized.strip()
 
 
 def _loads_with_normalization(candidate: str) -> Any:
-    """Try parsing candidate text as JSON with a normalization fallback."""
+    """Try parsing candidate text as JSON with normalization and unescape fallbacks."""
+    last_error: Exception | None = None
+
     try:
         return json.loads(candidate)
-    except Exception:
-        normalized = _normalize_json_text(candidate)
-        if normalized != candidate:
-            return json.loads(normalized)
-        raise
+    except Exception as exc:
+        last_error = exc
+
+    normalized = _normalize_json_text(candidate)
+    try:
+        return json.loads(normalized)
+    except Exception as exc:
+        last_error = exc
+
+    if '\\"' in normalized or "\\”" in normalized or "\\“" in normalized:
+        unescaped = normalized.replace('\\"', '"').replace("\\”", '"').replace("\\“", '"')
+        try:
+            return json.loads(unescaped)
+        except Exception as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise last_error
+    raise ValueError("unable to parse candidate")
 
 
 def extract_json_payload(raw_text: str) -> Any:
