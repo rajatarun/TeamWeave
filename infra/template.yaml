@@ -120,10 +120,10 @@ Resources:
         - AttributeName: sk
           KeyType: RANGE
 
-  OrchestratorExecutionRole:
+  WorkerRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${AWS::StackName}-orchestrator-role"
+      RoleName: !Sub "${AWS::StackName}-worker-role"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -132,7 +132,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: orchestrator-runtime
+        - PolicyName: worker-runtime
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -205,14 +205,130 @@ Resources:
                   Resource: !Ref GeminiSecretArn
                 - !Ref "AWS::NoValue"
 
-  OrchestratorFunction:
+  TriggerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-trigger-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: trigger-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - sfn:StartExecution
+                Resource: !Ref StateMachine
+              - Effect: Allow
+                Action: [s3:ListBucket]
+                Resource:
+                  - !If
+                    - CreateConfigBucket
+                    - !GetAtt TeamConfigBucket.Arn
+                    - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}"
+                  - !If
+                    - CreateConfigBucket
+                    - !Ref "AWS::NoValue"
+                    - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}-*"
+              - Effect: Allow
+                Action: [s3:GetObject]
+                Resource:
+                  - !If
+                    - CreateConfigBucket
+                    - !Sub "${TeamConfigBucket.Arn}/*"
+                    - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}/*"
+                  - !If
+                    - CreateConfigBucket
+                    - !Ref "AWS::NoValue"
+                    - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}-*/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*/index/*"
+
+  StatusRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-status-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: status-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - sfn:DescribeExecution
+                Resource: "*"
+
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-stepfunctions-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke-worker
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt WorkerFunction.Arn
+
+  TriggerFunction:
     Type: AWS::Serverless::Function
     Metadata:
       BuildMethod: makefile
     Properties:
       CodeUri: ../
-      Handler: src/orchestrator/handler.handler
-      Role: !GetAtt OrchestratorExecutionRole.Arn
+      Handler: src/orchestrator/trigger_handler.handler
+      Role: !GetAtt TriggerRole.Arn
       Events:
         TeamTaskEvent:
           Type: Api
@@ -252,12 +368,130 @@ Resources:
           VECTOR_DB_SSL_ROOT_CERT: /var/task/certs/rds-ca-bundle.pem
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
           GEMINI_MODEL: gemini-2.0-flash
+          STATE_MACHINE_ARN: !Ref StateMachine
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:
             - !Ref OrchestratorSecurityGroup
           SubnetIds: !Split [",", !Ref LambdaSubnetIds]
         - !Ref AWS::NoValue
+
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../
+      Handler: src/orchestrator/worker_handler.handler
+      Role: !GetAtt WorkerRole.Arn
+      Environment:
+        Variables:
+          CONFIG_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+          CONFIG_PREFIX: !Ref TeamConfigPrefix
+          ARTIFACT_BUCKET: !If [CreateArtifactBucket, !Ref TeamArtifactBucket, !Ref ArtifactBucketName]
+          DDB_TABLE: !If [CreateDdbTable, !Ref ContentPipelineRunsTable, !Ref DdbTableName]
+          VECTOR_DB_TABLE: !Ref VectorDbTable
+          VECTOR_DB_HOST: !Ref VectorDbHost
+          VECTOR_DB_PORT: !Ref VectorDbPort
+          VECTOR_DB_NAME: !Ref VectorDbName
+          VECTOR_DB_USER: !Ref VectorDbUser
+          VECTOR_DB_PASSWORD: !Ref VectorDbPassword
+          VECTOR_DB_URL: !Ref VectorDbUrl
+          VECTOR_DB_SSLMODE: verify-full
+          VECTOR_DB_SSL_ROOT_CERT: /var/task/certs/rds-ca-bundle.pem
+          GEMINI_SECRET_ARN: !Ref GeminiSecretArn
+          GEMINI_MODEL: gemini-2.0-flash
+      VpcConfig: !If
+        - HasVpcConfig
+        - SecurityGroupIds:
+            - !Ref OrchestratorSecurityGroup
+          SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+        - !Ref AWS::NoValue
+
+  StatusFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../
+      Handler: src/orchestrator/status_handler.handler
+      Role: !GetAtt StatusRole.Arn
+
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      # ASSUMPTION: Express workflow is required for low-latency polling and high-throughput invocation.
+      StateMachineType: EXPRESS
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      DefinitionString: !Sub |
+        {
+          "StartAt": "InvokeWorker",
+          "States": {
+            "InvokeWorker": {
+              "Type": "Task",
+              "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "FunctionName": "${WorkerFunction.Arn}",
+                "Payload.$": "$"
+              },
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "ResultPath": "$.error",
+                  "Next": "WorkflowFailed"
+                }
+              ],
+              "End": true
+            },
+            "WorkflowFailed": {
+              "Type": "Fail",
+              "Error": "WorkflowFailed",
+              "Cause": "Worker task failed"
+            }
+          }
+        }
+
+  TeamResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref TeamWeaveApi
+      ParentId: !GetAtt TeamWeaveApi.RootResourceId
+      PathPart: team
+
+  TeamTaskResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref TeamWeaveApi
+      ParentId: !Ref TeamResource
+      PathPart: task
+
+  TeamTaskRunIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref TeamWeaveApi
+      ParentId: !Ref TeamTaskResource
+      PathPart: "{run_id}"
+
+  StatusFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref StatusFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${TeamWeaveApi}/*/GET/team/task/*"
+
+  StatusFunctionRoute:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref TeamWeaveApi
+      ResourceId: !Ref TeamTaskRunIdResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${StatusFunction.Arn}/invocations"
 
   OrchestratorSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -376,10 +610,16 @@ Resources:
 Outputs:
   HttpApiUrl:
     Value: !Sub "https://${TeamWeaveApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
-  OrchestratorFunctionName:
-    Value: !Ref OrchestratorFunction
-  OrchestratorExecutionRoleArn:
-    Value: !GetAtt OrchestratorExecutionRole.Arn
+  StateMachineArn:
+    Value: !Ref StateMachine
+  TriggerFunctionArn:
+    Value: !GetAtt TriggerFunction.Arn
+  StatusFunctionArn:
+    Value: !GetAtt StatusFunction.Arn
+  WorkerFunctionArn:
+    Value: !GetAtt WorkerFunction.Arn
+  WorkerRoleArn:
+    Value: !GetAtt WorkerRole.Arn
   DdbTable:
     Value: !If [CreateDdbTable, !Ref ContentPipelineRunsTable, !Ref DdbTableName]
   BedrockGuardrailId:
