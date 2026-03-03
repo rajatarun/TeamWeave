@@ -18,6 +18,7 @@ env:
   TEAM_CONFIG_PREFIX: teams
   VECTOR_DB_TABLE: resume-rag-db
   GEMINI_SECRET_ARN: arn:aws:secretsmanager:us-east-1:239571291755:secret:gemini/api_key-SKx2NV
+  SAM_DEPLOYER_ROLE_NAME: teamweave-github-actions-sam-deployer
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -58,7 +59,8 @@ jobs:
             --parameter-overrides \
               "TeamConfigPrefix=${TEAM_CONFIG_PREFIX}" \
               "VectorDbTable=${VECTOR_DB_TABLE}" \
-              "GeminiSecretArn=${GEMINI_SECRET_ARN}"
+              "GeminiSecretArn=${GEMINI_SECRET_ARN}" \
+              "SamDeployerRoleName=${SAM_DEPLOYER_ROLE_NAME}"
 
 
       - name: Validate Bedrock Agents Template
