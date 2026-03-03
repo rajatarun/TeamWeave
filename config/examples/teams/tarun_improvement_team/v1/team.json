@@ -35,8 +35,8 @@
       "id": "coach",
       "name": "Technical Coach",
       "bedrock": {
-        "agentId": "OEBABFTSUL",
-        "aliasId": "H8L32RXO5E"
+        "agentId": "BPX2CTMTT7",
+        "aliasId": "TADVYKDAFO"
       },
       "goal_template": "Understand Tarun's current expertise and target date. Produce a Learning Map: skill gaps, milestones, and success rubric.",
       "schema_ref": "learning_map_v1"
@@ -45,8 +45,8 @@
       "id": "strategist",
       "name": "Learning Strategist",
       "bedrock": {
-        "agentId": "1RU9RRYGDY",
-        "aliasId": "ACJQ7XRLKL"
+        "agentId": "7BRS3KV3OV",
+        "aliasId": "I8O1K9SNWQ"
       },
       "goal_template": "Turn Learning Map into a calendar: weekly themes, daily cadence, and checkpoints. Keep it flexible.",
       "schema_ref": "learning_plan_v1"
@@ -55,8 +55,8 @@
       "id": "advisor",
       "name": "Daily Advisor",
       "bedrock": {
-        "agentId": "PTBDZJWWJC",
-        "aliasId": "OU5I3XD6R5"
+        "agentId": "9YKZVGBINB",
+        "aliasId": "Z6SE2YNTE7"
       },
       "goal_template": "Generate today's tasks: read, practice, reflect. Use COMPLETED_TASKS_HISTORY to avoid repeating same topic/level. Provide best links and a reflection prompt.",
       "schema_ref": "daily_tasks_v1"
