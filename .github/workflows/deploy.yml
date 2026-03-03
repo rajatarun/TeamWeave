@@ -44,7 +44,7 @@ jobs:
       - name: Validate SAM Template
         run: |
           cd infra
-          sam validate --lint
+          sam validate --lint --parameter-overrides "SamDeployerRoleName=${SAM_DEPLOYER_ROLE_NAME}"
           aws cloudformation validate-template --template-body file://template.yaml
 
       - name: SAM Deploy
