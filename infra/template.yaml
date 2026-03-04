@@ -343,6 +343,11 @@ Resources:
                   - bedrock:CreateAgentAlias
                   - bedrock:ListAgentAliases
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-bedrock-agent-service-role"
 
   StepFunctionsRole:
     Type: AWS::IAM::Role
