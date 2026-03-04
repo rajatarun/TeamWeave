@@ -1,6 +1,9 @@
 import json
+import os
 import uuid
 from typing import Any, Dict, Optional
+
+import boto3
 
 from .bedrock_invoke import invoke_agent
 from .config_loader import load_team_config
@@ -16,6 +19,7 @@ from .storage import save_artifact
 from .structured_transform import transform_json_to_schema
 
 log = get_logger("worker_handler")
+lambda_client = boto3.client("lambda")
 
 
 # ASSUMPTION: The Step Functions execution input preserves the existing POST body contract:
@@ -170,6 +174,37 @@ def run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> D
 
 
 def handler(event, context):
+    if event.get("operation") == "provision":
+        function_name = os.environ.get("PROVISION_FUNCTION_NAME")
+        if not function_name:
+            raise ValueError("PROVISION_FUNCTION_NAME is not configured")
+
+        invoke_payload = {
+            "httpMethod": event.get("method", "POST"),
+            "body": json.dumps(event.get("body") or {}),
+        }
+        response = lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType="RequestResponse",
+            Payload=json.dumps(invoke_payload).encode("utf-8"),
+        )
+        payload_bytes = response.get("Payload").read()
+        payload_text = payload_bytes.decode("utf-8") if payload_bytes else "{}"
+        payload = json.loads(payload_text or "{}")
+
+        status_code = int(payload.get("statusCode", 500))
+        raw_body = payload.get("body")
+        body = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
+        if status_code >= 400:
+            raise ValueError(f"provision request failed with status {status_code}: {body}")
+
+        return {
+            "status": "SUCCEEDED",
+            "operation": "provision",
+            "method": event.get("method", "POST"),
+            "result": body,
+        }
+
     team = event.get("team")
     version = event.get("version")
     request_obj = event.get("request") or {}
