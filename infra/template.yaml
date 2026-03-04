@@ -351,11 +351,30 @@ Resources:
                   - logs:PutLogEvents
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
               - Effect: Allow
-                Action: [s3:PutObject]
-                Resource: !If
-                  - CreateConfigBucket
-                  - !Sub "${TeamConfigBucket.Arn}/*"
-                  - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}/*"
+                Action: [s3:ListBucket]
+                Resource:
+                  - !If
+                    - CreateConfigBucket
+                    - !GetAtt TeamConfigBucket.Arn
+                    - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}"
+                  - !If
+                    - CreateConfigBucket
+                    - !Ref "AWS::NoValue"
+                    - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}-*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !If
+                    - CreateConfigBucket
+                    - !Sub "${TeamConfigBucket.Arn}/*"
+                    - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}/*"
+                  - !If
+                    - CreateConfigBucket
+                    - !Ref "AWS::NoValue"
+                    - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}-*/*"
               - Effect: Allow
                 Action:
                   - bedrock:ListAgents
