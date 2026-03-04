@@ -242,12 +242,102 @@ def _parse_body(event: dict) -> dict:
     return event
 
 
+
+
+
+# ---------------------------------------------------------------------------
+# Delete pipeline
+# ---------------------------------------------------------------------------
+
+def delete_agents(agent_names: list[str], region: str) -> dict:
+    """
+    Delete Bedrock agents by name.
+
+    For each name:
+      1. Search for the agent by sanitised name
+      2. Delete all aliases first (Bedrock requires this before agent deletion)
+      3. Delete the agent
+
+    Returns:
+        {
+          "deleted": ["Agent_Name", ...],
+          "not_found": ["Missing_Name", ...],
+          "errors": { "Agent_Name": "error message", ... }
+        }
+    """
+    from .provision_team import sanitise_agent_name
+
+    bedrock  = boto3.client("bedrock-agent", region_name=region)
+    deleted   = []
+    not_found = []
+    errors    = {}
+
+    for raw_name in agent_names:
+        safe_name = sanitise_agent_name(raw_name)
+        log.info(f"  Searching for agent: '{safe_name}'")
+
+        try:
+            agent = find_existing_agent(bedrock, raw_name)
+
+            if not agent:
+                log.warning(f"  NOT FOUND: '{safe_name}'")
+                not_found.append(raw_name)
+                continue
+
+            agent_id = agent["agentId"]
+            log.info(f"  Found: {safe_name} → agentId={agent_id}")
+
+            # Delete all aliases first — skip gracefully if none found or call fails
+            try:
+                aliases = bedrock.list_agent_aliases(
+                    agentId=agent_id
+                ).get("agentAliasSummaries", [])
+            except Exception as e:
+                log.warning(f"    Could not list aliases for {agent_id} — skipping alias deletion: {e}")
+                aliases = []
+
+            if not aliases:
+                log.info("    No aliases found — proceeding to delete agent.")
+            else:
+                for alias in aliases:
+                    alias_id = alias["agentAliasId"]
+                    try:
+                        log.info(f"    Deleting alias: {alias_id}")
+                        bedrock.delete_agent_alias(agentId=agent_id, agentAliasId=alias_id)
+                    except Exception as e:
+                        log.warning(f"    Could not delete alias {alias_id} — skipping: {e}")
+                log.info(f"    Processed {len(aliases)} alias(es). Deleting agent...")
+
+            # Delete the agent
+            bedrock.delete_agent(agentId=agent_id, skipResourceInUseCheck=True)
+            log.info(f"  ✓ Deleted: {safe_name} ({agent_id})")
+            deleted.append(raw_name)
+
+        except Exception as e:
+            log.error(f"  ✗ Failed to delete '{safe_name}': {e}")
+            errors[raw_name] = str(e)
+
+    return {"deleted": deleted, "not_found": not_found, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# Router — dispatch by HTTP method
+# ---------------------------------------------------------------------------
+
 def handler(event: dict, context) -> dict:
     """
     Lambda entry point — triggered via API Gateway proxy integration.
 
-    Scans SCAN_DIR for team*.json files that need provisioning,
-    runs the full pipeline for each, and returns an APIGW proxy response.
+    Routes:
+        POST   /provision  → provision all team*.json files needing IDs
+        DELETE /provision  → delete agents by name
+
+    POST body:
+        {}                          ← provision all
+        { "dry_run": true }         ← validate + enrich only
+
+    DELETE body:
+        { "agent_names": ["Technical Coach", "Learning Strategist"] }
     """
     log.info(f"Event: {json.dumps(event)}")
 
@@ -256,68 +346,96 @@ def handler(event: dict, context) -> dict:
         body = _parse_body(event)
     except ValueError as e:
         log.error(str(e))
-        return _apigw_response(400, {"error": str(e), "results": {}, "errors": [str(e)]})
-
-    dry_run = bool(body.get("dry_run", False))
+        return _apigw_response(400, {"error": str(e), "errors": [str(e)]})
 
     # Config
     try:
         cfg = get_config()
     except ValueError as e:
         log.error(str(e))
-        return _apigw_response(500, {"results": {}, "errors": [str(e)]})
+        return _apigw_response(500, {"errors": [str(e)]})
 
-    # Load shared config from filesystem
-    try:
-        log.info(f"Loading roles:       {cfg['roles_path']}")
-        log.info(f"Loading departments: {cfg['depts_path']}")
-        roles_data = load_json(cfg["roles_path"])
-        depts_data = load_json(cfg["depts_path"])
-        role_index = build_role_index(roles_data)
-        dept_index = build_dept_index(depts_data)
-        log.info(f"  ✓ {len(role_index)} roles, {len(dept_index)} departments.")
-    except Exception as e:
-        log.error(f"Failed to load config files: {e}")
-        return _apigw_response(500, {"results": {}, "errors": [str(e)]})
+    # Route by HTTP method
+    method = event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method", "POST")
+    method = method.upper()
+    log.info(f"Method: {method}")
 
-    # Scan filesystem for team files needing provisioning
-    log.info(f"Scanning: {cfg['scan_dir']}")
-    try:
-        team_files = scan_team_files(cfg["scan_dir"])
-    except SystemExit:
-        # scan_team_files calls sys.exit when nothing needs work — treat as success
-        log.info("All team files already provisioned or none found.")
-        return _apigw_response(200, {"results": {}, "errors": [], "message": "Nothing to provision."})
+    # ── DELETE ────────────────────────────────────────────────────────
+    if method == "DELETE":
+        agent_names = body.get("agent_names", [])
+        if not agent_names:
+            return _apigw_response(400, {
+                "error": "'agent_names' list is required for DELETE.",
+                "errors": ["'agent_names' list is required for DELETE."]
+            })
+        if not isinstance(agent_names, list):
+            return _apigw_response(400, {
+                "error": "'agent_names' must be a list of strings.",
+                "errors": ["'agent_names' must be a list of strings."]
+            })
 
-    log.info(f"  → {len(team_files)} team file(s) queued.\n")
+        log.info(f"Deleting {len(agent_names)} agent(s): {agent_names}")
+        result = delete_agents(agent_names, cfg["region"])
 
-    # Process each
-    results    = {}
-    all_errors = []
+        status = 200 if not result["errors"] else 500
+        log.info(f"Delete summary — deleted={result['deleted']} not_found={result['not_found']} errors={result['errors']}")
+        return _apigw_response(status, result)
 
-    for tf in team_files:
+    # ── POST (provision) ──────────────────────────────────────────────
+    if method == "POST":
+        dry_run = bool(body.get("dry_run", False))
+
+        # Load shared config from filesystem
         try:
-            result = process_team_entry(
-                team_file=tf,
-                role_index=role_index,
-                dept_index=dept_index,
-                cfg=cfg,
-                dry_run=dry_run,
-            )
+            log.info(f"Loading roles:       {cfg['roles_path']}")
+            log.info(f"Loading departments: {cfg['depts_path']}")
+            roles_data = load_json(cfg["roles_path"])
+            depts_data = load_json(cfg["depts_path"])
+            role_index = build_role_index(roles_data)
+            dept_index = build_dept_index(depts_data)
+            log.info(f"  ✓ {len(role_index)} roles, {len(dept_index)} departments.")
         except Exception as e:
-            log.exception(f"Unexpected error processing {tf['path'].name}")
-            result = {"success": False, "s3_uri": None, "errors": [str(e)]}
+            log.error(f"Failed to load config files: {e}")
+            return _apigw_response(500, {"results": {}, "errors": [str(e)]})
 
-        results[tf["name"]] = result
-        if not result["success"]:
-            all_errors.extend(result.get("errors", []))
+        # Scan filesystem for team files needing provisioning
+        log.info(f"Scanning: {cfg['scan_dir']}")
+        try:
+            team_files = scan_team_files(cfg["scan_dir"])
+        except SystemExit:
+            log.info("All team files already provisioned or none found.")
+            return _apigw_response(200, {"results": {}, "errors": [], "message": "Nothing to provision."})
 
-    # Summary
-    status = 200 if not all_errors else 500
-    log.info(f"\n{'='*40}")
-    for name, r in results.items():
-        log.info(f"  {'✓' if r['success'] else '✗'}  {name}")
-    log.info(f"  Status: {status}")
-    log.info(f"{'='*40}\n")
+        log.info(f"  → {len(team_files)} team file(s) queued.\n")
 
-    return _apigw_response(status, {"results": results, "errors": all_errors})
+        results    = {}
+        all_errors = []
+
+        for tf in team_files:
+            try:
+                result = process_team_entry(
+                    team_file=tf,
+                    role_index=role_index,
+                    dept_index=dept_index,
+                    cfg=cfg,
+                    dry_run=dry_run,
+                )
+            except Exception as e:
+                log.exception(f"Unexpected error processing {tf['path'].name}")
+                result = {"success": False, "s3_uri": None, "errors": [str(e)]}
+
+            results[tf["name"]] = result
+            if not result["success"]:
+                all_errors.extend(result.get("errors", []))
+
+        status = 200 if not all_errors else 500
+        log.info(f"\n{'='*40}")
+        for name, r in results.items():
+            log.info(f"  {'✓' if r['success'] else '✗'}  {name}")
+        log.info(f"  Status: {status}")
+        log.info(f"{'='*40}\n")
+
+        return _apigw_response(status, {"results": results, "errors": all_errors})
+
+    # ── Unsupported method ────────────────────────────────────────────
+    return _apigw_response(405, {"error": f"Method '{method}' not allowed. Use POST or DELETE."})
