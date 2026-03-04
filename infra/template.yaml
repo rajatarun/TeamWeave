@@ -446,18 +446,150 @@ Resources:
             RestApiId: !Ref TeamWeaveApi
             Path: /improve/task/done
             Method: post
-        ProvisionTeamPostEvent:
+        AgentsPostEvent:
           Type: Api
           Properties:
             RestApiId: !Ref TeamWeaveApi
-            Path: /provision
+            Path: /agents
             Method: post
-        ProvisionTeamDeleteEvent:
+        AgentsGetEvent:
           Type: Api
           Properties:
             RestApiId: !Ref TeamWeaveApi
-            Path: /provision
+            Path: /agents
+            Method: get
+        AgentsDeleteEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /agents
             Method: delete
+        AgentByNameGetEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /agents/{name}
+            Method: get
+            RequestParameters:
+              - method.request.path.name:
+                  Required: true
+                  Caching: false
+        AgentByNamePutEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /agents/{name}
+            Method: put
+            RequestParameters:
+              - method.request.path.name:
+                  Required: true
+                  Caching: false
+        TeamsGetEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /teams
+            Method: get
+        TeamsPostEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /teams
+            Method: post
+        TeamByNameGetEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /teams/{team_name}
+            Method: get
+            RequestParameters:
+              - method.request.path.team_name:
+                  Required: true
+                  Caching: false
+        TeamByNamePutEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /teams/{team_name}
+            Method: put
+            RequestParameters:
+              - method.request.path.team_name:
+                  Required: true
+                  Caching: false
+        TeamByNameDeleteEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /teams/{team_name}
+            Method: delete
+            RequestParameters:
+              - method.request.path.team_name:
+                  Required: true
+                  Caching: false
+        RolesGetEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /roles
+            Method: get
+        RolesPostEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /roles
+            Method: post
+        RoleByIdGetEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /roles/{role_id}
+            Method: get
+            RequestParameters:
+              - method.request.path.role_id:
+                  Required: true
+                  Caching: false
+        RoleByIdPutEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /roles/{role_id}
+            Method: put
+            RequestParameters:
+              - method.request.path.role_id:
+                  Required: true
+                  Caching: false
+        DepartmentsGetEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /departments
+            Method: get
+        DepartmentsPostEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /departments
+            Method: post
+        DepartmentByIdGetEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /departments/{dept_id}
+            Method: get
+            RequestParameters:
+              - method.request.path.dept_id:
+                  Required: true
+                  Caching: false
+        DepartmentByIdPutEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /departments/{dept_id}
+            Method: put
+            RequestParameters:
+              - method.request.path.dept_id:
+                  Required: true
+                  Caching: false
       Environment:
         Variables:
           CONFIG_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
@@ -531,6 +663,10 @@ Resources:
             RestApiId: !Ref TeamWeaveApi
             Path: /team/task/{run_id}
             Method: get
+            RequestParameters:
+              - method.request.path.run_id:
+                  Required: true
+                  Caching: false
 
 
   ProvisionTeamFunction:
@@ -697,8 +833,8 @@ Resources:
       StageName: prod
       Cors:
         AllowOrigin: "'*'"
-        AllowHeaders: "'content-type'"
-        AllowMethods: "'POST,GET,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowMethods: "'OPTIONS,GET,POST,PUT,DELETE'"
 
 Outputs:
   HttpApiUrl:
