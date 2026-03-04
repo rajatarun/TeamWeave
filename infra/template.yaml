@@ -265,6 +265,8 @@ Resources:
                 Action:
                   - states:StartExecution
                   - sfn:StartExecution
+                  - states:StartSyncExecution
+                  - sfn:StartSyncExecution
                 Resource: !Ref StateMachine
               - Effect: Allow
                 Action: [s3:ListBucket]
