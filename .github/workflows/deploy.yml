@@ -124,15 +124,6 @@ jobs:
 
           echo "CONFIG_BUCKET=$CONFIG_BUCKET" >> "$GITHUB_ENV"
 
-      - name: Provision team config artifacts
-        working-directory: config/examples
-        run: |
-          python provision_team.py \
-            --roles roles.json \
-            --depts departments.json \
-            --bucket "$CONFIG_BUCKET" \
-            --bedrock-role-arn "$BEDROCK_ROLE_ARN"
-
       - name: Test team task endpoint
         run: |
           curl --connect-timeout 10 --max-time 300 -X POST https://zua5drbgpi.execute-api.us-east-1.amazonaws.com/prod/team/task \
