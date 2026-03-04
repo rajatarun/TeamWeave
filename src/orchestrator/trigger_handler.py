@@ -48,6 +48,38 @@ def _json_body(event: Dict[str, Any]) -> Dict[str, Any]:
         return {}
 
 
+def _json_parse_if_needed(raw: Any) -> Any:
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except Exception:
+            return raw
+    return raw
+
+
+def _sync_stepfn_response(state_machine_arn: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    execution = sfn.start_sync_execution(stateMachineArn=state_machine_arn, input=json.dumps(payload))
+    status = execution.get("status", "FAILED")
+    if status != "SUCCEEDED":
+        return _resp(
+            500,
+            {
+                "error": execution.get("error") or "Step Functions synchronous execution failed",
+                "cause": execution.get("cause"),
+                "status": status,
+            },
+        )
+
+    output = _json_parse_if_needed(execution.get("output"))
+    if isinstance(output, dict) and "statusCode" in output and "body" in output:
+        headers = output.get("headers") or {}
+        headers.update(_cors())
+        output["headers"] = headers
+        return output
+
+    return _resp(200, output if isinstance(output, dict) else {"result": output})
+
+
 def _proxy_path_for_provision_compat(method: str, body: Dict[str, Any]) -> str:
     if method == "POST":
         return "/teams"
@@ -134,18 +166,17 @@ def handler(event, context):
             return _resp(500, {"error": "STATE_MACHINE_ARN is not configured"})
 
         try:
-            started = sfn.start_execution(
-                stateMachineArn=state_machine_arn,
-                input=json.dumps(
-                    {
-                        "operation": "agent_management",
-                        "method": m,
-                        "path": _normalize_proxy_path(p),
-                        "body": body,
-                        "query": _qs(event),
-                    }
-                ),
-            )
+            payload = {
+                "operation": "agent_management",
+                "method": m,
+                "path": _normalize_proxy_path(p),
+                "body": body,
+                "query": _qs(event),
+            }
+            if m == "GET":
+                return _sync_stepfn_response(state_machine_arn, payload)
+
+            started = sfn.start_execution(stateMachineArn=state_machine_arn, input=json.dumps(payload))
             return _resp(202, {"run_id": started["executionArn"]})
         except ClientError as exc:
             return _resp(500, {"error": exc.response.get("Error", {}).get("Message", str(exc))})
