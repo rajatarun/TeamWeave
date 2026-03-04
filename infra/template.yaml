@@ -514,6 +514,12 @@ Resources:
             RestApiId: !Ref TeamWeaveApi
             Path: /provision
             Method: post
+        ProvisionTeamDeleteEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /provision
+            Method: delete
       Environment:
         Variables:
           ARTIFACT_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
