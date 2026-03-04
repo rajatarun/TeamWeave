@@ -754,6 +754,8 @@ Resources:
               - bedrock:ListAgents
               - bedrock:CreateAgentAlias
               - bedrock:ListAgentAliases
+              - bedrock:DeleteAgent
+              - bedrock:DeleteAgentAlias
               - bedrock:TagResource
               - iam:PassRole
             Resource: "*"

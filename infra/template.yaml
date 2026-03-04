@@ -343,6 +343,8 @@ Resources:
                   - bedrock:PrepareAgent
                   - bedrock:CreateAgentAlias
                   - bedrock:ListAgentAliases
+                  - bedrock:DeleteAgent
+                  - bedrock:DeleteAgentAlias
                 Resource: "*"
               - Effect: Allow
                 Action:
