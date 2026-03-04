@@ -215,6 +215,11 @@ Resources:
                   - lambda:InvokeFunction
                 Resource:
                   - !GetAtt ProvisionTeamFunction.Arn
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-bedrock-agent-service-role"
               - !If
                 - HasGeminiSecret
                 - Effect: Allow
