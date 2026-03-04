@@ -1,232 +1,122 @@
 """
-lambda_handler.py
------------------
-AWS Lambda entry point for team provisioning.
+lambda_handler.py  —  Agent Management System
+──────────────────────────────────────────────
+All state lives in S3 under OUTPUT_PREFIX:
 
-Filesystem layout expected in the Lambda deployment package:
-    /var/task/
-        lambda_handler.py       ← this file
-        provision_team.py       ← core logic
-        roles.json              ← or override via ROLES_PATH env var
-        departments.json        ← or override via DEPTS_PATH env var
-        team*.json              ← any number of team files in SCAN_DIR
+    {prefix}/roles.json
+    {prefix}/departments.json
+    {prefix}/{team_name}/{version}/team.json
 
 Environment variables:
-    ARTIFACT_BUCKET   (required) S3 bucket to push provisioned team.json
-    BEDROCK_ROLE_ARN  (required) IAM role ARN Bedrock agents will assume
-    SCAN_DIR          (optional) directory to scan for team*.json  (default: /var/task)
-    ROLES_PATH        (optional) path to roles.json               (default: /var/task/roles.json)
-    DEPTS_PATH        (optional) path to departments.json         (default: /var/task/departments.json)
-    OUTPUT_PREFIX     (optional) S3 key prefix for output         (default: teams)
-    FOUNDATION_MODEL  (optional) Bedrock model ID                 (default: amazon.nova-micro-v1:0)
+    ARTIFACT_BUCKET   (required) S3 bucket — all state lives here
+    BEDROCK_ROLE_ARN  (required) IAM role ARN Bedrock agents assume
+    OUTPUT_PREFIX     (default: agent-management)
+    FOUNDATION_MODEL  (default: amazon.nova-micro-v1:0)
+    AWS_REGION        (default: us-east-1)
 
-Trigger:
-    API Gateway HTTP API or REST API (Lambda proxy integration).
+ROUTE TABLE
+───────────────────────────────────────────────────────────────────────────────
+Agents
+  GET    /agents                list all Bedrock agents (live from Bedrock)
+  GET    /agents/{name}         get agent + aliases by name
+  POST   /agents                create single agent from body
+  PUT    /agents/{name}         update agent instruction / description / model
+  DELETE /agents                delete agents by name list
 
-Request:
-    POST /provision
-    Content-Type: application/json
+Teams
+  GET    /teams                 list all teams from S3
+  GET    /teams/{team_name}     get latest team.json from S3
+  POST   /teams                 provision all unprovisioned teams in S3
+  PUT    /teams/{team_name}     update team in S3 + re-provision
+  DELETE /teams/{team_name}     delete all agents of team + remove all S3 versions
 
-    {}                          ← provision all team*.json files that need IDs
-    { "dry_run": true }         ← validate + enrich only, no Bedrock or S3 calls
+Roles
+  GET    /roles                 list all roles
+  GET    /roles/{role_id}       get one role
+  POST   /roles                 add new role
+  PUT    /roles/{role_id}       update existing role
 
-Response (API Gateway proxy format):
-    HTTP 200 / 500
-    Content-Type: application/json
-
-    {
-      "statusCode": 200 | 500,
-      "results": {
-        "team_name": { "success": true, "s3_uri": "s3://...", "errors": [] },
-        ...
-      },
-      "errors": []
-    }
+Departments
+  GET    /departments           list all departments
+  GET    /departments/{dept_id} get one department
+  POST   /departments           add new department
+  PUT    /departments/{dept_id} update existing department
+───────────────────────────────────────────────────────────────────────────────
 """
 
 import copy
 import json
 import logging
 import os
+import re
+from collections import defaultdict
+from urllib.parse import unquote_plus
 
 import boto3
+from botocore.exceptions import ClientError
 
 from .provision_team import (
-    load_json,
-    build_role_index,
     build_dept_index,
-    scan_team_files,
-    validate_team,
+    build_role_index,
+    create_bedrock_agent,
     enrich_goal_templates,
     find_existing_agent,
-    create_bedrock_agent,
+    generate_team_id,
+    needs_provisioning,
     push_to_s3,
     resolve_team_id,
-    needs_provisioning,
+    sanitise_agent_name,
+    validate_team,
 )
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 
-# ---------------------------------------------------------------------------
-# Config from environment
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Config
+# ─────────────────────────────────────────────────────────────────────────────
 
 def get_config() -> dict:
     bucket = os.environ.get("ARTIFACT_BUCKET", "").strip()
     if not bucket:
         raise ValueError("ARTIFACT_BUCKET environment variable is not set.")
-
     bedrock_role_arn = os.environ.get("BEDROCK_ROLE_ARN", "").strip()
     if not bedrock_role_arn:
         raise ValueError("BEDROCK_ROLE_ARN environment variable is not set.")
-
-    task_dir = "/var/task"
+    prefix = os.environ.get("OUTPUT_PREFIX", "").strip().strip("/")
     return {
         "bucket":           bucket,
         "bedrock_role_arn": bedrock_role_arn,
-        "scan_dir":         os.environ.get("SCAN_DIR",         task_dir),
-        "roles_path":       os.environ.get("ROLES_PATH",       os.path.join(task_dir, "roles.json")),
-        "depts_path":       os.environ.get("DEPTS_PATH",       os.path.join(task_dir, "departments.json")),
-        "output_prefix":    os.environ.get("OUTPUT_PREFIX",    "teams"),
+        "prefix":           prefix,
+        "roles_key":        f"{prefix}/roles.json" if prefix else "roles.json",
+        "depts_key":        f"{prefix}/departments.json" if prefix else "departments.json",
+        "teams_prefix":     f"{prefix}/teams" if prefix else "teams",
         "foundation_model": os.environ.get("FOUNDATION_MODEL", "amazon.nova-micro-v1:0"),
         "region":           os.environ.get("AWS_REGION",       "us-east-1"),
     }
 
 
-# ---------------------------------------------------------------------------
-# Per-team pipeline
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# APIGW helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
-def process_team_entry(
-    team_file:        dict,
-    role_index:       dict,
-    dept_index:       dict,
-    cfg:              dict,
-    dry_run:          bool,
-) -> dict:
-    """
-    Run validate → enrich → provision → push for one team file entry
-    (as returned by scan_team_files).
-
-    Returns { "success": bool, "s3_uri": str|None, "errors": list[str] }
-    """
-    team_path  = team_file["path"]
-    team_name  = team_file["name"]
-    s3_version = team_file["version"]
-
-    log.info(f"{'═'*60}")
-    log.info(f"  TEAM    : {team_name}")
-    log.info(f"  TEAM_ID : {team_file.get('team_id', resolve_team_id({'name': team_name}))}")
-    log.info(f"  FILE    : {team_path.name}")
-    log.info(f"  VERSION : {s3_version}")
-    log.info(f"  NEEDS   : {team_file['agents_needing_ids']}/{team_file['total_agents']} agent(s) missing IDs")
-    log.info(f"{'═'*60}")
-
-    # Load
-    try:
-        team = load_json(str(team_path))
-    except Exception as e:
-        return {"success": False, "s3_uri": None, "errors": [f"Load failed: {e}"]}
-
-    # Validate
-    log.info("  [1/4] Validating...")
-    errors = validate_team(team, role_index, dept_index)
-    if errors:
-        log.error(f"  Validation failed: {errors}")
-        return {"success": False, "s3_uri": None, "errors": errors}
-    log.info(f"  ✓ {len(team['agents'])} agent(s) validated.")
-
-    # Enrich
-    log.info("  [2/4] Enriching goal_templates...")
-    output_team = copy.deepcopy(team)
-    n = enrich_goal_templates(output_team, role_index, dept_index)
-    log.info(f"  ✓ {n} agent(s) enriched.")
-
-    # Dry run — stop here
-    if dry_run:
-        log.info("  [DRY RUN] Skipping Bedrock provisioning and S3 push.")
-        return {"success": True, "s3_uri": None, "errors": [], "dry_run": True}
-
-    # Provision
-    log.info("  [3/4] Provisioning Bedrock agents...")
-    bedrock = boto3.client("bedrock-agent", region_name=cfg["region"])
-
-    for i, agent in enumerate(output_team["agents"]):
-        existing_id    = agent.get("bedrock", {}).get("agentId",  "").strip()
-        existing_alias = agent.get("bedrock", {}).get("aliasId", "").strip()
-        tag            = f"    [{i+1}/{len(output_team['agents'])}]"
-
-        if existing_id and existing_alias:
-            log.info(f"{tag} SKIP — {agent['name']} already provisioned.")
-            continue
-
-        log.info(f"{tag} Provisioning: {agent['name']} ({agent['id']})")
-        role_obj = role_index[agent["role_id"]]
-
-        existing = find_existing_agent(bedrock, agent["name"])
-        if existing:
-            b_agent_id = existing["agentId"]
-            aliases = bedrock.list_agent_aliases(agentId=b_agent_id).get("agentAliasSummaries", [])
-            b_alias_id = (
-                aliases[0]["agentAliasId"] if aliases
-                else bedrock.create_agent_alias(
-                    agentId=b_agent_id, agentAliasName="live"
-                )["agentAlias"]["agentAliasId"]
-            )
-        else:
-            b_agent_id, b_alias_id = create_bedrock_agent(
-                client=bedrock,
-                agent_id_slug=agent["id"],
-                agent_name=agent["name"],
-                goal_template=agent["goal_template"],
-                schema_ref=agent["schema_ref"],
-                role_obj=role_obj,
-                bedrock_role_arn=cfg["bedrock_role_arn"],
-                foundation_model=cfg["foundation_model"],
-            )
-
-        output_team["agents"][i]["bedrock"] = {
-            "agentId": b_agent_id,
-            "aliasId": b_alias_id,
-        }
-        log.info(f"      ✓ agentId={b_agent_id}  aliasId={b_alias_id}")
-
-    # Push
-    log.info("  [4/4] Pushing to S3...")
-    s3_uri = push_to_s3(
-        bucket=cfg["bucket"],
-        prefix=cfg["output_prefix"],
-        team_name=team_name,
-        payload=output_team,
-        region=cfg["region"],
-        version=s3_version,
-    )
-    log.info(f"  ✓ {s3_uri}")
-
-    return {"success": True, "s3_uri": s3_uri, "errors": []}
-
-
-# ---------------------------------------------------------------------------
-# Lambda handler
-# ---------------------------------------------------------------------------
-
-def _apigw_response(status: int, body: dict) -> dict:
-    """Wrap a response body in API Gateway proxy integration format."""
+def _resp(status: int, body: dict) -> dict:
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body),
+        "headers":    {"Content-Type": "application/json"},
+        "body":       json.dumps(body, default=str),
     }
+
+def _ok(body)              : return _resp(200, body)
+def _created(body)         : return _resp(201, body)
+def _bad_request(msg)      : return _resp(400, {"error": msg})
+def _not_found(msg)        : return _resp(404, {"error": msg})
+def _server_error(msg)     : return _resp(500, {"error": str(msg)})
+def _method_not_allowed(m) : return _resp(405, {"error": f"Method '{m}' not allowed on this resource."})
 
 
 def _parse_body(event: dict) -> dict:
-    """
-    Extract and parse the request body from an API Gateway proxy event.
-    Handles both REST API (event["body"] is a string) and direct invocation
-    (event already is the body dict).
-    """
     if "body" in event:
         raw = event["body"]
         if not raw:
@@ -238,204 +128,636 @@ def _parse_body(event: dict) -> dict:
                 raise ValueError(f"Request body is not valid JSON: {raw!r}")
         if isinstance(raw, dict):
             return raw
-    # Direct Lambda invocation — event itself is the payload
     return event
 
 
+def _extract_route(event: dict) -> tuple:
+    """Returns (method, resource, path_param)."""
+    method = (
+        event.get("httpMethod")
+        or event.get("requestContext", {}).get("http", {}).get("method", "GET")
+    ).upper()
+    raw_path = (
+        event.get("path")
+        or event.get("requestContext", {}).get("http", {}).get("path", "/")
+    )
+    parts      = [p for p in raw_path.strip("/").split("/") if p]
+    resource   = parts[0].lower() if parts else ""
+    path_param = unquote_plus(parts[1]) if len(parts) > 1 else None
+    return method, resource, path_param
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# S3 core — all reads and writes go through here
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ---------------------------------------------------------------------------
-# Delete pipeline
-# ---------------------------------------------------------------------------
+def _s3(cfg):
+    return boto3.client("s3", region_name=cfg["region"])
 
-def delete_agents(agent_names: list[str], region: str) -> dict:
+
+def _s3_get(cfg, key: str) -> dict:
+    """Download and parse a JSON object from S3. Raises KeyError if not found."""
+    try:
+        resp = _s3(cfg).get_object(Bucket=cfg["bucket"], Key=key)
+        return json.loads(resp["Body"].read().decode("utf-8"))
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
+            raise KeyError(f"s3://{cfg['bucket']}/{key} not found.")
+        raise
+
+
+def _s3_put(cfg, key: str, data: dict) -> str:
+    """Serialise data and write to S3. Returns the S3 URI."""
+    _s3(cfg).put_object(
+        Bucket=cfg["bucket"],
+        Key=key,
+        Body=json.dumps(data, indent=2).encode("utf-8"),
+        ContentType="application/json",
+    )
+    uri = f"s3://{cfg['bucket']}/{key}"
+    log.info(f"  Wrote {uri}")
+    return uri
+
+
+def _s3_delete(cfg, key: str) -> None:
+    _s3(cfg).delete_object(Bucket=cfg["bucket"], Key=key)
+    log.info(f"  Deleted s3://{cfg['bucket']}/{key}")
+
+
+def _s3_list_prefix(cfg, prefix: str) -> list[str]:
+    """Return all S3 keys under prefix."""
+    paginator = _s3(cfg).get_paginator("list_objects_v2")
+    keys = []
+    for page in paginator.paginate(Bucket=cfg["bucket"], Prefix=prefix):
+        for obj in page.get("Contents", []):
+            keys.append(obj["Key"])
+    return keys
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Roles & Departments — S3-backed
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _load_roles(cfg) -> dict:
+    try:
+        return _s3_get(cfg, cfg["roles_key"])
+    except KeyError:
+        raise KeyError(f"roles.json not found at s3://{cfg['bucket']}/{cfg['roles_key']}. "
+                       f"Upload it first.")
+
+def _save_roles(cfg, data: dict) -> str:
+    return _s3_put(cfg, cfg["roles_key"], data)
+
+def _load_depts(cfg) -> dict:
+    try:
+        return _s3_get(cfg, cfg["depts_key"])
+    except KeyError:
+        raise KeyError(f"departments.json not found at s3://{cfg['bucket']}/{cfg['depts_key']}. "
+                       f"Upload it first.")
+
+def _save_depts(cfg, data: dict) -> str:
+    return _s3_put(cfg, cfg["depts_key"], data)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Teams — S3-backed
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _scan_s3_teams(cfg) -> dict:
     """
-    Delete Bedrock agents by name.
+    Scan bucket under teams_prefix and return:
+        { team_name: { version: s3_key } }
 
-    For each name:
-      1. Search for the agent by sanitised name
-      2. Delete all aliases first (Bedrock requires this before agent deletion)
-      3. Delete the agent
-
-    Returns:
-        {
-          "deleted": ["Agent_Name", ...],
-          "not_found": ["Missing_Name", ...],
-          "errors": { "Agent_Name": "error message", ... }
-        }
+    Expected key shape:
+        {teams_prefix}/{team_name}/{version}/team.json
     """
-    from .provision_team import sanitise_agent_name
+    prefix   = cfg["teams_prefix"].rstrip("/") + "/"
+    all_keys = _s3_list_prefix(cfg, prefix)
+    team_map = defaultdict(dict)
+    for key in all_keys:
+        rel   = key[len(prefix):]               # team_name/v1/team.json
+        parts = rel.split("/")
+        if len(parts) == 3 and parts[2] == "team.json":
+            team_name, version = parts[0], parts[1]
+            team_map[team_name][version] = key
+    log.info(f"S3 scan — {len(team_map)} team(s) found under s3://{cfg['bucket']}/{prefix}")
+    return dict(team_map)
 
-    bedrock  = boto3.client("bedrock-agent", region_name=region)
-    deleted   = []
-    not_found = []
-    errors    = {}
 
-    for raw_name in agent_names:
-        safe_name = sanitise_agent_name(raw_name)
-        log.info(f"  Searching for agent: '{safe_name}'")
+def _latest_version(versions: dict) -> str:
+    def _vnum(v):
+        m = re.match(r"^v(\d+)$", v)
+        return int(m.group(1)) if m else 0
+    return max(versions.keys(), key=_vnum)
 
+
+def _bump_version(v: str) -> str:
+    m = re.match(r"^v(\d+)$", str(v))
+    return f"v{int(m.group(1)) + 1}" if m else "v2"
+
+
+def _bedrock(cfg):
+    return boto3.client("bedrock-agent", region_name=cfg["region"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Provision helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _provision_team(team_data: dict, team_name: str, version: str,
+                    role_index: dict, dept_index: dict, cfg: dict,
+                    dry_run: bool = False) -> dict:
+    errors = validate_team(team_data, role_index, dept_index)
+    if errors:
+        return {"success": False, "s3_uri": None, "errors": errors}
+
+    output_team = copy.deepcopy(team_data)
+    enrich_goal_templates(output_team, role_index, dept_index)
+
+    if dry_run:
+        return {"success": True, "s3_uri": None, "errors": [], "dry_run": True}
+
+    bedrock = _bedrock(cfg)
+    for i, agent in enumerate(output_team["agents"]):
+        if (agent.get("bedrock", {}).get("agentId",  "").strip() and
+                agent.get("bedrock", {}).get("aliasId", "").strip()):
+            continue
+        role_obj = role_index[agent["role_id"]]
+        existing = find_existing_agent(bedrock, agent["name"])
+        if existing:
+            aid = existing["agentId"]
+            als = bedrock.list_agent_aliases(agentId=aid).get("agentAliasSummaries", [])
+            alid = (als[0]["agentAliasId"] if als else
+                    bedrock.create_agent_alias(agentId=aid, agentAliasName="live")
+                           ["agentAlias"]["agentAliasId"])
+        else:
+            aid, alid = create_bedrock_agent(
+                client=bedrock, agent_id_slug=agent["id"], agent_name=agent["name"],
+                goal_template=agent["goal_template"], schema_ref=agent["schema_ref"],
+                role_obj=role_obj, bedrock_role_arn=cfg["bedrock_role_arn"],
+                foundation_model=cfg["foundation_model"],
+            )
+        output_team["agents"][i]["bedrock"] = {"agentId": aid, "aliasId": alid}
+        log.info(f"  ✓ {agent['name']} → agentId={aid} aliasId={alid}")
+
+    # Push back to S3 under teams_prefix
+    key    = f"{cfg['teams_prefix']}/{team_name}/{version}/team.json"
+    s3_uri = _s3_put(cfg, key, output_team)
+    return {"success": True, "s3_uri": s3_uri, "errors": [], "team": output_team}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Agent delete helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _delete_bedrock_agents(bedrock, agent_names: list) -> dict:
+    deleted, not_found, errors = [], [], {}
+    for raw in agent_names:
         try:
-            agent = find_existing_agent(bedrock, raw_name)
-
-            if not agent:
-                log.warning(f"  NOT FOUND: '{safe_name}'")
-                not_found.append(raw_name)
+            summary = find_existing_agent(bedrock, raw)
+            if not summary:
+                not_found.append(raw)
                 continue
-
-            agent_id = agent["agentId"]
-            log.info(f"  Found: {safe_name} → agentId={agent_id}")
-
-            # Delete all aliases first — skip gracefully if none found or call fails
+            aid = summary["agentId"]
             try:
-                aliases = bedrock.list_agent_aliases(
-                    agentId=agent_id
-                ).get("agentAliasSummaries", [])
+                aliases = bedrock.list_agent_aliases(agentId=aid).get("agentAliasSummaries", [])
             except Exception as e:
-                log.warning(f"    Could not list aliases for {agent_id} — skipping alias deletion: {e}")
+                log.warning(f"Could not list aliases for {aid}: {e}")
                 aliases = []
-
-            if not aliases:
-                log.info("    No aliases found — proceeding to delete agent.")
-            else:
-                for alias in aliases:
-                    alias_id = alias["agentAliasId"]
-                    try:
-                        log.info(f"    Deleting alias: {alias_id}")
-                        bedrock.delete_agent_alias(agentId=agent_id, agentAliasId=alias_id)
-                    except Exception as e:
-                        log.warning(f"    Could not delete alias {alias_id} — skipping: {e}")
-                log.info(f"    Processed {len(aliases)} alias(es). Deleting agent...")
-
-            # Delete the agent
-            bedrock.delete_agent(agentId=agent_id, skipResourceInUseCheck=True)
-            log.info(f"  ✓ Deleted: {safe_name} ({agent_id})")
-            deleted.append(raw_name)
-
+            for alias in aliases:
+                try:
+                    bedrock.delete_agent_alias(agentId=aid, agentAliasId=alias["agentAliasId"])
+                except Exception as e:
+                    log.warning(f"Could not delete alias {alias['agentAliasId']}: {e}")
+            bedrock.delete_agent(agentId=aid, skipResourceInUseCheck=True)
+            deleted.append(raw)
+            log.info(f"  ✓ Deleted: {sanitise_agent_name(raw)} ({aid})")
         except Exception as e:
-            log.error(f"  ✗ Failed to delete '{safe_name}': {e}")
-            errors[raw_name] = str(e)
-
+            errors[raw] = str(e)
     return {"deleted": deleted, "not_found": not_found, "errors": errors}
 
 
-# ---------------------------------------------------------------------------
-# Router — dispatch by HTTP method
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# AGENTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def handle_agents(method, path_param, body, cfg) -> dict:
+    bedrock = _bedrock(cfg)
+
+    if method == "GET" and not path_param:
+        try:
+            paginator = bedrock.get_paginator("list_agents")
+            agents = [s for page in paginator.paginate() for s in page.get("agentSummaries", [])]
+            return _ok({"agents": agents, "count": len(agents)})
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "GET" and path_param:
+        try:
+            summary = find_existing_agent(bedrock, path_param)
+            if not summary:
+                return _not_found(f"Agent '{path_param}' not found.")
+            details = bedrock.get_agent(agentId=summary["agentId"])["agent"]
+            aliases = bedrock.list_agent_aliases(
+                agentId=summary["agentId"]).get("agentAliasSummaries", [])
+            return _ok({"agent": details, "aliases": aliases})
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "POST":
+        missing = [f for f in ["name", "role_id", "goal_template", "schema_ref"] if not body.get(f)]
+        if missing:
+            return _bad_request(f"Missing required fields: {missing}")
+        try:
+            role_index = build_role_index(_load_roles(cfg))
+            role_obj   = role_index.get(body["role_id"])
+            if not role_obj:
+                return _bad_request(f"role_id '{body['role_id']}' not found.")
+            aid, alid = create_bedrock_agent(
+                client=bedrock, agent_id_slug=body.get("id", body["name"]),
+                agent_name=body["name"], goal_template=body["goal_template"],
+                schema_ref=body["schema_ref"], role_obj=role_obj,
+                bedrock_role_arn=cfg["bedrock_role_arn"],
+                foundation_model=body.get("foundation_model", cfg["foundation_model"]),
+            )
+            return _created({"agentId": aid, "aliasId": alid,
+                             "name": sanitise_agent_name(body["name"])})
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "PUT" and path_param:
+        if not body:
+            return _bad_request("Request body required.")
+        try:
+            summary = find_existing_agent(bedrock, path_param)
+            if not summary:
+                return _not_found(f"Agent '{path_param}' not found.")
+            aid     = summary["agentId"]
+            current = bedrock.get_agent(agentId=aid)["agent"]
+            bedrock.update_agent(
+                agentId=aid,
+                agentName=current["agentName"],
+                agentResourceRoleArn=current["agentResourceRoleArn"],
+                foundationModel=body.get("foundation_model", current["foundationModel"]),
+                instruction=body.get("instruction",  current.get("instruction", "")),
+                description=body.get("description",  current.get("description", "")),
+            )
+            bedrock.prepare_agent(agentId=aid)
+            return _ok({"updated": True, "agentId": aid})
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "DELETE":
+        agent_names = body.get("agent_names", [])
+        if not agent_names or not isinstance(agent_names, list):
+            return _bad_request("'agent_names' list is required.")
+        result = _delete_bedrock_agents(bedrock, agent_names)
+        return _resp(200 if not result["errors"] else 500, result)
+
+    return _method_not_allowed(method)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEAMS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def handle_teams(method, path_param, body, cfg) -> dict:
+
+    if method == "GET" and not path_param:
+        try:
+            team_map = _scan_s3_teams(cfg)
+            teams = []
+            for name, versions in team_map.items():
+                latest_ver = _latest_version(versions)
+                try:
+                    data        = _s3_get(cfg, versions[latest_ver])
+                    provisioned = not needs_provisioning(data)[0]
+                    agent_count = len(data.get("agents", []))
+                    team_id     = data.get("team", {}).get("team_id") or generate_team_id(name)
+                    owner       = data.get("team", {}).get("owner", "")
+                except Exception:
+                    provisioned = agent_count = team_id = owner = None
+                teams.append({
+                    "name":           name,
+                    "latest_version": latest_ver,
+                    "all_versions":   sorted(versions.keys()),
+                    "team_id":        team_id,
+                    "owner":          owner,
+                    "agent_count":    agent_count,
+                    "provisioned":    provisioned,
+                    "latest_s3_key":  versions[latest_ver],
+                })
+            return _ok({"teams": teams, "count": len(teams)})
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "GET" and path_param:
+        try:
+            team_map = _scan_s3_teams(cfg)
+            if path_param not in team_map:
+                return _not_found(f"Team '{path_param}' not found in S3.")
+            versions   = team_map[path_param]
+            latest_ver = _latest_version(versions)
+            data       = _s3_get(cfg, versions[latest_ver])
+            return _ok({
+                "team":     data,
+                "version":  latest_ver,
+                "s3_key":   versions[latest_ver],
+                "versions": sorted(versions.keys()),
+            })
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "POST":
+        dry_run = bool(body.get("dry_run", False))
+        try:
+            role_index = build_role_index(_load_roles(cfg))
+            dept_index = build_dept_index(_load_depts(cfg))
+        except KeyError as e:
+            return _server_error(str(e))
+
+        team_map = _scan_s3_teams(cfg)
+        if not team_map:
+            return _ok({"results": {}, "errors": [], "message": "No teams found in S3."})
+
+        results, all_errors = {}, []
+        for team_name, versions in team_map.items():
+            latest_ver = _latest_version(versions)
+            try:
+                team_data = _s3_get(cfg, versions[latest_ver])
+            except Exception as e:
+                results[team_name] = {"success": False, "errors": [f"S3 load failed: {e}"]}
+                all_errors.append(str(e))
+                continue
+
+            work_needed, total, missing = needs_provisioning(team_data)
+            if not work_needed:
+                log.info(f"  SKIP {team_name} — all {total} agent(s) already provisioned.")
+                results[team_name] = {"success": True, "skipped": True,
+                                      "reason": "all agents already provisioned"}
+                continue
+
+            log.info(f"  QUEUE {team_name} — {missing}/{total} agent(s) need IDs.")
+            try:
+                r = _provision_team(team_data, team_name, latest_ver,
+                                    role_index, dept_index, cfg, dry_run)
+            except Exception as e:
+                r = {"success": False, "s3_uri": None, "errors": [str(e)]}
+            results[team_name] = {k: v for k, v in r.items() if k != "team"}
+            if not r["success"]:
+                all_errors.extend(r.get("errors", []))
+
+        return _resp(200 if not all_errors else 500,
+                     {"results": results, "errors": all_errors})
+
+    if method == "PUT" and path_param:
+        if not body:
+            return _bad_request("Request body required.")
+        try:
+            team_map = _scan_s3_teams(cfg)
+            if path_param not in team_map:
+                return _not_found(f"Team '{path_param}' not found in S3.")
+            versions   = team_map[path_param]
+            latest_ver = _latest_version(versions)
+            team_data  = _s3_get(cfg, versions[latest_ver])
+
+            updated = copy.deepcopy(team_data)
+            for k, v in body.items():
+                if k in updated and isinstance(v, dict) and isinstance(updated[k], dict):
+                    updated[k].update(v)
+                else:
+                    updated[k] = v
+
+            role_index = build_role_index(_load_roles(cfg))
+            dept_index = build_dept_index(_load_depts(cfg))
+
+            work_needed, total, missing = needs_provisioning(updated)
+            if work_needed:
+                r = _provision_team(updated, path_param, latest_ver,
+                                    role_index, dept_index, cfg)
+            else:
+                key    = f"{cfg['teams_prefix']}/{path_param}/{latest_ver}/team.json"
+                s3_uri = _s3_put(cfg, key, updated)
+                r = {"success": True, "s3_uri": s3_uri, "errors": [],
+                     "skipped": "all agents already provisioned"}
+
+            return (_ok if r["success"] else _server_error)({
+                "updated":  True,
+                "version":  latest_ver,
+                "s3_uri":   r.get("s3_uri"),
+                "errors":   r.get("errors", []),
+            })
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "DELETE":
+        if not path_param:
+            return _bad_request("Team name required. Use DELETE /teams/{team_name}.")
+        try:
+            team_map = _scan_s3_teams(cfg)
+            if path_param not in team_map:
+                return _not_found(f"Team '{path_param}' not found in S3.")
+            versions = team_map[path_param]
+
+            # Collect all agent names across every version (deduplicated)
+            agent_names = set()
+            for key in versions.values():
+                try:
+                    data = _s3_get(cfg, key)
+                    for agent in data.get("agents", []):
+                        agent_names.add(agent["name"])
+                except Exception as e:
+                    log.warning(f"Could not load {key} for agent names: {e}")
+
+            # Delete Bedrock agents
+            agent_result = _delete_bedrock_agents(_bedrock(cfg), list(agent_names))
+
+            # Delete all S3 versions
+            deleted_keys, s3_errors = [], []
+            for key in versions.values():
+                try:
+                    _s3_delete(cfg, key)
+                    deleted_keys.append(key)
+                except Exception as e:
+                    s3_errors.append(f"Failed to delete {key}: {e}")
+
+            success = not agent_result["errors"] and not s3_errors
+            return _resp(200 if success else 500, {
+                "team":         path_param,
+                "agents":       agent_result,
+                "deleted_keys": deleted_keys,
+                "s3_errors":    s3_errors,
+            })
+        except Exception as e:
+            return _server_error(e)
+
+    return _method_not_allowed(method)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ROLES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def handle_roles(method, path_param, body, cfg) -> dict:
+
+    if method == "GET" and not path_param:
+        try:
+            data = _load_roles(cfg)
+            return _ok({"roles": data["roles"], "count": len(data["roles"]),
+                        "s3_key": cfg["roles_key"]})
+        except KeyError as e:
+            return _not_found(str(e))
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "GET" and path_param:
+        try:
+            data  = _load_roles(cfg)
+            match = next((r for r in data["roles"] if r["role_id"] == path_param), None)
+            return _ok(match) if match else _not_found(f"Role '{path_param}' not found.")
+        except KeyError as e:
+            return _not_found(str(e))
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "POST":
+        missing = [f for f in ["role_id", "title", "slug", "department_id",
+                                "schema_ref", "agent_config"] if not body.get(f)]
+        if missing:
+            return _bad_request(f"Missing required fields: {missing}")
+        try:
+            data = _load_roles(cfg)
+            if any(r["role_id"] == body["role_id"] for r in data["roles"]):
+                return _bad_request(f"role_id '{body['role_id']}' already exists.")
+            data["roles"].append(body)
+            data["meta"]["version"] = _bump_version(data["meta"].get("version", "v1"))
+            s3_uri = _save_roles(cfg, data)
+            return _created({"created": True, "role_id": body["role_id"], "s3_uri": s3_uri})
+        except KeyError as e:
+            return _not_found(str(e))
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "PUT" and path_param:
+        if not body:
+            return _bad_request("Request body required.")
+        try:
+            data = _load_roles(cfg)
+            idx  = next((i for i, r in enumerate(data["roles"]) if r["role_id"] == path_param), None)
+            if idx is None:
+                return _not_found(f"Role '{path_param}' not found.")
+            data["roles"][idx].update(body)
+            data["meta"]["version"] = _bump_version(data["meta"].get("version", "v1"))
+            s3_uri = _save_roles(cfg, data)
+            return _ok({"updated": True, "role_id": path_param, "s3_uri": s3_uri})
+        except KeyError as e:
+            return _not_found(str(e))
+        except Exception as e:
+            return _server_error(e)
+
+    return _method_not_allowed(method)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEPARTMENTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def handle_departments(method, path_param, body, cfg) -> dict:
+
+    if method == "GET" and not path_param:
+        try:
+            data = _load_depts(cfg)
+            return _ok({"departments": data["departments"], "count": len(data["departments"]),
+                        "s3_key": cfg["depts_key"]})
+        except KeyError as e:
+            return _not_found(str(e))
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "GET" and path_param:
+        try:
+            data  = _load_depts(cfg)
+            match = next((d for d in data["departments"] if d["department_id"] == path_param), None)
+            return _ok(match) if match else _not_found(f"Department '{path_param}' not found.")
+        except KeyError as e:
+            return _not_found(str(e))
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "POST":
+        missing = [f for f in ["department_id", "name", "slug", "description",
+                                "allowed_roles", "allowed_schemas"] if not body.get(f)]
+        if missing:
+            return _bad_request(f"Missing required fields: {missing}")
+        try:
+            data = _load_depts(cfg)
+            if any(d["department_id"] == body["department_id"] for d in data["departments"]):
+                return _bad_request(f"department_id '{body['department_id']}' already exists.")
+            data["departments"].append(body)
+            data["meta"]["version"] = _bump_version(data["meta"].get("version", "v1"))
+            s3_uri = _save_depts(cfg, data)
+            return _created({"created": True, "department_id": body["department_id"],
+                             "s3_uri": s3_uri})
+        except KeyError as e:
+            return _not_found(str(e))
+        except Exception as e:
+            return _server_error(e)
+
+    if method == "PUT" and path_param:
+        if not body:
+            return _bad_request("Request body required.")
+        try:
+            data = _load_depts(cfg)
+            idx  = next((i for i, d in enumerate(data["departments"])
+                         if d["department_id"] == path_param), None)
+            if idx is None:
+                return _not_found(f"Department '{path_param}' not found.")
+            for list_field in ("allowed_roles", "allowed_schemas"):
+                if list_field in body:
+                    existing = set(data["departments"][idx].get(list_field, []))
+                    existing.update(body.pop(list_field))
+                    data["departments"][idx][list_field] = sorted(existing)
+            data["departments"][idx].update(body)
+            data["meta"]["version"] = _bump_version(data["meta"].get("version", "v1"))
+            s3_uri = _save_depts(cfg, data)
+            return _ok({"updated": True, "department_id": path_param, "s3_uri": s3_uri})
+        except KeyError as e:
+            return _not_found(str(e))
+        except Exception as e:
+            return _server_error(e)
+
+    return _method_not_allowed(method)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Router
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ROUTES = {
+    "agents":      handle_agents,
+    "teams":       handle_teams,
+    "roles":       handle_roles,
+    "departments": handle_departments,
+}
 
 def handler(event: dict, context) -> dict:
-    """
-    Lambda entry point — triggered via API Gateway proxy integration.
-
-    Routes:
-        POST   /provision  → provision all team*.json files needing IDs
-        DELETE /provision  → delete agents by name
-
-    POST body:
-        {}                          ← provision all
-        { "dry_run": true }         ← validate + enrich only
-
-    DELETE body:
-        { "agent_names": ["Technical Coach", "Learning Strategist"] }
-    """
-    log.info(f"Event: {json.dumps(event)}")
-
-    # Parse body
+    log.info(f"Event: {json.dumps(event, default=str)}")
     try:
         body = _parse_body(event)
     except ValueError as e:
-        log.error(str(e))
-        return _apigw_response(400, {"error": str(e), "errors": [str(e)]})
-
-    # Config
+        return _bad_request(str(e))
     try:
         cfg = get_config()
     except ValueError as e:
-        log.error(str(e))
-        return _apigw_response(500, {"errors": [str(e)]})
+        return _server_error(str(e))
 
-    # Route by HTTP method
-    method = event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method", "POST")
-    method = method.upper()
-    log.info(f"Method: {method}")
+    method, resource, path_param = _extract_route(event)
+    log.info(f"Route: {method} /{resource}" + (f"/{path_param}" if path_param else ""))
 
-    # ── DELETE ────────────────────────────────────────────────────────
-    if method == "DELETE":
-        agent_names = body.get("agent_names", [])
-        if not agent_names:
-            return _apigw_response(400, {
-                "error": "'agent_names' list is required for DELETE.",
-                "errors": ["'agent_names' list is required for DELETE."]
-            })
-        if not isinstance(agent_names, list):
-            return _apigw_response(400, {
-                "error": "'agent_names' must be a list of strings.",
-                "errors": ["'agent_names' must be a list of strings."]
-            })
-
-        log.info(f"Deleting {len(agent_names)} agent(s): {agent_names}")
-        result = delete_agents(agent_names, cfg["region"])
-
-        status = 200 if not result["errors"] else 500
-        log.info(f"Delete summary — deleted={result['deleted']} not_found={result['not_found']} errors={result['errors']}")
-        return _apigw_response(status, result)
-
-    # ── POST (provision) ──────────────────────────────────────────────
-    if method == "POST":
-        dry_run = bool(body.get("dry_run", False))
-
-        # Load shared config from filesystem
-        try:
-            log.info(f"Loading roles:       {cfg['roles_path']}")
-            log.info(f"Loading departments: {cfg['depts_path']}")
-            roles_data = load_json(cfg["roles_path"])
-            depts_data = load_json(cfg["depts_path"])
-            role_index = build_role_index(roles_data)
-            dept_index = build_dept_index(depts_data)
-            log.info(f"  ✓ {len(role_index)} roles, {len(dept_index)} departments.")
-        except Exception as e:
-            log.error(f"Failed to load config files: {e}")
-            return _apigw_response(500, {"results": {}, "errors": [str(e)]})
-
-        # Scan filesystem for team files needing provisioning
-        log.info(f"Scanning: {cfg['scan_dir']}")
-        try:
-            team_files = scan_team_files(cfg["scan_dir"])
-        except SystemExit:
-            log.info("All team files already provisioned or none found.")
-            return _apigw_response(200, {"results": {}, "errors": [], "message": "Nothing to provision."})
-
-        log.info(f"  → {len(team_files)} team file(s) queued.\n")
-
-        results    = {}
-        all_errors = []
-
-        for tf in team_files:
-            try:
-                result = process_team_entry(
-                    team_file=tf,
-                    role_index=role_index,
-                    dept_index=dept_index,
-                    cfg=cfg,
-                    dry_run=dry_run,
-                )
-            except Exception as e:
-                log.exception(f"Unexpected error processing {tf['path'].name}")
-                result = {"success": False, "s3_uri": None, "errors": [str(e)]}
-
-            results[tf["name"]] = result
-            if not result["success"]:
-                all_errors.extend(result.get("errors", []))
-
-        status = 200 if not all_errors else 500
-        log.info(f"\n{'='*40}")
-        for name, r in results.items():
-            log.info(f"  {'✓' if r['success'] else '✗'}  {name}")
-        log.info(f"  Status: {status}")
-        log.info(f"{'='*40}\n")
-
-        return _apigw_response(status, {"results": results, "errors": all_errors})
-
-    # ── Unsupported method ────────────────────────────────────────────
-    return _apigw_response(405, {"error": f"Method '{method}' not allowed. Use POST or DELETE."})
+    route_fn = _ROUTES.get(resource)
+    if not route_fn:
+        return _resp(404, {
+            "error":  f"Unknown resource '/{resource}'.",
+            "routes": list(_ROUTES.keys()),
+        })
+    return route_fn(method, path_param, body, cfg)
