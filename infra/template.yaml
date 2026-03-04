@@ -540,7 +540,7 @@ Resources:
       Environment:
         Variables:
           ARTIFACT_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
-          BEDROCK_ROLE_ARN: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-bedrock-agent-service-role"
+          BEDROCK_ROLE_ARN: arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
           SCAN_DIR: /var/task/config/examples
           ROLES_PATH: /var/task/config/examples/roles.json
           DEPTS_PATH: /var/task/config/examples/departments.json
