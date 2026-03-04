@@ -73,6 +73,10 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional IAM role name assumed during `sam deploy` that needs S3 team config upload permissions.
+  BedrockAgentServiceRoleArn:
+    Type: String
+    Default: "arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun"
+    Description: IAM role ARN passed to Bedrock CreateAgent as AgentResourceRoleArn.
 
 Conditions:
   CreateConfigBucket: !Equals [!Ref ConfigBucketName, ""]
@@ -367,7 +371,7 @@ Resources:
                 Action:
                   - iam:PassRole
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-bedrock-agent-service-role"
+                  - !Ref BedrockAgentServiceRoleArn
 
   StepFunctionsRole:
     Type: AWS::IAM::Role
@@ -540,7 +544,7 @@ Resources:
       Environment:
         Variables:
           ARTIFACT_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
-          BEDROCK_ROLE_ARN: arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
+          BEDROCK_ROLE_ARN: !Ref BedrockAgentServiceRoleArn
           SCAN_DIR: /var/task/config/examples
           ROLES_PATH: /var/task/config/examples/roles.json
           DEPTS_PATH: /var/task/config/examples/departments.json
