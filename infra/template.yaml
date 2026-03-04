@@ -306,6 +306,44 @@ Resources:
                   - sfn:DescribeExecution
                 Resource: "*"
 
+
+  ProvisionTeamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-provision-team-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: provision-team-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action: [s3:PutObject]
+                Resource: !If
+                  - CreateArtifactBucket
+                  - !Sub "${TeamArtifactBucket.Arn}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/*"
+              - Effect: Allow
+                Action:
+                  - bedrock:ListAgents
+                  - bedrock:GetAgent
+                  - bedrock:CreateAgent
+                  - bedrock:CreateAgentAlias
+                  - bedrock:ListAgentAliases
+                Resource: "*"
+
   StepFunctionsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -452,6 +490,32 @@ Resources:
             Path: /team/task/{run_id}
             Method: get
 
+
+  ProvisionTeamFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../
+      Handler: config/examples/lambda_handler.handler
+      Role: !GetAtt ProvisionTeamRole.Arn
+      Events:
+        ProvisionTeamEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /provision
+            Method: post
+      Environment:
+        Variables:
+          ARTIFACT_BUCKET: !If [CreateArtifactBucket, !Ref TeamArtifactBucket, !Ref ArtifactBucketName]
+          BEDROCK_ROLE_ARN: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-bedrock-agent-service-role"
+          SCAN_DIR: /var/task/config/examples
+          ROLES_PATH: /var/task/config/examples/roles.json
+          DEPTS_PATH: /var/task/config/examples/departments.json
+          OUTPUT_PREFIX: teams
+          FOUNDATION_MODEL: amazon.nova-micro-v1:0
+
   SamDeployerStateMachinePermissions:
     Type: AWS::IAM::RolePolicy
     Condition: HasSamDeployerRoleName
@@ -486,6 +550,7 @@ Resources:
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-trigger-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-status-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-worker-role"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-provision-team-role"
               - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AWS::StackName}-stepfunctions-role"
 
   SamAssumeRoleS3TeamUploadPermissions:
@@ -611,6 +676,8 @@ Outputs:
     Value: !GetAtt StatusFunction.Arn
   WorkerFunctionArn:
     Value: !GetAtt WorkerFunction.Arn
+  ProvisionTeamFunctionArn:
+    Value: !GetAtt ProvisionTeamFunction.Arn
   WorkerRoleArn:
     Value: !GetAtt WorkerRole.Arn
   DdbTable:

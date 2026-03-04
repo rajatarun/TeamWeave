@@ -2,6 +2,7 @@
 	build-TriggerFunction \
 	build-WorkerFunction \
 	build-StatusFunction \
+	build-ProvisionTeamFunction \
 	build-OrchestratorFunction
 
 package-lambda:
@@ -16,6 +17,8 @@ build-TriggerFunction: package-lambda
 build-WorkerFunction: package-lambda
 
 build-StatusFunction: package-lambda
+
+build-ProvisionTeamFunction: package-lambda
 
 # Backward-compatible alias for older templates.
 build-OrchestratorFunction: package-lambda
