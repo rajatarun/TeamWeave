@@ -430,12 +430,14 @@ def sanitise_agent_name(name: str) -> str:
     """
     Sanitise a string to satisfy Bedrock agentName constraint:
         ([0-9a-zA-Z][_-]?){1,100}
-    - Replace spaces and any non-alphanumeric chars (except _ and -) with _
+    - Replace any non-alphanumeric char (except _ and -) with _
+    - Collapse any consecutive run of [_-] chars to a single _
+      (e.g. "_-_" from "Writer - LinkedIn" would fail the regex)
     - Strip leading/trailing underscores/hyphens
     - Truncate to 100 characters
     """
     sanitised = re.sub(r"[^0-9a-zA-Z_-]", "_", name)
-    sanitised = re.sub(r"_+", "_", sanitised)   # collapse multiple underscores
+    sanitised = re.sub(r"[_-]+", "_", sanitised)  # collapse any mix of _ and - to single _
     sanitised = sanitised.strip("_-")
     return sanitised[:100]
 
