@@ -18,6 +18,7 @@ Set model via env var (optional):
 
 ```bash
 export FOUNDATION_MODEL_ID=amazon.nova-micro-v1:0
+export ASSUME_ROLE_ARN=arn:aws:iam::123456789012:role/teamweave-github-actions-sam-deployer
 ```
 
 Deploy:
@@ -31,7 +32,8 @@ sam deploy \
   --resolve-s3 \
   --no-fail-on-empty-changeset \
   --parameter-overrides \
-    FoundationModelId=${FOUNDATION_MODEL_ID:-amazon.nova-micro-v1:0}
+    FoundationModelId=${FOUNDATION_MODEL_ID:-amazon.nova-micro-v1:0} \
+    SamAssumeRoleName=${ASSUME_ROLE_ARN##*/}
 ```
 
 
