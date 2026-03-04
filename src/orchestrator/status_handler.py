@@ -21,8 +21,15 @@ def _resp(code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     return {"statusCode": code, "headers": _cors(), "body": json.dumps(body, ensure_ascii=False, default=str)}
 
 
+def _method(event: Dict[str, Any]) -> str:
+    return (event.get("requestContext", {}).get("http", {}).get("method") or event.get("httpMethod") or "").upper()
+
+
 # ASSUMPTION: run_id path parameter may be URL-encoded because execution ARN contains ':'.
 def handler(event, context):
+    if _method(event) == "OPTIONS":
+        return {"statusCode": 200, "headers": _cors(), "body": ""}
+
     run_id = (
         event.get("pathParameters", {}).get("run_id")
         or event.get("pathParameters", {}).get("runId")
