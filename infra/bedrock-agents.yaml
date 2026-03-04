@@ -14,11 +14,6 @@ Parameters:
     Default: ""
     Description: Optional existing IAM role ARN for Bedrock agents. If empty, this stack creates and uses its own role.
 
-  SamDeployerRoleName:
-    Type: String
-    Default: teamweave-github-actions-sam-deployer
-    Description: IAM role name used by CI/CD deployer to receive Bedrock agent provisioning permissions.
-
   SamAssumeRoleName:
     Type: String
     Default: ""
