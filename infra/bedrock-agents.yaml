@@ -57,7 +57,6 @@ Conditions:
   UseGuardrails: !Equals [!Ref EnableGuardrails, "true"]
   UseProvidedAgentServiceRoleArn: !Not [!Equals [!Ref AgentServiceRoleArn, ""]]
   CreateBedrockAgentServiceRole: !Equals [!Ref AgentServiceRoleArn, ""]
-  HasSamDeployerRoleName: !Not [!Equals [!Ref SamDeployerRoleName, ""]]
   HasSamAssumeRoleName: !Not [!Equals [!Ref SamAssumeRoleName, ""]]
 
 Resources:
