@@ -74,6 +74,7 @@ jobs:
       - name: Deploy Bedrock Agents Stack
         run: |
           cd infra
+          ASSUME_ROLE_NAME="${ASSUME_ROLE_ARN##*/}"
           sam deploy \
             --template-file bedrock-agents.yaml \
             --stack-name "${BEDROCK_AGENTS_STACK_NAME}" \
@@ -84,6 +85,7 @@ jobs:
             --parameter-overrides \
               "FoundationModelId=${FOUNDATION_MODEL_ID}" \
               "AgentServiceRoleArn=${AGENT_SERVICE_ROLE_ARN}" \
+              "SamAssumeRoleName=${ASSUME_ROLE_NAME}" \
               "EnableGuardrails=false"
 
       - name: Resolve Bedrock role from CloudFormation outputs

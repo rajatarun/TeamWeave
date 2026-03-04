@@ -19,6 +19,11 @@ Parameters:
     Default: teamweave-github-actions-sam-deployer
     Description: IAM role name used by CI/CD deployer to receive Bedrock agent provisioning permissions.
 
+  SamAssumeRoleName:
+    Type: String
+    Default: ""
+    Description: Optional IAM role name assumed during `sam deploy` that needs Bedrock agent provisioning permissions.
+
   EnableGuardrails:
     Type: String
     Default: "true"
@@ -53,6 +58,7 @@ Conditions:
   UseProvidedAgentServiceRoleArn: !Not [!Equals [!Ref AgentServiceRoleArn, ""]]
   CreateBedrockAgentServiceRole: !Equals [!Ref AgentServiceRoleArn, ""]
   HasSamDeployerRoleName: !Not [!Equals [!Ref SamDeployerRoleName, ""]]
+  HasSamAssumeRoleName: !Not [!Equals [!Ref SamAssumeRoleName, ""]]
 
 Resources:
   BedrockAgentServiceRole:
@@ -739,10 +745,10 @@ Resources:
 
   SamDeployerBedrockAgentProvisionPermissions:
     Type: AWS::IAM::RolePolicy
-    Condition: HasSamDeployerRoleName
+    Condition: HasSamAssumeRoleName
     Properties:
-      RoleName: !Ref SamDeployerRoleName
-      PolicyName: BedrockAgentProvision
+      RoleName: !Ref SamAssumeRoleName
+      PolicyName: !Sub "${AWS::StackName}-bedrock-agent-provision"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
