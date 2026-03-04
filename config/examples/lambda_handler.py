@@ -51,19 +51,36 @@ import os
 
 import boto3
 
-from provision_team import (
-    load_json,
-    build_role_index,
-    build_dept_index,
-    scan_team_files,
-    validate_team,
-    enrich_goal_templates,
-    find_existing_agent,
-    create_bedrock_agent,
-    push_to_s3,
-    resolve_team_id,
-    needs_provisioning,
-)
+if __package__:
+    # Supports package-style imports, e.g. `config.examples.lambda_handler`.
+    from .provision_team import (
+        load_json,
+        build_role_index,
+        build_dept_index,
+        scan_team_files,
+        validate_team,
+        enrich_goal_templates,
+        find_existing_agent,
+        create_bedrock_agent,
+        push_to_s3,
+        resolve_team_id,
+        needs_provisioning,
+    )
+else:
+    # Backward-compatible when this file is executed as a top-level module.
+    from provision_team import (
+        load_json,
+        build_role_index,
+        build_dept_index,
+        scan_team_files,
+        validate_team,
+        enrich_goal_templates,
+        find_existing_agent,
+        create_bedrock_agent,
+        push_to_s3,
+        resolve_team_id,
+        needs_provisioning,
+    )
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
