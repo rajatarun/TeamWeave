@@ -413,14 +413,31 @@ def get_bedrock_client(region: str, session: boto3.Session | None = None):
 
 def find_existing_agent(client, agent_name: str) -> dict | None:
     """
-    Search for a Bedrock agent by name. Returns the agent summary dict or None.
+    Search for a Bedrock agent by name (matched against sanitised form).
+    Returns the agent summary dict or None.
     """
+    safe_name = sanitise_agent_name(agent_name)
     paginator = client.get_paginator("list_agents")
     for page in paginator.paginate():
         for summary in page.get("agentSummaries", []):
-            if summary["agentName"] == agent_name:
+            if summary["agentName"] == safe_name:
                 return summary
     return None
+
+
+
+def sanitise_agent_name(name: str) -> str:
+    """
+    Sanitise a string to satisfy Bedrock agentName constraint:
+        ([0-9a-zA-Z][_-]?){1,100}
+    - Replace spaces and any non-alphanumeric chars (except _ and -) with _
+    - Strip leading/trailing underscores/hyphens
+    - Truncate to 100 characters
+    """
+    sanitised = re.sub(r"[^0-9a-zA-Z_-]", "_", name)
+    sanitised = re.sub(r"_+", "_", sanitised)   # collapse multiple underscores
+    sanitised = sanitised.strip("_-")
+    return sanitised[:100]
 
 
 def create_bedrock_agent(
@@ -452,9 +469,12 @@ def create_bedrock_agent(
         f"Escalation    : {role_obj['agent_config']['escalation_policy']}"
     )
 
-    log.info(f"  Creating Bedrock agent: {agent_name}")
+    safe_name = sanitise_agent_name(agent_name)
+    if safe_name != agent_name:
+        log.info(f"  Agent name sanitised: '{agent_name}' → '{safe_name}'")
+    log.info(f"  Creating Bedrock agent: {safe_name}")
     response = client.create_agent(
-        agentName=agent_name,
+        agentName=safe_name,
         agentResourceRoleArn=bedrock_role_arn,
         foundationModel=foundation_model,
         instruction=instruction,
