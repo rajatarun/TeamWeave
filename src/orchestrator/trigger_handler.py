@@ -1,6 +1,7 @@
 import json
 import os
 from typing import Any, Dict, Optional
+from urllib.parse import unquote
 
 import boto3
 from botocore.exceptions import ClientError
@@ -16,8 +17,8 @@ def _cors() -> Dict[str, str]:
     return {
         "content-type": "application/json",
         "access-control-allow-origin": "*",
-        "access-control-allow-headers": "content-type",
-        "access-control-allow-methods": "POST,GET,OPTIONS",
+        "access-control-allow-headers": "Content-Type,Authorization",
+        "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
     }
 
 
@@ -45,6 +46,29 @@ def _json_body(event: Dict[str, Any]) -> Dict[str, Any]:
         return json.loads(b) if isinstance(b, str) else b
     except Exception:
         return {}
+
+
+def _proxy_path_for_provision_compat(method: str, body: Dict[str, Any]) -> str:
+    if method == "POST":
+        return "/teams"
+    team_name = body.get("team_name") or body.get("team") or body.get("name")
+    return f"/teams/{team_name}" if team_name else "/teams"
+
+
+def _is_agent_mgmt_route(path: str) -> bool:
+    if not path:
+        return False
+    parts = [p for p in path.split("/") if p]
+    if not parts:
+        return False
+    if parts[0] not in {"agents", "teams", "roles", "departments"}:
+        return False
+    return len(parts) <= 2
+
+
+def _normalize_proxy_path(path: str) -> str:
+    parts = [unquote(p) for p in path.split("/") if p]
+    return "/" + "/".join(parts)
 
 
 def _dao_from_optional_team(team: Optional[str], version: Optional[str]) -> DbDao:
@@ -103,6 +127,29 @@ def handler(event, context):
         except ClientError as exc:
             return _resp(500, {"error": exc.response.get("Error", {}).get("Message", str(exc))})
 
+    if _is_agent_mgmt_route(p) and m in {"GET", "POST", "PUT", "DELETE"}:
+        body = _json_body(event)
+        state_machine_arn = os.environ.get("STATE_MACHINE_ARN")
+        if not state_machine_arn:
+            return _resp(500, {"error": "STATE_MACHINE_ARN is not configured"})
+
+        try:
+            started = sfn.start_execution(
+                stateMachineArn=state_machine_arn,
+                input=json.dumps(
+                    {
+                        "operation": "agent_management",
+                        "method": m,
+                        "path": _normalize_proxy_path(p),
+                        "body": body,
+                        "query": _qs(event),
+                    }
+                ),
+            )
+            return _resp(202, {"run_id": started["executionArn"]})
+        except ClientError as exc:
+            return _resp(500, {"error": exc.response.get("Error", {}).get("Message", str(exc))})
+
     if p == "/provision" and m in {"POST", "DELETE"}:
         body = _json_body(event)
         state_machine_arn = os.environ.get("STATE_MACHINE_ARN")
@@ -112,7 +159,15 @@ def handler(event, context):
         try:
             started = sfn.start_execution(
                 stateMachineArn=state_machine_arn,
-                input=json.dumps({"operation": "provision", "method": m, "body": body}),
+                input=json.dumps(
+                    {
+                        "operation": "agent_management",
+                        "method": m,
+                        "path": _proxy_path_for_provision_compat(m, body),
+                        "body": body,
+                        "query": _qs(event),
+                    }
+                ),
             )
             return _resp(202, {"run_id": started["executionArn"]})
         except ClientError as exc:
