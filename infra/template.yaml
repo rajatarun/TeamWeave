@@ -203,6 +203,11 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt ProvisionTeamFunction.Arn
               - !If
                 - HasGeminiSecret
                 - Effect: Allow
@@ -425,6 +430,18 @@ Resources:
             RestApiId: !Ref TeamWeaveApi
             Path: /improve/task/done
             Method: post
+        ProvisionTeamPostEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /provision
+            Method: post
+        ProvisionTeamDeleteEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /provision
+            Method: delete
       Environment:
         Variables:
           CONFIG_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
@@ -475,6 +492,7 @@ Resources:
           VECTOR_DB_SSL_ROOT_CERT: /var/task/certs/rds-ca-bundle.pem
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
           GEMINI_MODEL: gemini-2.0-flash
+          PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:
@@ -507,19 +525,6 @@ Resources:
       CodeUri: ../
       Handler: config/examples/lambda_handler.handler
       Role: !GetAtt ProvisionTeamRole.Arn
-      Events:
-        ProvisionTeamEvent:
-          Type: Api
-          Properties:
-            RestApiId: !Ref TeamWeaveApi
-            Path: /provision
-            Method: post
-        ProvisionTeamDeleteEvent:
-          Type: Api
-          Properties:
-            RestApiId: !Ref TeamWeaveApi
-            Path: /provision
-            Method: delete
       Environment:
         Variables:
           ARTIFACT_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
@@ -677,7 +682,7 @@ Resources:
       Cors:
         AllowOrigin: "'*'"
         AllowHeaders: "'content-type'"
-        AllowMethods: "'POST,GET,OPTIONS'"
+        AllowMethods: "'POST,GET,DELETE,OPTIONS'"
 
 Outputs:
   HttpApiUrl:
