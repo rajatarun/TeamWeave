@@ -194,6 +194,13 @@ Resources:
                 Action:
                   - bedrock:InvokeAgent
                   - bedrock-agent-runtime:InvokeAgent
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent-alias/*"
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeAgent
+                  - bedrock-agent-runtime:InvokeAgent
                 Resource: "*"
               - Effect: Allow
                 Action:
