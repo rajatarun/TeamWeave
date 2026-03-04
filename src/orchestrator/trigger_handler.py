@@ -103,4 +103,19 @@ def handler(event, context):
         except ClientError as exc:
             return _resp(500, {"error": exc.response.get("Error", {}).get("Message", str(exc))})
 
+    if p == "/provision" and m in {"POST", "DELETE"}:
+        body = _json_body(event)
+        state_machine_arn = os.environ.get("STATE_MACHINE_ARN")
+        if not state_machine_arn:
+            return _resp(500, {"error": "STATE_MACHINE_ARN is not configured"})
+
+        try:
+            started = sfn.start_execution(
+                stateMachineArn=state_machine_arn,
+                input=json.dumps({"operation": "provision", "method": m, "body": body}),
+            )
+            return _resp(202, {"run_id": started["executionArn"]})
+        except ClientError as exc:
+            return _resp(500, {"error": exc.response.get("Error", {}).get("Message", str(exc))})
+
     return _resp(404, {"error": "Route not found"})
