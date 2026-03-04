@@ -4,6 +4,7 @@ from typing import Optional
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from .logger import get_logger
 from .models import StepFailed
@@ -75,6 +76,16 @@ def invoke_agent(agent_id: str, alias_id: str, session_id: str, input_text: str,
                     )
             return "".join(out_chunks).strip()
         except Exception as e:
+            if isinstance(e, ClientError):
+                error_code = ((e.response or {}).get("Error") or {}).get("Code", "")
+                if error_code in {"AccessDeniedException", "UnrecognizedClientException", "ExpiredTokenException"}:
+                    message = (
+                        "InvokeAgent permission/auth failure: "
+                        f"{error_code}. Verify IAM permissions for bedrock:InvokeAgent and "
+                        "that credentials are valid in this runtime."
+                    )
+                    log.error(message, extra={"agent_id": agent_id, "alias_id": alias_id, "session_id": session_id})
+                    raise StepFailed("invoke_agent", message) from e
             last_err = e
             log.warning("InvokeAgent failed", extra={"attempt": attempt, "err": str(e)[:240]})
             time.sleep(1.3 * (attempt + 1))
