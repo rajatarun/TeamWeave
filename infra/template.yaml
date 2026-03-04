@@ -340,6 +340,7 @@ Resources:
                   - bedrock:ListAgents
                   - bedrock:GetAgent
                   - bedrock:CreateAgent
+                  - bedrock:PrepareAgent
                   - bedrock:CreateAgentAlias
                   - bedrock:ListAgentAliases
                 Resource: "*"
