@@ -174,13 +174,17 @@ def run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> D
 
 
 def handler(event, context):
-    if event.get("operation") == "provision":
+    if event.get("operation") in {"provision", "agent_management"}:
         function_name = os.environ.get("PROVISION_FUNCTION_NAME")
         if not function_name:
             raise ValueError("PROVISION_FUNCTION_NAME is not configured")
 
+        proxy_path = event.get("path") or "/teams"
         invoke_payload = {
             "httpMethod": event.get("method", "POST"),
+            "path": proxy_path,
+            "rawPath": proxy_path,
+            "queryStringParameters": event.get("query") or {},
             "body": json.dumps(event.get("body") or {}),
         }
         response = lambda_client.invoke(
@@ -200,8 +204,9 @@ def handler(event, context):
 
         return {
             "status": "SUCCEEDED",
-            "operation": "provision",
+            "operation": "agent_management",
             "method": event.get("method", "POST"),
+            "path": proxy_path,
             "result": body,
         }
 
