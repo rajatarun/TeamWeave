@@ -20,13 +20,22 @@ Environment variables:
     OUTPUT_PREFIX     (optional) S3 key prefix for output         (default: teams)
     FOUNDATION_MODEL  (optional) Bedrock model ID                 (default: amazon.nova-micro-v1:0)
 
-Event payload:
+Trigger:
+    API Gateway HTTP API or REST API (Lambda proxy integration).
+
+Request:
+    POST /provision
+    Content-Type: application/json
+
     {}                          ← provision all team*.json files that need IDs
     { "dry_run": true }         ← validate + enrich only, no Bedrock or S3 calls
 
-Response:
+Response (API Gateway proxy format):
+    HTTP 200 / 500
+    Content-Type: application/json
+
     {
-      "statusCode": 200 | 400 | 500,
+      "statusCode": 200 | 500,
       "results": {
         "team_name": { "success": true, "s3_uri": "s3://...", "errors": [] },
         ...
@@ -203,22 +212,60 @@ def process_team_entry(
 # Lambda handler
 # ---------------------------------------------------------------------------
 
+def _apigw_response(status: int, body: dict) -> dict:
+    """Wrap a response body in API Gateway proxy integration format."""
+    return {
+        "statusCode": status,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(body),
+    }
+
+
+def _parse_body(event: dict) -> dict:
+    """
+    Extract and parse the request body from an API Gateway proxy event.
+    Handles both REST API (event["body"] is a string) and direct invocation
+    (event already is the body dict).
+    """
+    if "body" in event:
+        raw = event["body"]
+        if not raw:
+            return {}
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                raise ValueError(f"Request body is not valid JSON: {raw!r}")
+        if isinstance(raw, dict):
+            return raw
+    # Direct Lambda invocation — event itself is the payload
+    return event
+
+
 def handler(event: dict, context) -> dict:
     """
-    Lambda entry point.
+    Lambda entry point — triggered via API Gateway proxy integration.
 
     Scans SCAN_DIR for team*.json files that need provisioning,
-    runs the full pipeline for each, and returns a summary.
+    runs the full pipeline for each, and returns an APIGW proxy response.
     """
     log.info(f"Event: {json.dumps(event)}")
-    dry_run = bool(event.get("dry_run", False))
+
+    # Parse body
+    try:
+        body = _parse_body(event)
+    except ValueError as e:
+        log.error(str(e))
+        return _apigw_response(400, {"error": str(e), "results": {}, "errors": [str(e)]})
+
+    dry_run = bool(body.get("dry_run", False))
 
     # Config
     try:
         cfg = get_config()
     except ValueError as e:
         log.error(str(e))
-        return {"statusCode": 500, "results": {}, "errors": [str(e)]}
+        return _apigw_response(500, {"results": {}, "errors": [str(e)]})
 
     # Load shared config from filesystem
     try:
@@ -231,7 +278,7 @@ def handler(event: dict, context) -> dict:
         log.info(f"  ✓ {len(role_index)} roles, {len(dept_index)} departments.")
     except Exception as e:
         log.error(f"Failed to load config files: {e}")
-        return {"statusCode": 500, "results": {}, "errors": [str(e)]}
+        return _apigw_response(500, {"results": {}, "errors": [str(e)]})
 
     # Scan filesystem for team files needing provisioning
     log.info(f"Scanning: {cfg['scan_dir']}")
@@ -240,8 +287,7 @@ def handler(event: dict, context) -> dict:
     except SystemExit:
         # scan_team_files calls sys.exit when nothing needs work — treat as success
         log.info("All team files already provisioned or none found.")
-        return {"statusCode": 200, "results": {}, "errors": [],
-                "message": "Nothing to provision."}
+        return _apigw_response(200, {"results": {}, "errors": [], "message": "Nothing to provision."})
 
     log.info(f"  → {len(team_files)} team file(s) queued.\n")
 
@@ -274,8 +320,4 @@ def handler(event: dict, context) -> dict:
     log.info(f"  Status: {status}")
     log.info(f"{'='*40}\n")
 
-    return {
-        "statusCode": status,
-        "results":    results,
-        "errors":     all_errors,
-    }
+    return _apigw_response(status, {"results": results, "errors": all_errors})
