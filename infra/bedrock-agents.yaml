@@ -759,7 +759,9 @@ Resources:
             Resource: "*"
           - Effect: Allow
             Action: sts:AssumeRole
-            Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${SamAssumeRoleName}"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${SamAssumeRoleName}"
+              - !If [UseProvidedAgentServiceRoleArn, !Ref AgentServiceRoleArn, !GetAtt BedrockAgentServiceRole.Arn]
 
 Outputs:
   BedrockAgentServiceRoleArn:
