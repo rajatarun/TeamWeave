@@ -679,7 +679,7 @@ Resources:
       Role: !GetAtt StatusRole.Arn
       Environment:
         Variables:
-          STATE_MACHINE_ARN: !Ref TeamOrchestratorStateMachine
+          STATE_MACHINE_ARN: !Ref StateMachine
       Events:
         TeamTaskStatusEvent:
           Type: Api
