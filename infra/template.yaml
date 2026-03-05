@@ -677,6 +677,9 @@ Resources:
       CodeUri: ../
       Handler: src/orchestrator/status_handler.handler
       Role: !GetAtt StatusRole.Arn
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref TeamOrchestratorStateMachine
       Events:
         TeamTaskStatusEvent:
           Type: Api
