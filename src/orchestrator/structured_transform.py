@@ -1,6 +1,7 @@
 import json
 from typing import Any, Dict, Optional
 
+from .bedrock_wrappers import invoke_model_request
 from .json_utils import extract_json_payload
 
 
@@ -35,8 +36,9 @@ Target Schema:
 {json.dumps(normalized_target_schema, indent=2)}
 """
 
-    response = runtime.invoke_model(
-        modelId=model_id,
+    response = invoke_model_request(
+        runtime,
+        model_id=model_id,
         body=json.dumps(
             {
                 "anthropic_version": "bedrock-2023-05-31",
