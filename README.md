@@ -98,7 +98,7 @@ Because of this, you can add or evolve pipelines by changing JSON configs rather
 ### Team workflow
 
 - `POST /team/task` → starts a workflow run (returns `run_id` / execution ARN).
-- `GET /team/task/{run_id}` → returns `RUNNING | SUCCEEDED | FAILED` and payload when available.
+- `GET /team/task/{run_id}` and `GET /teams/task/{run_id}` → returns `RUNNING | SUCCEEDED | FAILED` and payload when available.
 
 ### Improvement tasks
 
@@ -218,7 +218,7 @@ curl -X POST "$API_URL/team/task" \
 Then poll:
 
 ```bash
-curl "$API_URL/team/task/<run_id>"
+curl "$API_URL/teams/task/<run_id>"
 ```
 
 ---
