@@ -1,4 +1,5 @@
 import json
+import os
 from urllib.parse import unquote
 from typing import Any, Dict
 
@@ -25,6 +26,18 @@ def _method(event: Dict[str, Any]) -> str:
     return (event.get("requestContext", {}).get("http", {}).get("method") or event.get("httpMethod") or "").upper()
 
 
+def _to_execution_arn(run_id: str) -> str:
+    if run_id.startswith("arn:"):
+        return run_id
+
+    state_machine_arn = os.getenv("STATE_MACHINE_ARN", "")
+    if ":stateMachine:" not in state_machine_arn:
+        raise ValueError("STATE_MACHINE_ARN must be configured when run_id is an execution id")
+
+    base = state_machine_arn.replace(":stateMachine:", ":execution:", 1)
+    return f"{base}:{run_id}"
+
+
 # ASSUMPTION: run_id path parameter may be URL-encoded because execution ARN contains ':'.
 def handler(event, context):
     if _method(event) == "OPTIONS":
@@ -41,7 +54,12 @@ def handler(event, context):
         return _resp(400, {"error": "run_id required"})
 
     try:
-        desc = sfn.describe_execution(executionArn=run_id)
+        execution_arn = _to_execution_arn(run_id)
+    except ValueError as exc:
+        return _resp(400, {"error": str(exc)})
+
+    try:
+        desc = sfn.describe_execution(executionArn=execution_arn)
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code")
         if code == "ExecutionDoesNotExist":
