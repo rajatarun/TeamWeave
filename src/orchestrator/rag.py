@@ -5,6 +5,7 @@ from urllib.parse import unquote, urlparse
 import boto3
 import psycopg
 from psycopg import sql
+from .bedrock_wrappers import invoke_model_request
 from .logger import get_logger
 from .db import DbDao
 
@@ -22,10 +23,11 @@ def _embed_text(text: str) -> Optional[List[float]]:
     }
 
     try:
-        resp = bedrock_runtime.invoke_model(
-            modelId=model_id,
+        resp = invoke_model_request(
+            bedrock_runtime,
+            model_id=model_id,
             body=json.dumps(body),
-            contentType="application/json",
+            content_type="application/json",
             accept="application/json",
         )
         raw = resp.get("body").read().decode("utf-8")
