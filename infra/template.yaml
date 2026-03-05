@@ -787,7 +787,7 @@ Resources:
     Properties:
       StateMachineName: !Sub "${AWS::StackName}-state-machine"
       # ASSUMPTION: Express workflow is required for low-latency polling and high-throughput invocation.
-      StateMachineType: EXPRESS
+      StateMachineType: STANDARD
       RoleArn: !GetAtt StepFunctionsRole.Arn
       LoggingConfiguration:
         Level: ERROR
