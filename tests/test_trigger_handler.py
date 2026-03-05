@@ -123,9 +123,13 @@ class TriggerHandlerTests(unittest.TestCase):
         response = self.trigger_handler.handler(event, None)
 
         self.assertEqual(response["statusCode"], 202)
-        self.assertIn("run_id", json.loads(response["body"]))
+        body = json.loads(response["body"])
+        self.assertIn("run_id", body)
         self.assertEqual(len(self.fake_sfn.async_calls), 1)
         self.assertEqual(len(self.fake_sfn.sync_calls), 0)
+
+        payload = json.loads(self.fake_sfn.async_calls[0]["input"])
+        self.assertEqual(payload["run_id"], body["run_id"])
 
 
 if __name__ == "__main__":

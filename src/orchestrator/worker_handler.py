@@ -56,8 +56,8 @@ def _build_transform_fallback(raw_text: str, error: Exception) -> Dict[str, Any]
     return build_standard_response(raw_text, f"schema transformation failed: {error}")
 
 
-def run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> Dict[str, Any]:
-    run_id = str(uuid.uuid4())
+def run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any], run_id: Optional[str] = None) -> Dict[str, Any]:
+    run_id = run_id or str(uuid.uuid4())
     team_cfg, team_raw = load_team_config(team, version)
     dao = DbDao.from_team_config(team_raw)
 
@@ -217,4 +217,5 @@ def handler(event, context):
     request_obj = event.get("request") or {}
     if not team or not version:
         raise ValueError("team and version required")
-    return run_team_pipeline(team, version, request_obj)
+    run_id = event.get("run_id")
+    return run_team_pipeline(team, version, request_obj, run_id=run_id)
