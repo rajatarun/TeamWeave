@@ -174,6 +174,8 @@ def run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> D
 
 
 def handler(event, context):
+    log.info("worker_handler_received_event", extra={"event": event})
+
     if event.get("operation") in {"provision", "agent_management"}:
         function_name = os.environ.get("PROVISION_FUNCTION_NAME")
         if not function_name:
