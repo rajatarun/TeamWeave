@@ -125,6 +125,8 @@ class TriggerHandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 202)
         body = json.loads(response["body"])
         self.assertIn("run_id", body)
+        self.assertEqual(body["state_fn_execution_id"], "id")
+        self.assertEqual(body["state_fn_execution_arn"], "arn:aws:states:region:acct:execution:sm:id")
         self.assertEqual(len(self.fake_sfn.async_calls), 1)
         self.assertEqual(len(self.fake_sfn.sync_calls), 0)
 
