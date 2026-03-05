@@ -6,6 +6,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from .bedrock_wrappers import invoke_agent_request
 from .logger import get_logger
 from .models import StepFailed
 
@@ -18,8 +19,6 @@ brt = boto3.client(
         retries={"max_attempts": 0},
     ),
 )
-
-
 def invoke_agent(agent_id: str, alias_id: str, session_id: str, input_text: str, max_retries: int = 2) -> str:
     if not agent_id or not alias_id:
         raise StepFailed("invoke_agent", "Missing agentId/aliasId in config")
@@ -37,11 +36,12 @@ def invoke_agent(agent_id: str, alias_id: str, session_id: str, input_text: str,
                     "input_text": input_text[:1000],
                 },
             )
-            resp = brt.invoke_agent(
-                agentId=agent_id,
-                agentAliasId=alias_id,
-                sessionId=session_id,
-                inputText=input_text,
+            resp = invoke_agent_request(
+                brt,
+                agent_id=agent_id,
+                alias_id=alias_id,
+                session_id=session_id,
+                input_text=input_text,
             )
 
             guardrail_action = resp.get("amazon-bedrock-guardrailAction")
