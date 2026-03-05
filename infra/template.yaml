@@ -691,6 +691,16 @@ Resources:
               - method.request.path.run_id:
                   Required: true
                   Caching: false
+        TeamsTaskStatusEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /teams/task/{run_id}
+            Method: get
+            RequestParameters:
+              - method.request.path.run_id:
+                  Required: true
+                  Caching: false
 
 
   ProvisionTeamFunction:
