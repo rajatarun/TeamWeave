@@ -1,5 +1,6 @@
 import json
 import os
+import uuid
 from typing import Any, Dict, Optional
 from urllib.parse import unquote
 
@@ -80,6 +81,13 @@ def _sync_stepfn_response(state_machine_arn: str, payload: Dict[str, Any]) -> Di
     return _resp(200, output if isinstance(output, dict) else {"result": output})
 
 
+def _start_async_execution(state_machine_arn: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    run_id = str(uuid.uuid4())
+    payload_with_run_id = {**payload, "run_id": run_id}
+    sfn.start_execution(stateMachineArn=state_machine_arn, input=json.dumps(payload_with_run_id))
+    return _resp(202, {"run_id": run_id})
+
+
 def _proxy_path_for_provision_compat(method: str, body: Dict[str, Any]) -> str:
     if method == "POST":
         return "/teams"
@@ -151,11 +159,10 @@ def handler(event, context):
             return _resp(500, {"error": "STATE_MACHINE_ARN is not configured"})
 
         try:
-            started = sfn.start_execution(
-                stateMachineArn=state_machine_arn,
-                input=json.dumps({"team": team, "version": version, "request": request_obj}),
+            return _start_async_execution(
+                state_machine_arn,
+                {"team": team, "version": version, "request": request_obj},
             )
-            return _resp(202, {"run_id": started["executionArn"]})
         except ClientError as exc:
             return _resp(500, {"error": exc.response.get("Error", {}).get("Message", str(exc))})
 
@@ -176,8 +183,7 @@ def handler(event, context):
             if m == "GET":
                 return _sync_stepfn_response(state_machine_arn, payload)
 
-            started = sfn.start_execution(stateMachineArn=state_machine_arn, input=json.dumps(payload))
-            return _resp(202, {"run_id": started["executionArn"]})
+            return _start_async_execution(state_machine_arn, payload)
         except ClientError as exc:
             return _resp(500, {"error": exc.response.get("Error", {}).get("Message", str(exc))})
 
@@ -188,19 +194,16 @@ def handler(event, context):
             return _resp(500, {"error": "STATE_MACHINE_ARN is not configured"})
 
         try:
-            started = sfn.start_execution(
-                stateMachineArn=state_machine_arn,
-                input=json.dumps(
-                    {
-                        "operation": "agent_management",
-                        "method": m,
-                        "path": _proxy_path_for_provision_compat(m, body),
-                        "body": body,
-                        "query": _qs(event),
-                    }
-                ),
+            return _start_async_execution(
+                state_machine_arn,
+                {
+                    "operation": "agent_management",
+                    "method": m,
+                    "path": _proxy_path_for_provision_compat(m, body),
+                    "body": body,
+                    "query": _qs(event),
+                },
             )
-            return _resp(202, {"run_id": started["executionArn"]})
         except ClientError as exc:
             return _resp(500, {"error": exc.response.get("Error", {}).get("Message", str(exc))})
 
