@@ -84,8 +84,17 @@ def _sync_stepfn_response(state_machine_arn: str, payload: Dict[str, Any]) -> Di
 def _start_async_execution(state_machine_arn: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     run_id = str(uuid.uuid4())
     payload_with_run_id = {**payload, "run_id": run_id}
-    sfn.start_execution(stateMachineArn=state_machine_arn, input=json.dumps(payload_with_run_id))
-    return _resp(202, {"run_id": run_id})
+    execution = sfn.start_execution(stateMachineArn=state_machine_arn, input=json.dumps(payload_with_run_id))
+    execution_arn = execution.get("executionArn")
+    execution_id = execution_arn.rsplit(":", 1)[-1] if isinstance(execution_arn, str) and execution_arn else None
+    return _resp(
+        202,
+        {
+            "run_id": run_id,
+            "state_fn_execution_id": execution_id,
+            "state_fn_execution_arn": execution_arn,
+        },
+    )
 
 
 def _proxy_path_for_provision_compat(method: str, body: Dict[str, Any]) -> str:
