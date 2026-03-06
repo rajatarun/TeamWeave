@@ -45,7 +45,7 @@ def gemini_research_brief(team_globals: Dict[str, Any], request_obj: Dict[str, A
 
     prompt = (
         "You are a research assistant for a personal technical improvement plan. "
-        "Return a concise brief with 6-10 bullets, each bullet must include a credible URL. "
+        "Return a concise brief with 2000-3000 words in bullets, each bullet must include a credible URL. "
         "Prefer primary sources (official docs, specs, RFCs, vendor docs). "
         "Avoid repeating resources that map to completed topics/levels. "
         "If uncertain, tag NEEDS_SOURCE. Keep under 1200 chars. Return plain text only.\n"
