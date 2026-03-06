@@ -47,7 +47,6 @@ jobs:
           cd infra
           sam validate --lint
           aws cloudformation validate-template --template-body file://template.yaml
-
       - name: SAM Deploy
         run: |
           cd infra
@@ -64,41 +63,6 @@ jobs:
               "GeminiSecretArn=${GEMINI_SECRET_ARN}" \
               "SamDeployerRoleName=${SAM_DEPLOYER_ROLE_NAME}" \
               "SamAssumeRoleName=${ASSUME_ROLE_NAME}"
-
-
-      - name: Validate Bedrock Agents Template
-        run: |
-          cd infra
-          sam validate -t bedrock-agents.yaml --lint
-
-      - name: Deploy Bedrock Agents Stack
-        run: |
-          cd infra
-          ASSUME_ROLE_NAME="${ASSUME_ROLE_ARN##*/}"
-          sam deploy \
-            --template-file bedrock-agents.yaml \
-            --stack-name "${BEDROCK_AGENTS_STACK_NAME}" \
-            --region "${AWS_REGION}" \
-            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-            --resolve-s3 \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              "FoundationModelId=${FOUNDATION_MODEL_ID}" \
-              "AgentServiceRoleArn=${AGENT_SERVICE_ROLE_ARN}" \
-              "SamAssumeRoleName=${ASSUME_ROLE_NAME}" \
-              "EnableGuardrails=false"
-
-      - name: Resolve Bedrock role from CloudFormation outputs
-        run: |
-          BEDROCK_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name "${BEDROCK_AGENTS_STACK_NAME}" --region "${AWS_REGION}" --query "Stacks[0].Outputs[?OutputKey=='BedrockAgentServiceRoleArn'].OutputValue" --output text)
-
-          if [ -z "$BEDROCK_ROLE_ARN" ] || [ "$BEDROCK_ROLE_ARN" = "None" ]; then
-            echo "BedrockAgentServiceRoleArn output not found in stack ${BEDROCK_AGENTS_STACK_NAME}" >&2
-            exit 1
-          fi
-
-          echo "BEDROCK_ROLE_ARN=$BEDROCK_ROLE_ARN" >> "$GITHUB_ENV"
-
       - name: Dump CloudFormation events on failure
         if: failure()
         run: |
@@ -112,30 +76,3 @@ jobs:
             --stack-name "${BEDROCK_AGENTS_STACK_NAME}" \
             --region "${AWS_REGION}" \
             --max-items 50 || true
-
-      - name: Resolve config bucket from CloudFormation outputs
-        run: |
-          CONFIG_BUCKET=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --region "${AWS_REGION}" --query "Stacks[0].Outputs[?OutputKey=='ConfigBucket'].OutputValue" --output text)
-
-          if [ -z "$CONFIG_BUCKET" ] || [ "$CONFIG_BUCKET" = "None" ]; then
-            echo "ConfigBucket output not found in stack ${STACK_NAME}" >&2
-            exit 1
-          fi
-
-          echo "CONFIG_BUCKET=$CONFIG_BUCKET" >> "$GITHUB_ENV"
-
-      - name: Test team task endpoint
-        run: |
-          curl --connect-timeout 10 --max-time 300 -X POST https://zua5drbgpi.execute-api.us-east-1.amazonaws.com/prod/team/task \
-            -H "Content-Type: application/json" \
-            -d '{
-              "team": "tarun_visibility_team",
-              "version": "v1",
-              "request": {
-                "topic": "Agentic AI governance in banking",
-                "channel": "linkedin",
-                "audience": "CTOs",
-                "objective": "Increase authority positioning",
-                "constraints": ["No fabricated citations"]
-              }
-            }'
