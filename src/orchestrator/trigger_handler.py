@@ -11,6 +11,7 @@ from .config_loader import load_team_config
 from .db import DbDao
 
 sfn = boto3.client("stepfunctions")
+lambda_client = boto3.client("lambda")
 
 
 # ASSUMPTION: Existing non-/team/task routes remain on this Lambda to avoid breaking current API consumers.
@@ -63,6 +64,39 @@ def _start_async_execution(state_machine_arn: str, payload: Dict[str, Any]) -> D
             "state_fn_execution_arn": execution_arn,
         },
     )
+
+
+def _invoke_provision_lambda_sync(method: str, path: str, body: Dict[str, Any], query: Dict[str, Any]) -> Dict[str, Any]:
+    function_name = os.environ.get("PROVISION_FUNCTION_NAME")
+    if not function_name:
+        return _resp(500, {"error": "PROVISION_FUNCTION_NAME is not configured"})
+
+    invoke_payload = {
+        "httpMethod": method,
+        "path": path,
+        "rawPath": path,
+        "queryStringParameters": query,
+        "body": json.dumps(body or {}),
+    }
+    response = lambda_client.invoke(
+        FunctionName=function_name,
+        InvocationType="RequestResponse",
+        Payload=json.dumps(invoke_payload).encode("utf-8"),
+    )
+    payload_bytes = response.get("Payload").read()
+    payload_text = payload_bytes.decode("utf-8") if payload_bytes else "{}"
+    payload = json.loads(payload_text or "{}")
+
+    status_code = int(payload.get("statusCode", 500))
+    raw_body = payload.get("body")
+    try:
+        parsed_body = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
+    except Exception:
+        parsed_body = {"raw": raw_body}
+
+    if isinstance(parsed_body, dict):
+        return _resp(status_code, parsed_body)
+    return _resp(status_code, {"result": parsed_body})
 
 
 def _proxy_path_for_provision_compat(method: str, body: Dict[str, Any]) -> str:
@@ -145,17 +179,23 @@ def handler(event, context):
 
     if _is_agent_mgmt_route(p) and m in {"GET", "POST", "PUT", "DELETE"}:
         body = _json_body(event)
-        state_machine_arn = os.environ.get("STATE_MACHINE_ARN")
-        if not state_machine_arn:
-            return _resp(500, {"error": "STATE_MACHINE_ARN is not configured"})
+        query = _qs(event)
+        normalized_path = _normalize_proxy_path(p)
 
         try:
+            if m == "GET":
+                return _invoke_provision_lambda_sync(m, normalized_path, body, query)
+
+            state_machine_arn = os.environ.get("STATE_MACHINE_ARN")
+            if not state_machine_arn:
+                return _resp(500, {"error": "STATE_MACHINE_ARN is not configured"})
+
             payload = {
                 "operation": "agent_management",
                 "method": m,
-                "path": _normalize_proxy_path(p),
+                "path": normalized_path,
                 "body": body,
-                "query": _qs(event),
+                "query": query,
             }
             return _start_async_execution(state_machine_arn, payload)
         except ClientError as exc:
