@@ -8,20 +8,16 @@ import unittest
 
 class _FakeSfnClient:
     def __init__(self):
-        self.sync_calls = []
         self.async_calls = []
-        self.sync_response = {
-            "status": "SUCCEEDED",
-            "output": json.dumps({"statusCode": 200, "body": json.dumps({"items": ["a"]})}),
-        }
-
-    def start_sync_execution(self, **kwargs):
-        self.sync_calls.append(kwargs)
-        return self.sync_response
+        self.last_execution_arn = None
 
     def start_execution(self, **kwargs):
         self.async_calls.append(kwargs)
         return {"executionArn": "arn:aws:states:region:acct:execution:sm:id"}
+
+    def describe_execution(self, **kwargs):
+        self.last_execution_arn = kwargs.get("executionArn")
+        return {"status": "RUNNING"}
 
 
 class TriggerHandlerTests(unittest.TestCase):
@@ -65,14 +61,9 @@ class TriggerHandlerTests(unittest.TestCase):
         cls.trigger_handler.sfn = cls.fake_sfn
 
     def setUp(self):
-        self.fake_sfn.sync_calls.clear()
         self.fake_sfn.async_calls.clear()
-        self.fake_sfn.sync_response = {
-            "status": "SUCCEEDED",
-            "output": json.dumps({"statusCode": 200, "body": json.dumps({"items": ["a"]})}),
-        }
 
-    def test_get_agent_routes_wait_for_sync_step_function_response(self):
+    def test_get_agent_routes_are_async_for_standard_workflows(self):
         event = {
             "httpMethod": "GET",
             "path": "/agents",
@@ -81,37 +72,12 @@ class TriggerHandlerTests(unittest.TestCase):
 
         response = self.trigger_handler.handler(event, None)
 
-        self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(json.loads(response["body"]), {"items": ["a"]})
-        self.assertEqual(len(self.fake_sfn.sync_calls), 1)
-        self.assertEqual(len(self.fake_sfn.async_calls), 0)
-
-    def test_get_agent_routes_return_error_when_sync_execution_fails(self):
-        self.fake_sfn.sync_response = {
-            "status": "FAILED",
-            "error": "BadRequest",
-            "cause": "validation failed",
-        }
-        event = {"httpMethod": "GET", "path": "/agents"}
-
-        response = self.trigger_handler.handler(event, None)
-
-        self.assertEqual(response["statusCode"], 500)
+        self.assertEqual(response["statusCode"], 202)
         body = json.loads(response["body"])
-        self.assertEqual(body["status"], "FAILED")
-        self.assertEqual(body["error"], "BadRequest")
-        self.assertEqual(body["cause"], "validation failed")
-        self.assertEqual(len(self.fake_sfn.sync_calls), 1)
-        self.assertEqual(len(self.fake_sfn.async_calls), 0)
-
-    def test_get_agent_routes_wrap_non_json_sync_output(self):
-        self.fake_sfn.sync_response = {"status": "SUCCEEDED", "output": "not-json"}
-        event = {"httpMethod": "GET", "path": "/agents"}
-
-        response = self.trigger_handler.handler(event, None)
-
-        self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(json.loads(response["body"]), {"result": "not-json"})
+        self.assertIn("run_id", body)
+        self.assertEqual(body["state_fn_execution_id"], "id")
+        self.assertEqual(body["state_fn_execution_arn"], "arn:aws:states:region:acct:execution:sm:id")
+        self.assertEqual(len(self.fake_sfn.async_calls), 1)
 
     def test_post_agent_routes_remain_async(self):
         event = {
@@ -128,7 +94,6 @@ class TriggerHandlerTests(unittest.TestCase):
         self.assertEqual(body["state_fn_execution_id"], "id")
         self.assertEqual(body["state_fn_execution_arn"], "arn:aws:states:region:acct:execution:sm:id")
         self.assertEqual(len(self.fake_sfn.async_calls), 1)
-        self.assertEqual(len(self.fake_sfn.sync_calls), 0)
 
         payload = json.loads(self.fake_sfn.async_calls[0]["input"])
         self.assertEqual(payload["run_id"], body["run_id"])
