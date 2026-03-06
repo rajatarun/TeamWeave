@@ -196,6 +196,11 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*/index/*"
               - Effect: Allow
                 Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt ProvisionTeamFunction.Arn
+              - Effect: Allow
+                Action:
                   - bedrock:InvokeAgent
                   - bedrock-agent-runtime:InvokeAgent
                 Resource:
