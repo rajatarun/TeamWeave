@@ -627,6 +627,7 @@ Resources:
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
           GEMINI_MODEL: gemini-2.0-flash
           STATE_MACHINE_ARN: !Ref StateMachine
+          PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:
