@@ -17,7 +17,7 @@ TeamWeave is split into two layers:
 
 - **Trigger Lambda** accepts API calls and starts Step Functions executions for long-running work.
 - **Status Lambda** reports execution state by `run_id`.
-- **Step Functions (Express)** invokes worker logic and provides async execution tracking.
+- **Step Functions (Standard)** invokes worker logic and provides async execution tracking.
 
 ### 2) Data/Execution Plane (multi-agent pipeline)
 
@@ -34,7 +34,7 @@ TeamWeave is split into two layers:
 flowchart TD
   A[Client] --> B[API Gateway]
   B --> C[Trigger Lambda]
-  C --> D[Step Functions Express]
+  C --> D[Step Functions Standard]
   D --> E[Worker Lambda]
   E --> F[S3 Team Config]
   E --> G[Bedrock Agents]
@@ -114,7 +114,7 @@ The trigger function can also route CRUD-like requests for:
 - `/roles`, `/roles/{role_id}`
 - `/departments`, `/departments/{dept_id}`
 
-These are dispatched through Step Functions to the provision/management lambda path.
+These are dispatched through Step Functions to the provision/management lambda path and return an async execution id.
 
 ---
 
