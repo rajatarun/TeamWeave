@@ -173,9 +173,9 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
 
 def get_rag_context(request_obj: Dict[str, Any], team_globals: Dict[str, Any], owner: str, dao: Optional[DbDao] = None) -> str:
     rag = (team_globals or {}).get("rag") or {}
-    features = (team_globals or {}).get("features") or {}
+    feats = (team_globals or {}).get("features") or {}
 
-    if features.get("explicit_rag") is False:
+    if not feats.get("explicit_rag", False):
         log.info("explicit_rag_disabled; skipping_rag_context_generation")
         return ""
 
