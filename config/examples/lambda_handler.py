@@ -265,13 +265,19 @@ def _bedrock(cfg):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_instruction(agent: dict, role_obj: dict) -> str:
-    """Construct the full Bedrock instruction string from role + agent config."""
+    """
+    Construct the full Bedrock instruction string from role + agent config.
+    Uses original_goal_template (pre-enrichment) if present to avoid
+    double-wrapping an already enriched goal_template.
+    """
     primary_task = role_obj["agent_config"]["primary_task"]
     constraints  = "\n".join(f"  - {c}" for c in primary_task.get("constraints", []))
+    # Prefer the raw goal before enrich_goal_templates ran
+    goal = agent.get("original_goal_template") or agent.get("goal_template", "")
     return (
         f"You are {agent['name']}.\n\n"
         f"Persona: {role_obj['agent_config']['persona']}\n\n"
-        f"Goal:\n{agent['goal_template']}\n\n"
+        f"Goal:\n{goal}\n\n"
         f"Action  : {primary_task['action']}\n"
         f"Input   : {primary_task['input']}\n"
         f"Output  : {primary_task['output']}\n"
@@ -470,10 +476,38 @@ def handle_agents(method, path_param, body, cfg) -> dict:
             summary = find_existing_agent(bedrock, path_param)
             if not summary:
                 return _not_found(f"Agent '{path_param}' not found.")
-            details = bedrock.get_agent(agentId=summary["agentId"])["agent"]
-            aliases = bedrock.list_agent_aliases(
-                agentId=summary["agentId"]).get("agentAliasSummaries", [])
-            return _ok({"agent": details, "aliases": aliases})
+            aid     = summary["agentId"]
+            details = bedrock.get_agent(agentId=aid)["agent"]
+            aliases = bedrock.list_agent_aliases(agentId=aid).get("agentAliasSummaries", [])
+
+            # Find original_goal_template from S3 team files so callers
+            # can PUT back the raw goal without re-sending the full composite instruction
+            original_goal_template = None
+            agent_name_sanitised   = details["agentName"]
+            try:
+                team_map = _scan_s3_teams(cfg)
+                for versions in team_map.values():
+                    latest_ver = _latest_version(versions)
+                    try:
+                        team_data = _s3_get(cfg, versions[latest_ver])
+                        for a in team_data.get("agents", []):
+                            if sanitise_agent_name(a["name"]) == agent_name_sanitised:
+                                original_goal_template = (
+                                    a.get("original_goal_template") or a.get("goal_template")
+                                )
+                                break
+                    except Exception:
+                        continue
+                    if original_goal_template:
+                        break
+            except Exception as e:
+                log.warning(f"Could not resolve original_goal_template for {path_param}: {e}")
+
+            return _ok({
+                "agent":                 details,
+                "aliases":               aliases,
+                "original_goal_template": original_goal_template,
+            })
         except Exception as e:
             return _server_error(e)
 
@@ -514,7 +548,7 @@ def handle_agents(method, path_param, body, cfg) -> dict:
                     resolved = json.loads(body)
                 except Exception:
                     return _bad_request("Request body is not valid JSON.")
-            updated_fm          = resolved.get("foundation_model", current["foundationModel"])
+            updated_fm          = resolved.get("foundation_model") or resolved.get("foundationModel") or current["foundationModel"]
             updated_instruction = resolved.get("instruction",      current.get("instruction", ""))
             updated_description = resolved.get("description",      current.get("description", ""))
             bedrock.update_agent(
@@ -526,21 +560,11 @@ def handle_agents(method, path_param, body, cfg) -> dict:
                 description=updated_description,
             )
             bedrock.prepare_agent(agentId=aid)
-            # Rebuild any team that contains this agent by name
-            agent_name_key = current["agentName"]
-            rebuild = _rebuild_affected_teams(
-                cfg,
-                lambda td: any(
-                    sanitise_agent_name(a["name"]) == agent_name_key
-                    for a in td.get("agents", [])
-                )
-            )
             return _ok({
-                "updated":     True,
-                "agentId":     aid,
-                "fields_set":  {k: True for k in resolved if k in
-                                ("instruction", "description", "foundation_model")},
-                "teams_rebuilt": rebuild,
+                "updated":    True,
+                "agentId":    aid,
+                "fields_set": {k: True for k in resolved if k in
+                               ("instruction", "description", "foundation_model", "foundationModel")},
             })
         except Exception as e:
             return _server_error(e)
