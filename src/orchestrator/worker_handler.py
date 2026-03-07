@@ -24,6 +24,8 @@ lambda_client = boto3.client("lambda")
 
 # ASSUMPTION: The Step Functions execution input preserves the existing POST body contract:
 # {"team": "...", "version": "...", "request": {...}}.
+
+
 def _find_agent(team_cfg, agent_id: str):
     for a in team_cfg.agents:
         if a.id == agent_id:
@@ -56,14 +58,98 @@ def _build_transform_fallback(raw_text: str, error: Exception) -> Dict[str, Any]
     return build_standard_response(raw_text, f"schema transformation failed: {error}")
 
 
-def run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any], run_id: Optional[str] = None) -> Dict[str, Any]:
+def _resolve_supervisor_step_id(team_cfg, workflow: list) -> Optional[str]:
+    """
+    Determine which step acts as the supervisor (brief source).
+
+    Priority:
+      1. First agent in the workflow with agentRole == "supervisor"
+      2. Fallback: first step in the workflow
+    """
+    for step_def in workflow:
+        agent = _find_agent(team_cfg, step_def["step"])
+        if getattr(agent, "role", None) == "supervisor":
+            return step_def["step"]
+
+    # Fallback to first step
+    return workflow[0]["step"] if workflow else None
+
+
+def _build_step_inputs(
+    step_def: Dict[str, Any],
+    request_obj: Dict[str, Any],
+    owner: str,
+    rag_context: str,
+    owner_profile_context: str,
+    gemini_brief: str,
+    outputs: Dict[str, Any],
+    supervisor_brief: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build the full input context for a step.
+
+    Base context keys are always injected. All prior step outputs are merged in
+    so any step can reference any predecessor without requiring explicit `inputs`
+    declaration in the workflow YAML.
+
+    Supervisor brief is injected as a convenience alias once the supervisor step
+    has completed. If no agentRole: supervisor is declared, the first step's
+    output is used as the fallback supervisor brief.
+
+    Explicit `inputs` entries in the step definition are still honoured; a
+    warning is logged if a declared input hasn't been produced yet.
+    """
+    base: Dict[str, Any] = {
+        "request": request_obj,
+        "owner": owner,
+        "rag_context": rag_context,
+        "owner_profile_context": owner_profile_context,
+        "gemini_brief": gemini_brief,
+    }
+
+    # Merge all completed step outputs so every downstream step can access
+    # any predecessor without explicit YAML wiring.
+    base.update(outputs)
+
+    # Supervisor brief — available once the supervisor step has completed.
+    if supervisor_brief:
+        base["supervisor"] = supervisor_brief
+
+    # Explicit `inputs` declarations are validated for early warning.
+    for inp in step_def.get("inputs", []):
+        key = inp.split(".")[0] if inp.endswith(".output") else inp
+        if key not in base:
+            log.warning(
+                "step_input_not_yet_available inp=%s available=%s",
+                inp,
+                list(outputs.keys()),
+            )
+            base[key] = {}
+
+    return base
+
+
+def run_team_pipeline(
+    team: str,
+    version: str,
+    request_obj: Dict[str, Any],
+    run_id: Optional[str] = None,
+) -> Dict[str, Any]:
     run_id = run_id or str(uuid.uuid4())
     team_cfg, team_raw = load_team_config(team, version)
     dao = DbDao.from_team_config(team_raw)
 
-    owner = (team_raw.get("team") or {}).get("owner") or request_obj.get("owner") or "Tarun Raja"
+    owner = (
+        (team_raw.get("team") or {}).get("owner")
+        or request_obj.get("owner")
+        or "Tarun Raja"
+    )
 
-    dao.put_run_meta(run_id, "RUNNING", {"team": team, "version": version, "owner": owner, "request": request_obj})
+    dao.put_run_meta(
+        run_id,
+        "RUNNING",
+        {"team": team, "version": version, "owner": owner, "request": request_obj},
+    )
 
     try:
         rag_context = get_rag_context(
@@ -73,13 +159,15 @@ def run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any], run_
             dao=dao,
         )
     except Exception:
-        log.exception("rag_context_unavailable_proceeding_without_rag", extra={"run_id": run_id, "owner": owner})
+        log.exception(
+            "rag_context_unavailable_proceeding_without_rag",
+            extra={"run_id": run_id, "owner": owner},
+        )
         rag_context = ""
+
     owner_profile_context = get_owner_profile_context(request_obj, team_raw, owner)
 
-    completed_topics = ""
-    if rag_context.startswith("COMPLETED_TASKS_HISTORY"):
-        completed_topics = rag_context
+    completed_topics = rag_context if rag_context.startswith("COMPLETED_TASKS_HISTORY") else ""
     gemini_brief = gemini_research_brief(
         {"features": team_cfg.globals.features},
         request_obj,
@@ -87,49 +175,46 @@ def run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any], run_
     )
 
     outputs: Dict[str, Any] = {}
-    director_brief: Dict[str, Any] = {}
+    supervisor_brief: Dict[str, Any] = {}
 
     workflow = team_raw.get("workflow") or []
-    step_index = 0
 
-    while step_index < len(workflow):
-        step_def = workflow[step_index]
+    supervisor_step_id = _resolve_supervisor_step_id(team_cfg, workflow)
+    log.info("supervisor_step_resolved step=%s run_id=%s", supervisor_step_id, run_id)
+
+    for step_def in workflow:
         step_id = step_def["step"]
         agent = _find_agent(team_cfg, step_id)
         if not agent:
-            raise StepFailed(step_id, f"Agent not found for step {step_id}")
+            raise StepFailed(step_id, f"Agent not found for step '{step_id}'")
 
-        step_inputs: Dict[str, Any] = {
-            "request": request_obj,
-            "owner": owner,
-            "rag_context": rag_context,
-            "owner_profile_context": owner_profile_context,
-            "gemini_brief": gemini_brief,
-        }
-        for inp in step_def.get("inputs", []):
-            if inp == "request":
-                step_inputs["request"] = request_obj
-            elif inp == "rag_context":
-                step_inputs["rag_context"] = rag_context
-            elif inp == "owner_profile_context":
-                step_inputs["owner_profile_context"] = owner_profile_context
-            elif inp.endswith(".output"):
-                key = inp.split(".")[0]
-                step_inputs[key] = outputs.get(key, {})
-            else:
-                step_inputs[inp] = outputs.get(inp, {})
+        step_inputs = _build_step_inputs(
+            step_def,
+            request_obj,
+            owner,
+            rag_context,
+            owner_profile_context,
+            gemini_brief,
+            outputs,
+            supervisor_brief,
+        )
 
         prompt = build_prompt(
             team_cfg,
             agent,
             step_inputs,
-            director_brief,
+            supervisor_brief,
             rag_context,
             owner_profile_context,
             gemini_brief,
         )
 
-        log.info("agent_prompt_built step=%s run_id=%s prompt=%s", step_id, run_id, prompt)
+        log.info(
+            "agent_prompt_built step=%s run_id=%s prompt_len=%d",
+            step_id,
+            run_id,
+            len(prompt),
+        )
 
         raw_text = invoke_agent(agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt)
 
@@ -137,10 +222,10 @@ def run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any], run_
             out_json = extract_json_payload(raw_text)
         except Exception as e:
             log.warning(
-                "json_parse_failed_coercing_to_payload step=%s run_id=%s raw_response=%s",
+                "json_parse_failed_coercing_to_payload step=%s run_id=%s raw_len=%d",
                 step_id,
                 run_id,
-                raw_text,
+                len(raw_text),
             )
             out_json = build_standard_response(raw_text, str(e))
 
@@ -158,18 +243,29 @@ def run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any], run_
                 out_json = _build_transform_fallback(raw_text, transform_error)
 
         artifact_uri = save_artifact(run_id, step_id, out_json)
-        dao.put_step(run_id, step_id, "SUCCEEDED", step_inputs, out_json, error=None, artifact_uri=artifact_uri)
+        dao.put_step(
+            run_id, step_id, "SUCCEEDED", step_inputs, out_json, error=None, artifact_uri=artifact_uri
+        )
 
         outputs[step_id] = out_json
-        if step_id == "director":
-            director_brief = out_json
+
+        if step_id == supervisor_step_id:
+            supervisor_brief = out_json
+            log.info(
+                "supervisor_brief_captured step=%s run_id=%s keys=%s",
+                step_id,
+                run_id,
+                list(supervisor_brief.keys()),
+            )
 
         if step_id == "advisor" and isinstance(out_json.get("daily_tasks"), list):
-            dao.put_tasks(owner=owner, tasks=out_json.get("daily_tasks"), source_run_id=run_id)
+            dao.put_tasks(owner=owner, tasks=out_json["daily_tasks"], source_run_id=run_id)
 
-        step_index += 1
-
-    dao.put_run_meta(run_id, "SUCCEEDED", {"team": team, "version": version, "owner": owner, "steps": list(outputs.keys())})
+    dao.put_run_meta(
+        run_id,
+        "SUCCEEDED",
+        {"team": team, "version": version, "owner": owner, "steps": list(outputs.keys())},
+    )
     return {"run_id": run_id, "status": "SUCCEEDED", "steps": outputs, "owner": owner}
 
 
@@ -179,7 +275,7 @@ def handler(event, context):
     if event.get("operation") in {"provision", "agent_management"}:
         function_name = os.environ.get("PROVISION_FUNCTION_NAME")
         if not function_name:
-            raise ValueError("PROVISION_FUNCTION_NAME is not configured")
+            raise ValueError("PROVISION_FUNCTION_NAME env var not set")
 
         proxy_path = event.get("path") or "/teams"
         invoke_payload = {
@@ -194,15 +290,15 @@ def handler(event, context):
             InvocationType="RequestResponse",
             Payload=json.dumps(invoke_payload).encode("utf-8"),
         )
-        payload_bytes = response.get("Payload").read()
-        payload_text = payload_bytes.decode("utf-8") if payload_bytes else "{}"
-        payload = json.loads(payload_text or "{}")
+        payload_bytes = response["Payload"].read()
+        payload = json.loads(payload_bytes.decode("utf-8") or "{}")
 
         status_code = int(payload.get("statusCode", 500))
         raw_body = payload.get("body")
         body = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
+
         if status_code >= 400:
-            raise ValueError(f"provision request failed with status {status_code}: {body}")
+            raise ValueError(f"provision request failed [{status_code}]: {body}")
 
         return {
             "status": "SUCCEEDED",
@@ -216,6 +312,6 @@ def handler(event, context):
     version = event.get("version")
     request_obj = event.get("request") or {}
     if not team or not version:
-        raise ValueError("team and version required")
-    run_id = event.get("run_id")
-    return run_team_pipeline(team, version, request_obj, run_id=run_id)
+        raise ValueError("team and version are required in the event payload")
+
+    return run_team_pipeline(team, version, request_obj, run_id=event.get("run_id"))
