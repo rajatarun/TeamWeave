@@ -27,9 +27,10 @@ def _get_gemini_key() -> str:
         return s
 
 def gemini_research_brief(feats: Dict[str, Any], request_obj: Dict[str, Any], completed_topics: str = "") -> str:
-    if not feats.get("gemini_research", False):
-        log.warning("gemini disabled")
-        return ""
+    
+    #if not feats.get("gemini_research", False):
+        #log.warning("gemini disabled")
+        #return ""
 
     api_key = _get_gemini_key()
     if not api_key:
