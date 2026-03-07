@@ -26,8 +26,7 @@ def _get_gemini_key() -> str:
     except Exception:
         return s
 
-def gemini_research_brief(team_globals: Dict[str, Any], request_obj: Dict[str, Any], completed_topics: str = "") -> str:
-    feats = (team_globals or {}).get("features") or {}
+def gemini_research_brief(feats: Dict[str, Any], request_obj: Dict[str, Any], completed_topics: str = "") -> str:
     if not feats.get("gemini_research", False):
         log.warning("gemini disabled")
         return ""
