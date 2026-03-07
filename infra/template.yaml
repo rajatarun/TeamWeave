@@ -390,6 +390,7 @@ Resources:
                   - bedrock:ListAgents
                   - bedrock:GetAgent
                   - bedrock:CreateAgent
+                  - bedrock:UpdateAgent
                   - bedrock:PrepareAgent
                   - bedrock:CreateAgentAlias
                   - bedrock:ListAgentAliases
