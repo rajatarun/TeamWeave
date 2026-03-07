@@ -237,7 +237,7 @@ def _scan_s3_teams(cfg) -> dict:
     for key in all_keys:
         rel   = key[len(prefix):]               # team_name/v1/team.json
         parts = rel.split("/")
-        if len(parts) == 3 and parts[2] == "team.json":
+        if len(parts) == 3 and parts[2].startswith("team"):
             team_name, version = parts[0], parts[1]
             team_map[team_name][version] = key
     log.info(f"S3 scan — {len(team_map)} team(s) found under s3://{cfg['bucket']}/{prefix}")
@@ -264,6 +264,23 @@ def _bedrock(cfg):
 # Provision helper
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _build_instruction(agent: dict, role_obj: dict) -> str:
+    """Construct the full Bedrock instruction string from role + agent config."""
+    primary_task = role_obj["agent_config"]["primary_task"]
+    constraints  = "\n".join(f"  - {c}" for c in primary_task.get("constraints", []))
+    return (
+        f"You are {agent['name']}.\n\n"
+        f"Persona: {role_obj['agent_config']['persona']}\n\n"
+        f"Goal:\n{agent['goal_template']}\n\n"
+        f"Action  : {primary_task['action']}\n"
+        f"Input   : {primary_task['input']}\n"
+        f"Output  : {primary_task['output']}\n"
+        f"Constraints:\n{constraints}\n\n"
+        f"Output schema : {agent['schema_ref']}\n"
+        f"Escalation    : {role_obj['agent_config']['escalation_policy']}"
+    )
+
+
 def _provision_team(team_data: dict, team_name: str, version: str,
                     role_index: dict, dept_index: dict, cfg: dict,
                     dry_run: bool = False) -> dict:
@@ -279,14 +296,53 @@ def _provision_team(team_data: dict, team_name: str, version: str,
 
     bedrock = _bedrock(cfg)
     for i, agent in enumerate(output_team["agents"]):
-        if (agent.get("bedrock", {}).get("agentId",  "").strip() and
-                agent.get("bedrock", {}).get("aliasId", "").strip()):
+        role_obj         = role_index[agent["role_id"]]
+        agent_fm         = agent.get("bedrock", {}).get("foundation_model", "").strip()
+        foundation_model = agent_fm or cfg["foundation_model"]
+        instruction      = _build_instruction(agent, role_obj)
+
+        existing_id  = agent.get("bedrock", {}).get("agentId",  "").strip()
+        existing_ali = agent.get("bedrock", {}).get("aliasId",  "").strip()
+
+        if existing_id and existing_ali:
+            # Agent already provisioned — always sync instruction + model
+            log.info(f"  SYNC {agent['name']} ({existing_id}) — updating instruction")
+            try:
+                current = bedrock.get_agent(agentId=existing_id)["agent"]
+                bedrock.update_agent(
+                    agentId=existing_id,
+                    agentName=current["agentName"],
+                    agentResourceRoleArn=current["agentResourceRoleArn"],
+                    foundationModel=foundation_model,
+                    instruction=instruction,
+                    description=current.get("description", ""),
+                )
+                bedrock.prepare_agent(agentId=existing_id)
+                log.info(f"  ✓ SYNC {agent['name']} — instruction updated")
+            except Exception as e:
+                log.warning(f"  WARN could not sync {agent['name']}: {e}")
+            # Keep existing IDs — no change to bedrock block
             continue
-        role_obj = role_index[agent["role_id"]]
+
+        # Not yet provisioned — create or recover
         existing = find_existing_agent(bedrock, agent["name"])
         if existing:
             aid = existing["agentId"]
-            als = bedrock.list_agent_aliases(agentId=aid).get("agentAliasSummaries", [])
+            # Update instruction on recovered agent too
+            try:
+                current = bedrock.get_agent(agentId=aid)["agent"]
+                bedrock.update_agent(
+                    agentId=aid,
+                    agentName=current["agentName"],
+                    agentResourceRoleArn=current["agentResourceRoleArn"],
+                    foundationModel=foundation_model,
+                    instruction=instruction,
+                    description=current.get("description", ""),
+                )
+                bedrock.prepare_agent(agentId=aid)
+            except Exception as e:
+                log.warning(f"  WARN could not update recovered agent {agent['name']}: {e}")
+            als  = bedrock.list_agent_aliases(agentId=aid).get("agentAliasSummaries", [])
             alid = (als[0]["agentAliasId"] if als else
                     bedrock.create_agent_alias(agentId=aid, agentAliasName="live")
                            ["agentAlias"]["agentAliasId"])
@@ -295,9 +351,12 @@ def _provision_team(team_data: dict, team_name: str, version: str,
                 client=bedrock, agent_id_slug=agent["id"], agent_name=agent["name"],
                 goal_template=agent["goal_template"], schema_ref=agent["schema_ref"],
                 role_obj=role_obj, bedrock_role_arn=cfg["bedrock_role_arn"],
-                foundation_model=cfg["foundation_model"],
+                foundation_model=foundation_model,
             )
-        output_team["agents"][i]["bedrock"] = {"agentId": aid, "aliasId": alid}
+
+        bdrock = output_team["agents"][i].get("bedrock", {})
+        bdrock.update({"agentId": aid, "aliasId": alid})
+        output_team["agents"][i]["bedrock"] = bdrock
         log.info(f"  ✓ {agent['name']} → agentId={aid} aliasId={alid}")
 
     # Push back to S3 under teams_prefix
@@ -335,6 +394,60 @@ def _delete_bedrock_agents(bedrock, agent_names: list) -> dict:
         except Exception as e:
             errors[raw] = str(e)
     return {"deleted": deleted, "not_found": not_found, "errors": errors}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Team rebuild helper — called after any role / dept / agent update
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _rebuild_affected_teams(cfg: dict, match_fn) -> dict:
+    """
+    Scan all S3 teams. For every team where match_fn(team_data) returns True,
+    re-run _provision_team (which syncs instructions on existing agents and
+    creates any missing ones) and push the updated team.json back to S3.
+
+    match_fn receives the raw team_data dict and returns True/False.
+
+    Returns:
+        {
+            "rebuilt":  [team_name, ...],
+            "skipped":  [team_name, ...],   # match_fn returned False
+            "errors":   {team_name: error_msg, ...},
+        }
+    """
+    try:
+        role_index = build_role_index(_load_roles(cfg))
+        dept_index = build_dept_index(_load_depts(cfg))
+    except Exception as e:
+        return {"rebuilt": [], "skipped": [], "errors": {"_load": str(e)}}
+
+    team_map = _scan_s3_teams(cfg)
+    rebuilt, skipped, errors = [], [], {}
+
+    for team_name, versions in team_map.items():
+        latest_ver = _latest_version(versions)
+        try:
+            team_data = _s3_get(cfg, versions[latest_ver])
+        except Exception as e:
+            errors[team_name] = f"S3 load failed: {e}"
+            continue
+
+        if not match_fn(team_data):
+            skipped.append(team_name)
+            continue
+
+        try:
+            r = _provision_team(team_data, team_name, latest_ver,
+                                role_index, dept_index, cfg)
+            if r["success"]:
+                rebuilt.append(team_name)
+            else:
+                errors[team_name] = r.get("errors", ["unknown error"])
+        except Exception as e:
+            errors[team_name] = str(e)
+
+    log.info(f"  Team rebuild — rebuilt:{rebuilt} skipped:{len(skipped)} errors:{list(errors.keys())}")
+    return {"rebuilt": rebuilt, "skipped": skipped, "errors": errors}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -394,16 +507,41 @@ def handle_agents(method, path_param, body, cfg) -> dict:
                 return _not_found(f"Agent '{path_param}' not found.")
             aid     = summary["agentId"]
             current = bedrock.get_agent(agentId=aid)["agent"]
+            # Resolve body — APIGW proxy may deliver body as a JSON string
+            resolved = body
+            if isinstance(body, str):
+                try:
+                    resolved = json.loads(body)
+                except Exception:
+                    return _bad_request("Request body is not valid JSON.")
+            updated_fm          = resolved.get("foundation_model", current["foundationModel"])
+            updated_instruction = resolved.get("instruction",      current.get("instruction", ""))
+            updated_description = resolved.get("description",      current.get("description", ""))
             bedrock.update_agent(
                 agentId=aid,
                 agentName=current["agentName"],
                 agentResourceRoleArn=current["agentResourceRoleArn"],
-                foundationModel=body.get("foundation_model", current["foundationModel"]),
-                instruction=body.get("instruction",  current.get("instruction", "")),
-                description=body.get("description",  current.get("description", "")),
+                foundationModel=updated_fm,
+                instruction=updated_instruction,
+                description=updated_description,
             )
             bedrock.prepare_agent(agentId=aid)
-            return _ok({"updated": True, "agentId": aid})
+            # Rebuild any team that contains this agent by name
+            agent_name_key = current["agentName"]
+            rebuild = _rebuild_affected_teams(
+                cfg,
+                lambda td: any(
+                    sanitise_agent_name(a["name"]) == agent_name_key
+                    for a in td.get("agents", [])
+                )
+            )
+            return _ok({
+                "updated":     True,
+                "agentId":     aid,
+                "fields_set":  {k: True for k in resolved if k in
+                                ("instruction", "description", "foundation_model")},
+                "teams_rebuilt": rebuild,
+            })
         except Exception as e:
             return _server_error(e)
 
@@ -646,10 +784,27 @@ def handle_roles(method, path_param, body, cfg) -> dict:
             idx  = next((i for i, r in enumerate(data["roles"]) if r["role_id"] == path_param), None)
             if idx is None:
                 return _not_found(f"Role '{path_param}' not found.")
-            data["roles"][idx].update(body)
+            # Deep-merge nested dicts (e.g. agent_config) instead of replacing them
+            def _deep_merge(base: dict, patch: dict) -> dict:
+                result = copy.deepcopy(base)
+                for k, v in patch.items():
+                    if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+                        result[k] = _deep_merge(result[k], v)
+                    else:
+                        result[k] = v
+                return result
+            data["roles"][idx] = _deep_merge(data["roles"][idx], body)
             data["meta"]["version"] = _bump_version(data["meta"].get("version", "v1"))
             s3_uri = _save_roles(cfg, data)
-            return _ok({"updated": True, "role_id": path_param, "s3_uri": s3_uri})
+            # Rebuild every team that uses this role_id
+            rebuild = _rebuild_affected_teams(
+                cfg,
+                lambda td, rid=path_param: any(
+                    a.get("role_id") == rid for a in td.get("agents", [])
+                )
+            )
+            return _ok({"updated": True, "role_id": path_param, "s3_uri": s3_uri,
+                        "role": data["roles"][idx], "teams_rebuilt": rebuild})
         except KeyError as e:
             return _not_found(str(e))
         except Exception as e:
@@ -712,15 +867,33 @@ def handle_departments(method, path_param, body, cfg) -> dict:
                          if d["department_id"] == path_param), None)
             if idx is None:
                 return _not_found(f"Department '{path_param}' not found.")
+            # Merge list fields (allowed_roles, allowed_schemas) — additive, not replacing
             for list_field in ("allowed_roles", "allowed_schemas"):
                 if list_field in body:
                     existing = set(data["departments"][idx].get(list_field, []))
                     existing.update(body.pop(list_field))
                     data["departments"][idx][list_field] = sorted(existing)
-            data["departments"][idx].update(body)
+            # Deep-merge remaining fields
+            def _deep_merge(base: dict, patch: dict) -> dict:
+                result = copy.deepcopy(base)
+                for k, v in patch.items():
+                    if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+                        result[k] = _deep_merge(result[k], v)
+                    else:
+                        result[k] = v
+                return result
+            data["departments"][idx] = _deep_merge(data["departments"][idx], body)
             data["meta"]["version"] = _bump_version(data["meta"].get("version", "v1"))
             s3_uri = _save_depts(cfg, data)
-            return _ok({"updated": True, "department_id": path_param, "s3_uri": s3_uri})
+            # Rebuild every team that uses this department_id
+            rebuild = _rebuild_affected_teams(
+                cfg,
+                lambda td, did=path_param: any(
+                    a.get("department_id") == did for a in td.get("agents", [])
+                )
+            )
+            return _ok({"updated": True, "department_id": path_param, "s3_uri": s3_uri,
+                        "department": data["departments"][idx], "teams_rebuilt": rebuild})
         except KeyError as e:
             return _not_found(str(e))
         except Exception as e:
