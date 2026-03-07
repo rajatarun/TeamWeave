@@ -173,7 +173,7 @@ def run_team_pipeline(
         request_obj,
         completed_topics=completed_topics,
     )
-
+    log.warning(gemini_brief)
     outputs: Dict[str, Any] = {}
     supervisor_brief: Dict[str, Any] = {}
 
