@@ -35,6 +35,7 @@ _REFUSAL_PHRASES = [
     "i cannot produce",
     "i do not have",
     "i apologize",
+    "not to describe",
     "i apologise",
     "please provide",
     "as an ai",
