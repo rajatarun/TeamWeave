@@ -237,6 +237,7 @@ def run_team_pipeline(
             schema_ref=agent.schema_ref,
             raw_output=out_json,
             schema=step_schema,
+            step_inputs=step_inputs,
         )
         log.info("enrichment_complete step=%s run_id=%s", step_id, run_id)
         # ──────────────────────────────────────────────────────────────────────
