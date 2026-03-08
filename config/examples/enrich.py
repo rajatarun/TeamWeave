@@ -55,6 +55,14 @@ _REFUSAL_PHRASES = [
     "tool is required",
     "i am not able",
     "not supported",
+    "the task is to generate",
+    "not to perform an action",
+    "not to use a tool",
+    "use a tool",
+    "perform an action",
+    "instead of performing",
+    "rather than performing",
+    "generate content, not",
 ]
 
 _CRITICAL_ARRAYS = {"hooks", "outline", "drafts", "variants", "tasks", "hashtags", "claims"}
