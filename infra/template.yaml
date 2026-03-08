@@ -238,6 +238,12 @@ Resources:
                   Action: [secretsmanager:GetSecretValue]
                   Resource: !Ref GeminiSecretArn
                 - !Ref "AWS::NoValue"
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:ViewSubscriptions
+                  - aws-marketplace:Subscribe
+                  - aws-marketplace:Unsubscribe
+                Resource: "*"
 
   TriggerRole:
     Type: AWS::IAM::Role
@@ -311,6 +317,12 @@ Resources:
                   - lambda:InvokeFunction
                 Resource:
                   - !GetAtt ProvisionTeamFunction.Arn
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:ViewSubscriptions
+                  - aws-marketplace:Subscribe
+                  - aws-marketplace:Unsubscribe
+                Resource: "*"
 
   StatusRole:
     Type: AWS::IAM::Role
@@ -338,6 +350,12 @@ Resources:
                 Action:
                   - states:DescribeExecution
                   - sfn:DescribeExecution
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:ViewSubscriptions
+                  - aws-marketplace:Subscribe
+                  - aws-marketplace:Unsubscribe
                 Resource: "*"
 
 
@@ -405,6 +423,12 @@ Resources:
                   - iam:PassRole
                 Resource:
                   - !Ref BedrockAgentServiceRoleArn
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:ViewSubscriptions
+                  - aws-marketplace:Subscribe
+                  - aws-marketplace:Unsubscribe
+                Resource: "*"
 
   StepFunctionsRole:
     Type: AWS::IAM::Role
@@ -709,6 +733,12 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:gemini/api_key-*"
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:ViewSubscriptions
+                  - aws-marketplace:Subscribe
+                  - aws-marketplace:Unsubscribe
+                Resource: "*"
 
   GeminiResearchFunction:
     Type: AWS::Serverless::Function
