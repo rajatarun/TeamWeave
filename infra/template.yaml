@@ -727,7 +727,6 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName: !Ref GeminiResearchFunction
       Principal: bedrock.amazonaws.com
-      StatementId: bedrock-invoke
 
   StatusFunction:
     Type: AWS::Serverless::Function
