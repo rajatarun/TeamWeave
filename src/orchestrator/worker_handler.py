@@ -8,6 +8,7 @@ import boto3
 from .bedrock_invoke import invoke_agent
 from .config_loader import load_team_config
 from .db import DbDao
+from .enrich import enrich_step_output
 from .gemini import gemini_research_brief
 from .json_utils import build_standard_response, extract_json_payload
 from .logger import get_logger
@@ -173,7 +174,7 @@ def run_team_pipeline(
         request_obj,
         completed_topics=completed_topics,
     )
-    log.warning(gemini_brief)
+
     outputs: Dict[str, Any] = {}
     supervisor_brief: Dict[str, Any] = {}
 
@@ -229,7 +230,18 @@ def run_team_pipeline(
             )
             out_json = build_standard_response(raw_text, str(e))
 
+        # ── Enrichment — voice correction + schema enforcement via Claude ──────
         step_schema = _load_step_schema(team_raw, agent.schema_ref)
+        out_json = enrich_step_output(
+            agent_name=agent.name,
+            schema_ref=agent.schema_ref,
+            raw_output=out_json,
+            schema=step_schema,
+            step_inputs=step_inputs,
+        )
+        log.info("enrichment_complete step=%s run_id=%s", step_id, run_id)
+        # ──────────────────────────────────────────────────────────────────────
+
         if step_schema:
             try:
                 out_json = transform_json_to_schema(out_json, step_schema)
