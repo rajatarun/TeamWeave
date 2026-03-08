@@ -2,6 +2,7 @@
 	build-TriggerFunction \
 	build-WorkerFunction \
 	build-StatusFunction \
+	build-GeminiResearchFunction \
 	build-ProvisionTeamFunction \
 	build-OrchestratorFunction
 
@@ -17,6 +18,8 @@ build-TriggerFunction: package-lambda
 build-WorkerFunction: package-lambda
 
 build-StatusFunction: package-lambda
+
+build-GeminiResearchFunction: package-lambda
 
 build-ProvisionTeamFunction: package-lambda
 
