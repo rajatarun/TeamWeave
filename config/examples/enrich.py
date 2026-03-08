@@ -41,7 +41,23 @@ _REFUSAL_PHRASES = [
     "i cannot complete",
     "the information provided",
     "based on the information",
+    "the task requires",
+    "not supported by the available tools",
+    "is not supported",
+    "requires generating",
+    "i don't have the ability",
+    "i lack the",
+    "this task requires",
+    "i need more",
+    "without additional",
+    "cannot be completed",
+    "no tools available",
+    "tool is required",
+    "i am not able",
+    "not supported",
 ]
+
+_CRITICAL_ARRAYS = {"hooks", "outline", "drafts", "variants", "tasks", "hashtags", "claims"}
 
 _VOICE_STYLE = """
 Tarun Raja's LinkedIn voice rules:
@@ -75,13 +91,19 @@ def _is_placeholder(value: str) -> bool:
 
 
 def _has_placeholder(obj, depth=0) -> bool:
-    """Recursively check if any string value in the JSON is a placeholder."""
+    """Recursively check if any string value is a placeholder,
+    or if critical array fields are empty at any level."""
     if depth > 5:
         return False
     if isinstance(obj, str):
         return _is_placeholder(obj)
     if isinstance(obj, dict):
-        return any(_has_placeholder(v, depth + 1) for v in obj.values())
+        for k, v in obj.items():
+            if k in _CRITICAL_ARRAYS and isinstance(v, list) and len(v) == 0:
+                return True
+            if _has_placeholder(v, depth + 1):
+                return True
+        return False
     if isinstance(obj, list):
         return any(_has_placeholder(item, depth + 1) for item in obj)
     return False
