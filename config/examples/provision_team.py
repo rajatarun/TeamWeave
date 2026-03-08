@@ -564,21 +564,18 @@ def create_bedrock_agent(
     constraints  = "\n".join(f"  - {c}" for c in primary_task.get("constraints", []))
 
     gemini_tool_hint = (
-        "\n\n## RESEARCH TOOL\n"
-        "You have access to the `gemini_research` tool. "
-        "You MUST call this tool before producing your output whenever your task involves:\n"
-        "  - Any factual claim, statistic, or data point\n"
-        "  - Technical explanations, concepts, or frameworks\n"
-        "  - Resource URLs or references\n"
-        "  - Current events, trends, or recent developments\n"
-        "  - Any information not explicitly provided in your input context\n\n"
-        "How to use:\n"
-        "  - Call gemini_research(query) with a specific, targeted question\n"
-        "  - You may call it multiple times for different sub-questions\n"
-        "  - Incorporate the results into your output — do not ignore them\n"
-        "  - Never fabricate facts when you can research them instead\n\n"
-        "When NOT to call it: only skip if every claim in your output is already "
-        "present verbatim in the input context provided to you."
+        "\n\n## RESEARCH TOOL — gemini_research\n"
+        "You have access to a research tool: gemini_research(query).\n"
+        "Use it to look up facts, find resources, or ground claims you are not certain about.\n\n"
+        "Call it when useful:\n"
+        "  - Factual claims or statistics not in your input\n"
+        "  - Technical explanations or framework details\n"
+        "  - Resource URLs you need to verify or find\n"
+        "  - Recent trends or current data\n\n"
+        "You may call it zero or more times depending on what you need.\n"
+        "If the tool is unavailable or returns an error, proceed without it — "
+        "do not refuse or stall. Your primary job is to produce the output, "
+        "with or without the tool."
     ) if gemini_lambda_arn else ""
 
     instruction = (
