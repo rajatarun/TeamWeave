@@ -116,7 +116,7 @@ def _invoke_claude(prompt: str) -> str:
         accept="application/json",
         body=json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 4096,
+            "max_tokens": 8192,
             "messages": [{"role": "user", "content": prompt}],
         }),
     )
@@ -133,50 +133,73 @@ def _build_prompt(
     raw_output: dict,
     schema: dict | None,
     has_placeholders: bool,
+    step_inputs: dict | None = None,
 ) -> str:
     schema_block = (
         f"\n\nTARGET SCHEMA:\n{json.dumps(schema, indent=2)}"
         if schema else ""
     )
 
-    placeholder_block = """
-## CRITICAL — PLACEHOLDER DETECTED
-The input JSON contains placeholder or refusal text (e.g. "The provided information is sufficient",
-"I cannot generate", etc.). This means the upstream agent failed to produce real content.
-You MUST replace every placeholder string with actual generated content appropriate to the
-agent's role and schema. Use the field names and schema to infer what content is needed.
-Produce real LinkedIn post copy, real strategy output, real structured data — whatever the
-schema requires. Do not carry any placeholder text through to the output.
-""" if has_placeholders else ""
+    # Summarise step_inputs for context — strip embeddings/large blobs
+    context_block = ""
+    if step_inputs and has_placeholders:
+        safe_inputs = {}
+        for k, v in step_inputs.items():
+            if k in ("embedding", "rag_context", "owner_profile_context"):
+                continue
+            if isinstance(v, str) and len(v) > 2000:
+                safe_inputs[k] = v[:2000] + "...[truncated]"
+            elif isinstance(v, dict) or isinstance(v, list):
+                s = json.dumps(v)
+                safe_inputs[k] = json.loads(s[:3000]) if len(s) > 3000 else v
+            else:
+                safe_inputs[k] = v
+        context_block = f"\n\n## PIPELINE CONTEXT (use this to generate content):\n{json.dumps(safe_inputs, indent=2)}"
+
+    if has_placeholders:
+        placeholder_block = f"""
+## CRITICAL — UPSTREAM AGENT FAILED TO GENERATE CONTENT
+The agent "{agent_name}" produced only meta-commentary instead of actual content.
+The raw output contains phrases like "The task requires generating..." or "not supported by available tools".
+This is a generation failure — NOT a real constraint.
+
+You must FULLY REGENERATE this output from scratch.
+Use the PIPELINE CONTEXT below to understand what content is needed.
+Produce real, specific content for every field in the schema.
+Do not reference the failed output — treat it as if it never existed.{context_block}
+"""
+    else:
+        placeholder_block = ""
 
     return f"""You are a post-processing enrichment step for a LinkedIn content pipeline for Tarun Raja.
 
-You receive the raw JSON output from agent "{agent_name}" (schema: {schema_ref}).
-Return a corrected version of this JSON with the following fixes applied:
+You receive output from agent "{agent_name}" (schema: {schema_ref}).
+Return a corrected JSON with the following fixes:
 {placeholder_block}
 ## FIX 1 — VOICE CORRECTION
 Rewrite any field containing LinkedIn copy (post_copy, hook, body, final_post, linkedin_post,
-post, variants, content, draft, etc.) to match this voice:
+post, variants, content, draft, angle, cta, outline items, hooks) to match this voice:
 
 {_VOICE_STYLE}
 
 Rules:
 - Only rewrite copy/text fields
-- Do NOT rewrite structured fields (IDs, dates, booleans, URLs, scores, hashtag lists)
+- Do NOT rewrite structured fields (IDs, dates, booleans, URLs, scores, numeric values)
 - Never carry through placeholder or refusal text
 
 ## FIX 2 — SCHEMA ENFORCEMENT
-- Ensure all required fields are present
-- Fill null/missing string fields with a generated default — never leave null where string is expected
-- Ensure correct types: arrays are arrays, booleans are booleans, strings are strings
-- Do not add fields absent from the schema{schema_block}
+- Ensure all required fields are present and non-empty
+- Arrays like hooks/outline/drafts must have actual items — never return empty arrays
+- Fill null/missing string fields with generated content — never leave null
+- Ensure correct types throughout{schema_block}
 
-## INPUT JSON:
+## INPUT JSON (may be a failed output — regenerate if needed):
 {json.dumps(raw_output, indent=2)}
 
 ## OUTPUT RULES:
 - Return ONLY valid JSON — no preamble, no explanation, no markdown fences
-- Preserve all fields and structure — only fix content and types"""
+- Every array field must have at least one real item
+- Every string field must have real content, not meta-commentary"""
 
 
 def enrich_step_output(
@@ -184,9 +207,11 @@ def enrich_step_output(
     schema_ref: str,
     raw_output: dict,
     schema: dict | None = None,
+    step_inputs: dict | None = None,
 ) -> dict:
     """
     Enrich a single agent's JSON output through Claude.
+    When placeholder/refusal text is detected, fully regenerates from step_inputs context.
     Returns the corrected dict. Falls back to raw_output on any error.
     """
     if not isinstance(raw_output, dict):
@@ -195,11 +220,11 @@ def enrich_step_output(
     has_placeholders = _has_placeholder(raw_output)
     if has_placeholders:
         log.warning(
-            "enrich_placeholder_detected agent=%s schema=%s — forcing rewrite",
+            "enrich_placeholder_detected agent=%s schema=%s — forcing full regeneration",
             agent_name, schema_ref,
         )
 
-    prompt = _build_prompt(agent_name, schema_ref, raw_output, schema, has_placeholders)
+    prompt = _build_prompt(agent_name, schema_ref, raw_output, schema, has_placeholders, step_inputs)
 
     try:
         text     = _invoke_claude(prompt)
