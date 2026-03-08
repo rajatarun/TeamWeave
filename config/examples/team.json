@@ -14,8 +14,9 @@
       "Prefer concrete examples from Tarun's work using RAG context."
     ],
     "features": {
-      "gemini_research": false,
-      "explicit_rag": true
+      "gemini_research": true,
+      "explicit_rag": true,
+      "default_model": "amazon.nova-pro-v1:0"
     },
     "rag": {
       "mode": "explicit",
@@ -39,9 +40,10 @@
       "department_id": "DEPT-001",
       "bedrock": {
         "agentId": "",
-        "aliasId": ""
+        "aliasId": "",
+        "foundation_model": "amazon.nova-pro-v1:0"
       },
-      "goal_template": "Define a measurable goal to increase Tarun Raja's social visibility. Produce a Creative Brief with acceptance criteria and risks.",
+      "goal_template": "Produce a Creative Brief for a LinkedIn post. Determine MODE A (RAG context has real shipped project) or MODE B (Tarun is exploring the space \u2014 use research context). Declare mode explicitly. Set voice as first-person practitioner. Minimum 250\u2013350 words, plain text, LinkedIn-formatted. Acceptance criteria: mode declared, first-person throughout, no fabricated shipped experience in MODE B, plain text, no URL encoding, no generic unrelated frameworks.",
       "schema_ref": "creative_brief_v1"
     },
     {
@@ -51,9 +53,10 @@
       "department_id": "DEPT-003",
       "bedrock": {
         "agentId": "",
-        "aliasId": ""
+        "aliasId": "",
+        "foundation_model": "amazon.nova-pro-v1:0"
       },
-      "goal_template": "Derive strategy from Director brief. Generate hooks, narrative angle, and outline optimized for reach.",
+      "goal_template": "Receive the Director brief. Read the declared mode. Generate 3 hook candidates, score each against the 5 criteria (contrarian, specific, two lines, not a question, scroll-stopping for senior engineers), select the single strongest hook. Produce a full Content Strategy Pack: validated hook + rationale, hidden problem (named failure mode), enterprise danger (specific blast radius), named framework (3\u20134 concepts: emoji + name + definition + example), operational principles (2\u20133 bullets, distributed systems vocabulary), closing question, vocabulary directive (8\u201310 terms), word count target 250\u2013350, output format spec (plain text, LinkedIn-formatted, blank lines between sections, no URL encoding). Adapt narrative angle to declared mode.",
       "schema_ref": "strategy_pack_v1"
     },
     {
@@ -63,46 +66,24 @@
       "department_id": "DEPT-003",
       "bedrock": {
         "agentId": "",
-        "aliasId": ""
+        "aliasId": "",
+        "foundation_model": "amazon.nova-pro-v1:0"
       },
-      "goal_template": "Write 2-3 LinkedIn draft variants aligned to Director acceptance criteria and Strategist outline.",
+      "goal_template": "Write 3 LinkedIn post variants in Tarun's first-person voice using the validated hook from the strategy pack. Each variant 250\u2013350 words. MODE A: anchor to real project from RAG context, use specific system names and decisions. MODE B: anchor to analytical perspective, never fabricate shipped experience. Structure: hook \u2192 hidden problem \u2192 enterprise danger \u2192 transition \u2192 framework (emoji + name + definition + example) \u2192 operational principles \u2192 closing question \u2192 closing statement \u2192 5\u20136 hashtags. Score all 3 variants against the Creative Brief acceptance criteria. Output only the single winning variant with selection_rationale. Plain text. Short paragraphs. Blank lines between sections. No URL encoding.",
       "schema_ref": "draft_pack_v1"
     },
     {
-      "id": "TVT_DEPT-005_PBM-010_seo",
-      "name": "SEO Specialist",
-      "role_id": "PBM-010",
-      "department_id": "DEPT-005",
-      "bedrock": {
-        "agentId": "",
-        "aliasId": ""
-      },
-      "goal_template": "Provide discoverability improvements, keyword set, and title/meta suggestions without stuffing.",
-      "schema_ref": "seo_pack_v1"
-    },
-    {
-      "id": "TVT_DEPT-003_PBM-003_editor",
+      "id": "TVT_DEPT-003_PBM-003E_editor",
       "name": "Managing Editor",
-      "role_id": "PBM-003",
+      "role_id": "PBM-003E",
       "department_id": "DEPT-003",
       "bedrock": {
         "agentId": "",
-        "aliasId": ""
+        "aliasId": "",
+        "foundation_model": "amazon.nova-pro-v1:0"
       },
-      "goal_template": "Polish to final copy: high-signal, voice-consistent, and constraint-compliant.",
+      "goal_template": "Receive the single winning variant. Polish to final publish-ready LinkedIn copy. Integrate SEO keywords from the vocabulary directive naturally. Self-check and fix before output: hook is two standalone lines with blank line after; no mode labels or raw URLs in copy; word count 250\u2013350 (expand framework if under); framework has 3\u20134 named concepts with emoji/definition/example; closing question present; 5\u20136 hashtags on final line; blank lines between all sections; paragraphs 1\u20133 sentences max; first-person throughout; no hype words; plain paste-ready text, zero URL encoding. Fix all failures before passing to approval.",
       "schema_ref": "final_copy_v1"
-    },
-    {
-      "id": "TVT_DEPT-002_PBM-005_designer",
-      "name": "Designer",
-      "role_id": "PBM-005",
-      "department_id": "DEPT-002",
-      "bedrock": {
-        "agentId": "",
-        "aliasId": ""
-      },
-      "goal_template": "Create carousel plan + hero image direction + image prompts aligned to final copy.",
-      "schema_ref": "design_pack_v1"
     },
     {
       "id": "TVT_DEPT-003_PBM-004_distribution",
@@ -111,21 +92,23 @@
       "department_id": "DEPT-003",
       "bedrock": {
         "agentId": "",
-        "aliasId": ""
+        "aliasId": "",
+        "foundation_model": "amazon.nova-pro-v1:0"
       },
-      "goal_template": "Create channel variants + posting checklist optimized for engagement and reach.",
+      "goal_template": "Receive the final copy and Creative Brief. Produce a Distribution Plan: platform (LinkedIn), post datetime (Tuesday or Thursday 8\u201310am Tarun's timezone if unspecified), caption variant within platform character limit, 5\u20136 hashtags (use those already in the copy \u2014 do not add new ones), pre-publish checklist (binary yes/no items). Verify final copy is plain text before scheduling \u2014 flag if URL-encoded or contains raw references.",
       "schema_ref": "distribution_pack_v1"
     },
     {
-      "id": "TVT_DEPT-001_PBM-001_director_approve",
+      "id": "TVT_DEPT-001_PBM-001A_director_approve",
       "name": "Director Approval",
-      "role_id": "PBM-001",
+      "role_id": "PBM-001A",
       "department_id": "DEPT-001",
       "bedrock": {
         "agentId": "",
-        "aliasId": ""
+        "aliasId": "",
+        "foundation_model": "amazon.nova-pro-v1:0"
       },
-      "goal_template": "Approve or request revisions. Output APPROVED boolean and revision_notes if not approved.",
+      "goal_template": "Approve or reject final copy against Creative Brief acceptance criteria. Check all: mode followed correctly (MODE A has named real project, MODE B has no fabricated shipped experience), first-person consistent, hook is two standalone contrarian lines, no mode labels or raw URLs in copy, word count 250\u2013350, framework has 3\u20134 named concepts with emoji/definition/example, closing question present, 5\u20136 hashtags on final line, blank lines between sections, paragraphs 1\u20133 sentences, no hype words, plain paste-ready text. Output APPROVED: true or APPROVED: false with a complete revision re-prompt structured as a new goal_template the Writer can execute directly \u2014 name each failed element and state the exact fix required.",
       "schema_ref": "approval_v1"
     }
   ],
@@ -134,14 +117,16 @@
       "step": "TVT_DEPT-001_PBM-001_director",
       "inputs": [
         "request",
-        "rag_context"
+        "rag_context",
+        "research_context"
       ]
     },
     {
       "step": "TVT_DEPT-003_PBM-003_strategist",
       "inputs": [
         "TVT_DEPT-001_PBM-001_director.output",
-        "rag_context"
+        "rag_context",
+        "research_context"
       ]
     },
     {
@@ -149,42 +134,29 @@
       "inputs": [
         "TVT_DEPT-001_PBM-001_director.output",
         "TVT_DEPT-003_PBM-003_strategist.output",
-        "rag_context"
+        "rag_context",
+        "research_context"
       ]
     },
     {
-      "step": "TVT_DEPT-005_PBM-010_seo",
+      "step": "TVT_DEPT-003_PBM-003E_editor",
       "inputs": [
         "TVT_DEPT-003_PBM-006_writer_linkedin.output",
-        "TVT_DEPT-003_PBM-003_strategist.output"
-      ]
-    },
-    {
-      "step": "TVT_DEPT-003_PBM-003_editor",
-      "inputs": [
-        "TVT_DEPT-005_PBM-010_seo.output",
-        "TVT_DEPT-003_PBM-006_writer_linkedin.output",
-        "TVT_DEPT-001_PBM-001_director.output",
-        "rag_context"
-      ]
-    },
-    {
-      "step": "TVT_DEPT-002_PBM-005_designer",
-      "inputs": [
-        "TVT_DEPT-003_PBM-003_editor.output"
+        "TVT_DEPT-003_PBM-003_strategist.output",
+        "TVT_DEPT-001_PBM-001_director.output"
       ]
     },
     {
       "step": "TVT_DEPT-003_PBM-004_distribution",
       "inputs": [
-        "TVT_DEPT-003_PBM-003_editor.output",
+        "TVT_DEPT-003_PBM-003E_editor.output",
         "TVT_DEPT-001_PBM-001_director.output"
       ]
     },
     {
-      "step": "TVT_DEPT-001_PBM-001_director_approve",
+      "step": "TVT_DEPT-001_PBM-001A_director_approve",
       "inputs": [
-        "TVT_DEPT-003_PBM-003_editor.output",
+        "TVT_DEPT-003_PBM-003E_editor.output",
         "TVT_DEPT-003_PBM-004_distribution.output",
         "TVT_DEPT-001_PBM-001_director.output"
       ]
@@ -200,14 +172,8 @@
     "draft_pack_v1": {
       "path": "config/examples/schemas/draft_pack_v1.json"
     },
-    "seo_pack_v1": {
-      "path": "config/examples/schemas/seo_pack_v1.json"
-    },
     "final_copy_v1": {
       "path": "config/examples/schemas/final_copy_v1.json"
-    },
-    "design_pack_v1": {
-      "path": "config/examples/schemas/design_pack_v1.json"
     },
     "distribution_pack_v1": {
       "path": "config/examples/schemas/distribution_pack_v1.json"
