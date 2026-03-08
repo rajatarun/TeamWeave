@@ -56,6 +56,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from .provision_team import (
+    _attach_gemini_action_group,
     build_dept_index,
     build_role_index,
     create_bedrock_agent,
@@ -94,6 +95,7 @@ def get_config() -> dict:
         "teams_prefix":     f"{prefix}/teams" if prefix else "teams",
         "foundation_model": os.environ.get("FOUNDATION_MODEL", "amazon.nova-micro-v1:0"),
         "region":           os.environ.get("AWS_REGION",       "us-east-1"),
+        "gemini_lambda_arn": os.environ.get("GEMINI_LAMBDA_ARN", "").strip(),
     }
 
 
@@ -301,6 +303,10 @@ def _provision_team(team_data: dict, team_name: str, version: str,
         return {"success": True, "s3_uri": None, "errors": [], "dry_run": True}
 
     bedrock = _bedrock(cfg)
+    gemini_lambda_arn = cfg.get("gemini_lambda_arn", "")
+    gemini_enabled    = bool(gemini_lambda_arn and
+                             team_data.get("globals", {}).get("features", {}).get("gemini_research"))
+
     for i, agent in enumerate(output_team["agents"]):
         role_obj         = role_index[agent["role_id"]]
         agent_fm         = agent.get("bedrock", {}).get("foundation_model", "").strip()
@@ -311,7 +317,7 @@ def _provision_team(team_data: dict, team_name: str, version: str,
         existing_ali = agent.get("bedrock", {}).get("aliasId",  "").strip()
 
         if existing_id and existing_ali:
-            # Agent already provisioned — always sync instruction + model
+            # Agent already provisioned — sync instruction + model + action group
             log.info(f"  SYNC {agent['name']} ({existing_id}) — updating instruction")
             try:
                 current = bedrock.get_agent(agentId=existing_id)["agent"]
@@ -323,18 +329,18 @@ def _provision_team(team_data: dict, team_name: str, version: str,
                     instruction=instruction,
                     description=current.get("description", ""),
                 )
+                if gemini_enabled:
+                    _attach_gemini_action_group(bedrock, existing_id, gemini_lambda_arn)
                 bedrock.prepare_agent(agentId=existing_id)
                 log.info(f"  ✓ SYNC {agent['name']} — instruction updated")
             except Exception as e:
                 log.warning(f"  WARN could not sync {agent['name']}: {e}")
-            # Keep existing IDs — no change to bedrock block
             continue
 
         # Not yet provisioned — create or recover
         existing = find_existing_agent(bedrock, agent["name"])
         if existing:
             aid = existing["agentId"]
-            # Update instruction on recovered agent too
             try:
                 current = bedrock.get_agent(agentId=aid)["agent"]
                 bedrock.update_agent(
@@ -345,6 +351,8 @@ def _provision_team(team_data: dict, team_name: str, version: str,
                     instruction=instruction,
                     description=current.get("description", ""),
                 )
+                if gemini_enabled:
+                    _attach_gemini_action_group(bedrock, aid, gemini_lambda_arn)
                 bedrock.prepare_agent(agentId=aid)
             except Exception as e:
                 log.warning(f"  WARN could not update recovered agent {agent['name']}: {e}")
@@ -358,6 +366,7 @@ def _provision_team(team_data: dict, team_name: str, version: str,
                 goal_template=agent["goal_template"], schema_ref=agent["schema_ref"],
                 role_obj=role_obj, bedrock_role_arn=cfg["bedrock_role_arn"],
                 foundation_model=foundation_model,
+                gemini_lambda_arn=gemini_lambda_arn if gemini_enabled else "",
             )
 
         bdrock = output_team["agents"][i].get("bedrock", {})

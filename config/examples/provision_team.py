@@ -442,6 +442,108 @@ def sanitise_agent_name(name: str) -> str:
     return sanitised[:100]
 
 
+def _gemini_action_group_schema() -> str:
+    """
+    OpenAPI 3.0 schema for the gemini_research action group.
+    Bedrock uses this to understand when and how to call the tool.
+    """
+    schema = {
+        "openapi": "3.0.0",
+        "info": {"title": "Gemini Research Tool", "version": "1.0"},
+        "paths": {
+            "/gemini_research": {
+                "post": {
+                    "summary": (
+                        "Search and research any topic using Google Gemini. "
+                        "Call this whenever you need external knowledge, current facts, "
+                        "technical references, or information not present in your context."
+                    ),
+                    "operationId": "gemini_research",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["query"],
+                                    "properties": {
+                                        "query": {
+                                            "type": "string",
+                                            "description": (
+                                                "The research question or search query. "
+                                                "Be specific — include topic, context, and what "
+                                                "kind of answer you need (e.g. current stats, "
+                                                "technical explanation, examples)."
+                                            ),
+                                        }
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Research result from Gemini",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "result": {
+                                                "type": "string",
+                                                "description": "The research response from Gemini",
+                                            }
+                                        },
+                                    }
+                                }
+                            },
+                        }
+                    },
+                }
+            }
+        },
+    }
+    return json.dumps(schema)
+
+
+def _attach_gemini_action_group(client, agent_id: str, gemini_lambda_arn: str) -> None:
+    """
+    Attach (or replace) the gemini_research action group on a Bedrock agent.
+    Idempotent — deletes any existing group with the same name before creating.
+    """
+    group_name = "gemini_research"
+
+    # Delete existing action group with same name if present
+    try:
+        existing = client.list_agent_action_groups(
+            agentId=agent_id, agentVersion="DRAFT"
+        ).get("actionGroupSummaries", [])
+        for ag in existing:
+            if ag["actionGroupName"] == group_name:
+                client.delete_agent_action_group(
+                    agentId=agent_id,
+                    agentVersion="DRAFT",
+                    actionGroupId=ag["actionGroupId"],
+                )
+                log.info(f"  Deleted existing action group '{group_name}' on {agent_id}")
+    except Exception as e:
+        log.warning(f"  Could not clean up existing action groups on {agent_id}: {e}")
+
+    client.create_agent_action_group(
+        agentId=agent_id,
+        agentVersion="DRAFT",
+        actionGroupName=group_name,
+        description=(
+            "Call Gemini to research any topic, retrieve current facts, technical references, "
+            "or external knowledge not present in the agent's context."
+        ),
+        actionGroupExecutor={"lambda": gemini_lambda_arn},
+        apiSchema={"payload": _gemini_action_group_schema()},
+        actionGroupState="ENABLED",
+    )
+    log.info(f"  ✓ Attached gemini_research action group to agent {agent_id}")
+
+
 def create_bedrock_agent(
     client,
     agent_id_slug: str,
@@ -450,14 +552,23 @@ def create_bedrock_agent(
     schema_ref: str,
     role_obj: dict,
     bedrock_role_arn: str,
-    foundation_model: str = "anthropic.claude-sonnet-4-20250514-v1:0",
+    foundation_model: str = "amazon.nova-micro-v1:0",
+    gemini_lambda_arn: str = "",
 ) -> tuple[str, str]:
     """
     Create a Bedrock agent + default alias.
+    If gemini_lambda_arn is provided, attaches the gemini_research action group.
     Returns (agentId, aliasId).
     """
     primary_task = role_obj["agent_config"]["primary_task"]
     constraints  = "\n".join(f"  - {c}" for c in primary_task.get("constraints", []))
+
+    gemini_tool_hint = (
+        "\n\nTool available: gemini_research(query)\n"
+        "Call this tool whenever you need to research a topic, verify facts, find current data, "
+        "or retrieve external knowledge not present in your input context. "
+        "Prefer calling it over guessing or leaving gaps in your output."
+    ) if gemini_lambda_arn else ""
 
     instruction = (
         f"You are {agent_name}.\n\n"
@@ -469,6 +580,7 @@ def create_bedrock_agent(
         f"Constraints:\n{constraints}\n\n"
         f"Output schema : {schema_ref}\n"
         f"Escalation    : {role_obj['agent_config']['escalation_policy']}"
+        f"{gemini_tool_hint}"
     )
 
     safe_name = sanitise_agent_name(agent_name)
@@ -484,15 +596,16 @@ def create_bedrock_agent(
     )
     agent_id = response["agent"]["agentId"]
 
-    # Wait for agent to be ready
     _wait_for_agent(client, agent_id)
 
-    # Prepare agent (needed before alias creation)
+    # Attach Gemini action group before prepare so it's baked in
+    if gemini_lambda_arn:
+        _attach_gemini_action_group(client, agent_id, gemini_lambda_arn)
+
     log.info(f"  Preparing agent {agent_id}")
     client.prepare_agent(agentId=agent_id)
     _wait_for_agent(client, agent_id, target_status="PREPARED")
 
-    # Create alias
     log.info(f"  Creating alias for agent {agent_id}")
     alias_resp = client.create_agent_alias(
         agentId=agent_id,
@@ -502,6 +615,7 @@ def create_bedrock_agent(
     alias_id = alias_resp["agentAlias"]["agentAliasId"]
 
     return agent_id, alias_id
+
 
 
 def _wait_for_agent(client, agent_id: str, target_status: str = "NOT_PREPARED", max_wait: int = 120):
