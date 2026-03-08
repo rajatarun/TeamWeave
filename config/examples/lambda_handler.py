@@ -266,7 +266,29 @@ def _bedrock(cfg):
 # Provision helper
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_instruction(agent: dict, role_obj: dict) -> str:
+def _gemini_tool_hint(enabled: bool) -> str:
+    if not enabled:
+        return ""
+    return (
+        "\n\n## RESEARCH TOOL\n"
+        "You have access to the `gemini_research` tool. "
+        "You MUST call this tool before producing your output whenever your task involves:\n"
+        "  - Any factual claim, statistic, or data point\n"
+        "  - Technical explanations, concepts, or frameworks\n"
+        "  - Resource URLs or references\n"
+        "  - Current events, trends, or recent developments\n"
+        "  - Any information not explicitly provided in your input context\n\n"
+        "How to use:\n"
+        "  - Call gemini_research(query) with a specific, targeted question\n"
+        "  - You may call it multiple times for different sub-questions\n"
+        "  - Incorporate the results into your output — do not ignore them\n"
+        "  - Never fabricate facts when you can research them instead\n\n"
+        "When NOT to call it: only skip if every claim in your output is already "
+        "present verbatim in the input context provided to you."
+    )
+
+
+def _build_instruction(agent: dict, role_obj: dict, gemini_enabled: bool = False) -> str:
     """
     Construct the full Bedrock instruction string from role + agent config.
     Uses original_goal_template (pre-enrichment) if present to avoid
@@ -274,7 +296,6 @@ def _build_instruction(agent: dict, role_obj: dict) -> str:
     """
     primary_task = role_obj["agent_config"]["primary_task"]
     constraints  = "\n".join(f"  - {c}" for c in primary_task.get("constraints", []))
-    # Prefer the raw goal before enrich_goal_templates ran
     goal = agent.get("original_goal_template") or agent.get("goal_template", "")
     return (
         f"You are {agent['name']}.\n\n"
@@ -286,6 +307,7 @@ def _build_instruction(agent: dict, role_obj: dict) -> str:
         f"Constraints:\n{constraints}\n\n"
         f"Output schema : {agent['schema_ref']}\n"
         f"Escalation    : {role_obj['agent_config']['escalation_policy']}"
+        f"{_gemini_tool_hint(gemini_enabled)}"
     )
 
 
@@ -304,14 +326,13 @@ def _provision_team(team_data: dict, team_name: str, version: str,
 
     bedrock = _bedrock(cfg)
     gemini_lambda_arn = cfg.get("gemini_lambda_arn", "")
-    gemini_enabled    = bool(gemini_lambda_arn and
-                             team_data.get("globals", {}).get("features", {}).get("gemini_research"))
+    gemini_enabled    = bool(gemini_lambda_arn)
 
     for i, agent in enumerate(output_team["agents"]):
         role_obj         = role_index[agent["role_id"]]
         agent_fm         = agent.get("bedrock", {}).get("foundation_model", "").strip()
         foundation_model = agent_fm or cfg["foundation_model"]
-        instruction      = _build_instruction(agent, role_obj)
+        instruction      = _build_instruction(agent, role_obj, gemini_enabled)
 
         existing_id  = agent.get("bedrock", {}).get("agentId",  "").strip()
         existing_ali = agent.get("bedrock", {}).get("aliasId",  "").strip()

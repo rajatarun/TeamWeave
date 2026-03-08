@@ -564,10 +564,21 @@ def create_bedrock_agent(
     constraints  = "\n".join(f"  - {c}" for c in primary_task.get("constraints", []))
 
     gemini_tool_hint = (
-        "\n\nTool available: gemini_research(query)\n"
-        "Call this tool whenever you need to research a topic, verify facts, find current data, "
-        "or retrieve external knowledge not present in your input context. "
-        "Prefer calling it over guessing or leaving gaps in your output."
+        "\n\n## RESEARCH TOOL\n"
+        "You have access to the `gemini_research` tool. "
+        "You MUST call this tool before producing your output whenever your task involves:\n"
+        "  - Any factual claim, statistic, or data point\n"
+        "  - Technical explanations, concepts, or frameworks\n"
+        "  - Resource URLs or references\n"
+        "  - Current events, trends, or recent developments\n"
+        "  - Any information not explicitly provided in your input context\n\n"
+        "How to use:\n"
+        "  - Call gemini_research(query) with a specific, targeted question\n"
+        "  - You may call it multiple times for different sub-questions\n"
+        "  - Incorporate the results into your output — do not ignore them\n"
+        "  - Never fabricate facts when you can research them instead\n\n"
+        "When NOT to call it: only skip if every claim in your output is already "
+        "present verbatim in the input context provided to you."
     ) if gemini_lambda_arn else ""
 
     instruction = (
