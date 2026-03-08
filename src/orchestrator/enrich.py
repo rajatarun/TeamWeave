@@ -55,7 +55,7 @@ _REFUSAL_PHRASES = [
     "cannot be completed",
     "no tools available",
     "tool is required",
-    "no tools are required",
+    "tools are required",
     "i am not able",
     "not supported",
     "the task is to generate",
