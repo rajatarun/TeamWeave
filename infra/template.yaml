@@ -671,6 +671,7 @@ Resources:
           VECTOR_DB_SSL_ROOT_CERT: /var/task/certs/rds-ca-bundle.pem
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
           GEMINI_MODEL: gemini-2.0-flash
+          GEMINI_LAMBDA_ARN: !GetAtt GeminiResearchFunction.Arn
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
       VpcConfig: !If
         - HasVpcConfig
@@ -678,6 +679,55 @@ Resources:
             - !Ref OrchestratorSecurityGroup
           SubnetIds: !Split [",", !Ref LambdaSubnetIds]
         - !Ref AWS::NoValue
+
+  GeminiResearchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-gemini-research-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: gemini-research-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:gemini/api_key-*"
+
+  GeminiResearchFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: pbm-gemini-research
+      CodeUri: ../
+      Handler: config/examples/gemini_lambda.handler
+      Role: !GetAtt GeminiResearchRole.Arn
+      Environment:
+        Variables:
+          GEMINI_MODEL: gemini-2.0-flash
+          MAX_TOKENS: "1024"
+
+  GeminiResearchFunctionInvokePermissionForBedrock:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GeminiResearchFunction
+      Principal: bedrock.amazonaws.com
+      StatementId: bedrock-invoke
 
   StatusFunction:
     Type: AWS::Serverless::Function
@@ -893,6 +943,8 @@ Outputs:
     Value: !GetAtt WorkerFunction.Arn
   ProvisionTeamFunctionArn:
     Value: !GetAtt ProvisionTeamFunction.Arn
+  GeminiResearchFunctionArn:
+    Value: !GetAtt GeminiResearchFunction.Arn
   WorkerRoleArn:
     Value: !GetAtt WorkerRole.Arn
   DdbTable:
