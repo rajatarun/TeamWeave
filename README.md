@@ -177,6 +177,25 @@ Important runtime variables include:
 
 Most of these are wired by `infra/template.yaml`.
 
+### Gemini research Lambda wiring
+
+The SAM template now provisions a dedicated Gemini action-group Lambda named `pbm-gemini-research` using `config/examples/gemini_lambda.handler` and exposes its ARN to the worker as `GEMINI_LAMBDA_ARN`.
+
+Equivalent CLI setup:
+
+```bash
+# 1. Deploy gemini_lambda.py as a Lambda function named e.g. pbm-gemini-research
+# 2. Grant Bedrock permission to invoke it:
+aws lambda add-permission \
+  --function-name pbm-gemini-research \
+  --statement-id bedrock-invoke \
+  --action lambda:InvokeFunction \
+  --principal bedrock.amazonaws.com
+
+# 3. Set on your worker Lambda:
+GEMINI_LAMBDA_ARN=gemini lambda
+```
+
 ---
 
 ## Local Development
