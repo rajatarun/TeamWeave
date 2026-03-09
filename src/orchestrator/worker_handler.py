@@ -217,7 +217,15 @@ def run_team_pipeline(
             len(prompt),
         )
 
-        raw_text = invoke_agent(agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt)
+        # Resolve shadow alias from team config for mcp_observatory dual_invoke
+        shadow_alias_id = None
+        if agent.bedrock.shadow_model_id and agent.bedrock.model_aliases:
+            shadow_alias_id = agent.bedrock.model_aliases.get(agent.bedrock.shadow_model_id) or None
+
+        raw_text = invoke_agent(
+            agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt,
+            shadow_alias_id=shadow_alias_id,
+        )
 
         try:
             out_json = extract_json_payload(raw_text)

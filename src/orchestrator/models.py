@@ -1,10 +1,13 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 @dataclass
 class BedrockRef:
     agentId: str
     aliasId: str
+    model_id: str = "us.amazon.nova-micro-v1:0"
+    shadow_model_id: str = ""
+    model_aliases: Dict[str, str] = field(default_factory=dict)
 
 @dataclass
 class AgentConfig:
