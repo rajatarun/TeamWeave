@@ -35,8 +35,8 @@
       "id": "coach",
       "name": "Technical Coach",
       "bedrock": {
-        "agentId": "BPX2CTMTT7",
-        "aliasId": "TADVYKDAFO",
+        "agentId": "",
+        "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
@@ -55,8 +55,8 @@
       "id": "strategist",
       "name": "Learning Strategist",
       "bedrock": {
-        "agentId": "7BRS3KV3OV",
-        "aliasId": "I8O1K9SNWQ",
+        "agentId": "",
+        "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
@@ -75,8 +75,8 @@
       "id": "advisor",
       "name": "Daily Advisor",
       "bedrock": {
-        "agentId": "9YKZVGBINB",
-        "aliasId": "Z6SE2YNTE7",
+        "agentId": "",
+        "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
