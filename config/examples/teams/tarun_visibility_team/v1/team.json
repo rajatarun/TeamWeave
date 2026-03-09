@@ -35,8 +35,8 @@
       "id": "director",
       "name": "Content Marketing Director",
       "bedrock": {
-        "agentId": "9QV7CTD9CD",
-        "aliasId": "SEUN4TSHUQ",
+        "agentId": "",
+        "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
@@ -55,8 +55,8 @@
       "id": "strategist",
       "name": "Content Strategist",
       "bedrock": {
-        "agentId": "AFZWOHRKED",
-        "aliasId": "W43CPIZLP4",
+        "agentId": "",
+        "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
@@ -75,8 +75,8 @@
       "id": "writer_linkedin",
       "name": "Content Writer - LinkedIn",
       "bedrock": {
-        "agentId": "GCFCYD7FPO",
-        "aliasId": "YUVNDS1MPB",
+        "agentId": "",
+        "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
@@ -95,8 +95,8 @@
       "id": "seo",
       "name": "SEO Specialist",
       "bedrock": {
-        "agentId": "WD28PRDAXY",
-        "aliasId": "UFD1VBX5FH",
+        "agentId": "",
+        "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
@@ -115,8 +115,8 @@
       "id": "editor",
       "name": "Managing Editor",
       "bedrock": {
-        "agentId": "YOTXN6WCUZ",
-        "aliasId": "ICON4XIKNC",
+        "agentId": "",
+        "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
@@ -135,8 +135,8 @@
       "id": "designer",
       "name": "Designer",
       "bedrock": {
-        "agentId": "61NNMVPUWW",
-        "aliasId": "XBVTOUJP5C",
+        "agentId": "",
+        "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
@@ -155,8 +155,8 @@
       "id": "distribution",
       "name": "Social Media / Distribution Manager",
       "bedrock": {
-        "agentId": "OLQS6YSIL1",
-        "aliasId": "9ZKRIHTFOW",
+        "agentId": "",
+        "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
@@ -175,8 +175,8 @@
       "id": "director_approve",
       "name": "Director Approval",
       "bedrock": {
-        "agentId": "YKTSAES5IK",
-        "aliasId": "JPY7XIE4SU",
+        "agentId": "",
+        "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
