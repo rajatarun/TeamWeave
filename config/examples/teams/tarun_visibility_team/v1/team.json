@@ -27,12 +27,12 @@
     },
     "revision": {
       "enabled": false,
-      "default_jump_to_step": "strategist"
+      "default_jump_to_step": "TVT_DEPT-003_PBM-003_strategist"
     }
   },
   "agents": [
     {
-      "id": "director",
+      "id": "TVT_DEPT-001_PBM-001_director",
       "name": "Content Marketing Director",
       "bedrock": {
         "agentId": "",
@@ -54,7 +54,7 @@
       "department_id": "DEPT-001"
     },
     {
-      "id": "strategist",
+      "id": "TVT_DEPT-003_PBM-003_strategist",
       "name": "Content Strategist",
       "bedrock": {
         "agentId": "",
@@ -76,7 +76,7 @@
       "department_id": "DEPT-003"
     },
     {
-      "id": "writer_linkedin",
+      "id": "TVT_DEPT-003_PBM-006_writer_linkedin",
       "name": "Content Writer - LinkedIn",
       "bedrock": {
         "agentId": "",
@@ -98,7 +98,7 @@
       "department_id": "DEPT-003"
     },
     {
-      "id": "seo",
+      "id": "TVT_DEPT-005_PBM-010_seo",
       "name": "SEO Specialist",
       "bedrock": {
         "agentId": "",
@@ -120,7 +120,7 @@
       "department_id": "DEPT-005"
     },
     {
-      "id": "editor",
+      "id": "TVT_DEPT-003_PBM-003E_editor",
       "name": "Managing Editor",
       "bedrock": {
         "agentId": "",
@@ -142,7 +142,7 @@
       "department_id": "DEPT-003"
     },
     {
-      "id": "designer",
+      "id": "TVT_DEPT-002_PBM-005_designer",
       "name": "Designer",
       "bedrock": {
         "agentId": "",
@@ -164,7 +164,7 @@
       "department_id": "DEPT-002"
     },
     {
-      "id": "distribution",
+      "id": "TVT_DEPT-003_PBM-004_distribution",
       "name": "Social Media / Distribution Manager",
       "bedrock": {
         "agentId": "",
@@ -186,7 +186,7 @@
       "department_id": "DEPT-003"
     },
     {
-      "id": "director_approve",
+      "id": "TVT_DEPT-001_PBM-001A_director_approve",
       "name": "Director Approval",
       "bedrock": {
         "agentId": "",
@@ -210,62 +210,62 @@
   ],
   "workflow": [
     {
-      "step": "director",
+      "step": "TVT_DEPT-001_PBM-001_director",
       "inputs": [
         "request",
         "rag_context"
       ]
     },
     {
-      "step": "strategist",
+      "step": "TVT_DEPT-003_PBM-003_strategist",
       "inputs": [
-        "director.output",
+        "TVT_DEPT-001_PBM-001_director.output",
         "rag_context"
       ]
     },
     {
-      "step": "writer_linkedin",
+      "step": "TVT_DEPT-003_PBM-006_writer_linkedin",
       "inputs": [
-        "director.output",
-        "strategist.output",
+        "TVT_DEPT-001_PBM-001_director.output",
+        "TVT_DEPT-003_PBM-003_strategist.output",
         "rag_context"
       ]
     },
     {
-      "step": "seo",
+      "step": "TVT_DEPT-005_PBM-010_seo",
       "inputs": [
-        "writer_linkedin.output",
-        "strategist.output"
+        "TVT_DEPT-003_PBM-006_writer_linkedin.output",
+        "TVT_DEPT-003_PBM-003_strategist.output"
       ]
     },
     {
-      "step": "editor",
+      "step": "TVT_DEPT-003_PBM-003E_editor",
       "inputs": [
-        "seo.output",
-        "writer_linkedin.output",
-        "director.output",
+        "TVT_DEPT-005_PBM-010_seo.output",
+        "TVT_DEPT-003_PBM-006_writer_linkedin.output",
+        "TVT_DEPT-001_PBM-001_director.output",
         "rag_context"
       ]
     },
     {
-      "step": "designer",
+      "step": "TVT_DEPT-002_PBM-005_designer",
       "inputs": [
-        "editor.output"
+        "TVT_DEPT-003_PBM-003E_editor.output"
       ]
     },
     {
-      "step": "distribution",
+      "step": "TVT_DEPT-003_PBM-004_distribution",
       "inputs": [
-        "editor.output",
-        "director.output"
+        "TVT_DEPT-003_PBM-003E_editor.output",
+        "TVT_DEPT-001_PBM-001_director.output"
       ]
     },
     {
-      "step": "director_approve",
+      "step": "TVT_DEPT-001_PBM-001A_director_approve",
       "inputs": [
-        "editor.output",
-        "distribution.output",
-        "director.output"
+        "TVT_DEPT-003_PBM-003E_editor.output",
+        "TVT_DEPT-003_PBM-004_distribution.output",
+        "TVT_DEPT-001_PBM-001_director.output"
       ]
     }
   ],
