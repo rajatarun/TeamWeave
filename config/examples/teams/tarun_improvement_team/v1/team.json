@@ -36,7 +36,17 @@
       "name": "Technical Coach",
       "bedrock": {
         "agentId": "BPX2CTMTT7",
-        "aliasId": "TADVYKDAFO"
+        "aliasId": "TADVYKDAFO",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "TADVYKDAFO",
+          "us.amazon.nova-lite-v1:0": "",
+          "us.amazon.nova-pro-v1:0": "",
+          "us.amazon.nova-premier-v1:0": "",
+          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
       },
       "goal_template": "Understand Tarun's current expertise and target date. Produce a Learning Map: skill gaps, milestones, and success rubric.",
       "schema_ref": "learning_map_v1"
@@ -46,7 +56,17 @@
       "name": "Learning Strategist",
       "bedrock": {
         "agentId": "7BRS3KV3OV",
-        "aliasId": "I8O1K9SNWQ"
+        "aliasId": "I8O1K9SNWQ",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "I8O1K9SNWQ",
+          "us.amazon.nova-lite-v1:0": "",
+          "us.amazon.nova-pro-v1:0": "",
+          "us.amazon.nova-premier-v1:0": "",
+          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
       },
       "goal_template": "Turn Learning Map into a calendar: weekly themes, daily cadence, and checkpoints. Keep it flexible.",
       "schema_ref": "learning_plan_v1"
@@ -56,7 +76,17 @@
       "name": "Daily Advisor",
       "bedrock": {
         "agentId": "9YKZVGBINB",
-        "aliasId": "Z6SE2YNTE7"
+        "aliasId": "Z6SE2YNTE7",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "Z6SE2YNTE7",
+          "us.amazon.nova-lite-v1:0": "",
+          "us.amazon.nova-pro-v1:0": "",
+          "us.amazon.nova-premier-v1:0": "",
+          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
       },
       "goal_template": "Generate today's tasks: read, practice, reflect. Use COMPLETED_TASKS_HISTORY to avoid repeating same topic/level. Provide best links and a reflection prompt.",
       "schema_ref": "daily_tasks_v1"

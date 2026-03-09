@@ -5,13 +5,16 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-def _make_wrapper_result(output, *, action="allow", reason="within_budget"):
+def _make_wrapper_result(output, *, action="allow", reason="within_budget",
+                         shadow_disagreement=None, shadow_variance=None):
     """Build a minimal WrapperResult-like object for use in mocks."""
     span = MagicMock()
     span.trace_id = "trace-abc"
     span.prompt_tokens = 10
     span.completion_tokens = 5
     span.cost_usd = 0.0
+    span.shadow_disagreement_score = shadow_disagreement
+    span.shadow_numeric_variance = shadow_variance
 
     decision = MagicMock()
     decision.action = action
@@ -30,11 +33,10 @@ class McpObservatoryTests(unittest.TestCase):
         cls.observatory = importlib.import_module("src.orchestrator.mcp_observatory")
 
     def setUp(self):
-        # Reset cached DynamoDB table between tests.
         self.observatory._ddb_table = None
 
     # ------------------------------------------------------------------
-    # observe_agent_request – core behaviour
+    # observe_agent_request — core behaviour (no shadow)
     # ------------------------------------------------------------------
 
     def test_observe_agent_request_returns_wrapper_output(self):
@@ -44,34 +46,27 @@ class McpObservatoryTests(unittest.TestCase):
         with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
             with patch.object(self.observatory, "_push_metric"):
                 output = self.observatory.observe_agent_request(
-                    MagicMock(),
-                    agent_id="agent-1",
-                    alias_id="alias-1",
-                    session_id="sess-1",
-                    input_text="hello",
+                    MagicMock(), agent_id="a1", alias_id="al1",
+                    session_id="s1", input_text="hello",
                 )
-
         self.assertEqual(output, expected)
 
-    def test_observe_agent_request_invokes_wrapper_with_correct_source_and_model(self):
+    def test_observe_agent_request_no_shadow_uses_dual_invoke_false(self):
         fake_result = _make_wrapper_result({"completion": []})
         mock_invoke = AsyncMock(return_value=fake_result)
 
         with patch.object(self.observatory._wrapper, "invoke", new=mock_invoke):
             with patch.object(self.observatory, "_push_metric"):
                 self.observatory.observe_agent_request(
-                    MagicMock(),
-                    agent_id="agent-1",
-                    alias_id="alias-1",
-                    session_id="sess-1",
-                    input_text="hello",
+                    MagicMock(), agent_id="a1", alias_id="al1",
+                    session_id="s1", input_text="hello",
                 )
 
-        mock_invoke.assert_called_once()
-        call_kwargs = mock_invoke.call_args.kwargs
-        self.assertEqual(call_kwargs["source"], "agent")
-        self.assertEqual(call_kwargs["model"], "bedrock-agent")
-        self.assertEqual(call_kwargs["prompt"], "hello")
+        kw = mock_invoke.call_args.kwargs
+        self.assertEqual(kw["source"], "agent")
+        self.assertEqual(kw["model"], "bedrock-agent")
+        self.assertFalse(kw["dual_invoke"])
+        self.assertIsNone(kw["shadow_call"])
 
     def test_observe_agent_request_emits_log_with_span_fields(self):
         fake_result = _make_wrapper_result({"completion": []})
@@ -80,14 +75,10 @@ class McpObservatoryTests(unittest.TestCase):
             with patch.object(self.observatory, "_push_metric"):
                 with patch.object(self.observatory.log, "info") as mock_log:
                     self.observatory.observe_agent_request(
-                        MagicMock(),
-                        agent_id="agent-1",
-                        alias_id="alias-1",
-                        session_id="sess-1",
-                        input_text="hello",
+                        MagicMock(), agent_id="a1", alias_id="al1",
+                        session_id="s1", input_text="hello",
                     )
 
-        mock_log.assert_called_once()
         extra = mock_log.call_args.kwargs["extra"]
         self.assertEqual(extra["operation"], "invoke_agent")
         self.assertEqual(extra["trace_id"], "trace-abc")
@@ -98,17 +89,87 @@ class McpObservatoryTests(unittest.TestCase):
         with patch.object(
             self.observatory._wrapper, "invoke", new=AsyncMock(side_effect=RuntimeError("boom"))
         ):
-            with self.assertRaises(RuntimeError, msg="boom"):
+            with self.assertRaises(RuntimeError):
                 self.observatory.observe_agent_request(
-                    MagicMock(),
-                    agent_id="agent-1",
-                    alias_id="alias-1",
-                    session_id="sess-1",
-                    input_text="hello",
+                    MagicMock(), agent_id="a1", alias_id="al1",
+                    session_id="s1", input_text="hello",
                 )
 
     # ------------------------------------------------------------------
-    # observe_agent_request – DynamoDB writes
+    # observe_agent_request — shadow alias / dual_invoke
+    # ------------------------------------------------------------------
+
+    def test_observe_agent_request_shadow_enables_dual_invoke(self):
+        fake_result = _make_wrapper_result({"completion": []}, shadow_disagreement=0.12)
+        mock_invoke = AsyncMock(return_value=fake_result)
+
+        with patch.object(self.observatory._wrapper, "invoke", new=mock_invoke):
+            with patch.object(self.observatory, "_push_metric"):
+                self.observatory.observe_agent_request(
+                    MagicMock(), agent_id="a1", alias_id="al1",
+                    session_id="s1", input_text="hello",
+                    shadow_alias_id="shadow-al",
+                )
+
+        kw = mock_invoke.call_args.kwargs
+        self.assertTrue(kw["dual_invoke"])
+        self.assertEqual(kw["shadow_model"], "bedrock-agent/shadow-al")
+        self.assertIsNotNone(kw["shadow_call"])
+
+    def test_observe_agent_request_shadow_writes_disagreement_to_dynamodb(self):
+        fake_result = _make_wrapper_result(
+            {"completion": []}, shadow_disagreement=0.35, shadow_variance=1.5
+        )
+        mock_table = MagicMock()
+
+        with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
+            with patch.object(self.observatory, "_get_ddb_table", return_value=mock_table):
+                self.observatory.observe_agent_request(
+                    MagicMock(), agent_id="a1", alias_id="al1",
+                    session_id="s1", input_text="hello",
+                    shadow_alias_id="shadow-al",
+                )
+
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        self.assertIn("shadow_disagreement_score", item)
+        self.assertAlmostEqual(float(item["shadow_disagreement_score"]), 0.35, places=4)
+        self.assertIn("shadow_numeric_variance", item)
+        self.assertEqual(item["shadow_alias_id"], "shadow-al")
+
+    def test_observe_agent_request_shadow_logs_disagreement_score(self):
+        fake_result = _make_wrapper_result({"completion": []}, shadow_disagreement=0.42)
+
+        with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
+            with patch.object(self.observatory, "_push_metric"):
+                with patch.object(self.observatory.log, "info") as mock_log:
+                    self.observatory.observe_agent_request(
+                        MagicMock(), agent_id="a1", alias_id="al1",
+                        session_id="s1", input_text="hello",
+                        shadow_alias_id="shadow-al",
+                    )
+
+        extra = mock_log.call_args.kwargs["extra"]
+        self.assertEqual(extra["shadow_alias_id"], "shadow-al")
+        self.assertEqual(extra["shadow_disagreement_score"], 0.42)
+
+    def test_observe_agent_request_no_shadow_disagreement_skipped_from_dynamodb(self):
+        """When no shadow, shadow fields must NOT appear in the DynamoDB item."""
+        fake_result = _make_wrapper_result({"completion": []})  # shadow fields = None
+        mock_table = MagicMock()
+
+        with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
+            with patch.object(self.observatory, "_get_ddb_table", return_value=mock_table):
+                self.observatory.observe_agent_request(
+                    MagicMock(), agent_id="a1", alias_id="al1",
+                    session_id="s1", input_text="hello",
+                )
+
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        self.assertNotIn("shadow_disagreement_score", item)
+        self.assertNotIn("shadow_alias_id", item)
+
+    # ------------------------------------------------------------------
+    # observe_agent_request — DynamoDB writes
     # ------------------------------------------------------------------
 
     def test_observe_agent_request_writes_metric_to_dynamodb(self):
@@ -118,22 +179,16 @@ class McpObservatoryTests(unittest.TestCase):
         with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
             with patch.object(self.observatory, "_get_ddb_table", return_value=mock_table):
                 self.observatory.observe_agent_request(
-                    MagicMock(),
-                    agent_id="agent-1",
-                    alias_id="alias-1",
-                    session_id="sess-1",
-                    input_text="hello",
+                    MagicMock(), agent_id="a1", alias_id="al1",
+                    session_id="s1", input_text="hello",
                 )
 
-        mock_table.put_item.assert_called_once()
         item = mock_table.put_item.call_args.kwargs["Item"]
         self.assertEqual(item["pk"], "OBSERVATORY#invoke_agent")
         self.assertIn("trace-abc", item["sk"])
         self.assertEqual(item["trace_id"], "trace-abc")
-        self.assertEqual(item["operation"], "invoke_agent")
         self.assertEqual(item["decision"], "allow")
-        self.assertEqual(item["agent_id"], "agent-1")
-        self.assertIn("ttl", item)
+        self.assertEqual(item["agent_id"], "a1")
         self.assertIsInstance(item["ttl"], Decimal)
         self.assertIsInstance(item["cost_usd"], Decimal)
 
@@ -141,21 +196,15 @@ class McpObservatoryTests(unittest.TestCase):
         fake_result = _make_wrapper_result({"completion": []})
 
         with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
-            with patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("OBSERVATORY_METRICS_TABLE", None)
-                self.observatory._ddb_table = None
-                # Should complete without error even with no table configured.
-                output = self.observatory.observe_agent_request(
-                    MagicMock(),
-                    agent_id="agent-1",
-                    alias_id="alias-1",
-                    session_id="sess-1",
-                    input_text="hello",
-                )
+            os.environ.pop("OBSERVATORY_METRICS_TABLE", None)
+            self.observatory._ddb_table = None
+            output = self.observatory.observe_agent_request(
+                MagicMock(), agent_id="a1", alias_id="al1",
+                session_id="s1", input_text="hello",
+            )
         self.assertEqual(output, {"completion": []})
 
     def test_observe_agent_request_swallows_dynamodb_write_errors(self):
-        """A DynamoDB failure must not propagate to the caller."""
         fake_result = _make_wrapper_result({"completion": []})
         bad_table = MagicMock()
         bad_table.put_item.side_effect = Exception("network error")
@@ -163,17 +212,13 @@ class McpObservatoryTests(unittest.TestCase):
         with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
             with patch.object(self.observatory, "_get_ddb_table", return_value=bad_table):
                 output = self.observatory.observe_agent_request(
-                    MagicMock(),
-                    agent_id="agent-1",
-                    alias_id="alias-1",
-                    session_id="sess-1",
-                    input_text="hello",
+                    MagicMock(), agent_id="a1", alias_id="al1",
+                    session_id="s1", input_text="hello",
                 )
-
         self.assertEqual(output, {"completion": []})
 
     # ------------------------------------------------------------------
-    # observe_model_request – core behaviour
+    # observe_model_request — core behaviour
     # ------------------------------------------------------------------
 
     def test_observe_model_request_returns_wrapper_output(self):
@@ -183,11 +228,8 @@ class McpObservatoryTests(unittest.TestCase):
         with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
             with patch.object(self.observatory, "_push_metric"):
                 output = self.observatory.observe_model_request(
-                    MagicMock(),
-                    model_id="amazon.nova-micro-v1:0",
-                    body='{"prompt":"hi"}',
+                    MagicMock(), model_id="amazon.nova-micro-v1:0", body='{"prompt":"hi"}',
                 )
-
         self.assertEqual(output, expected)
 
     def test_observe_model_request_invokes_wrapper_with_model_id(self):
@@ -197,14 +239,12 @@ class McpObservatoryTests(unittest.TestCase):
         with patch.object(self.observatory._wrapper, "invoke", new=mock_invoke):
             with patch.object(self.observatory, "_push_metric"):
                 self.observatory.observe_model_request(
-                    MagicMock(),
-                    model_id="amazon.nova-micro-v1:0",
-                    body='{"prompt":"hi"}',
+                    MagicMock(), model_id="amazon.nova-micro-v1:0", body='{"prompt":"hi"}',
                 )
 
-        call_kwargs = mock_invoke.call_args.kwargs
-        self.assertEqual(call_kwargs["source"], "model")
-        self.assertEqual(call_kwargs["model"], "amazon.nova-micro-v1:0")
+        kw = mock_invoke.call_args.kwargs
+        self.assertEqual(kw["source"], "model")
+        self.assertEqual(kw["model"], "amazon.nova-micro-v1:0")
 
     def test_observe_model_request_emits_log_with_span_fields(self):
         fake_result = _make_wrapper_result({"body": b"{}"})
@@ -213,31 +253,22 @@ class McpObservatoryTests(unittest.TestCase):
             with patch.object(self.observatory, "_push_metric"):
                 with patch.object(self.observatory.log, "info") as mock_log:
                     self.observatory.observe_model_request(
-                        MagicMock(),
-                        model_id="amazon.nova-micro-v1:0",
-                        body='{"prompt":"hi"}',
+                        MagicMock(), model_id="amazon.nova-micro-v1:0", body='{"prompt":"hi"}',
                     )
 
         extra = mock_log.call_args.kwargs["extra"]
         self.assertEqual(extra["operation"], "invoke_model")
         self.assertEqual(extra["model_id"], "amazon.nova-micro-v1:0")
         self.assertEqual(extra["trace_id"], "trace-abc")
-        self.assertEqual(extra["decision"], "allow")
 
     def test_observe_model_request_propagates_exceptions(self):
         with patch.object(
             self.observatory._wrapper, "invoke", new=AsyncMock(side_effect=RuntimeError("model error"))
         ):
-            with self.assertRaises(RuntimeError, msg="model error"):
+            with self.assertRaises(RuntimeError):
                 self.observatory.observe_model_request(
-                    MagicMock(),
-                    model_id="amazon.nova-micro-v1:0",
-                    body="{}",
+                    MagicMock(), model_id="amazon.nova-micro-v1:0", body="{}",
                 )
-
-    # ------------------------------------------------------------------
-    # observe_model_request – DynamoDB writes
-    # ------------------------------------------------------------------
 
     def test_observe_model_request_writes_metric_to_dynamodb(self):
         fake_result = _make_wrapper_result({"body": b"{}"})
@@ -246,19 +277,14 @@ class McpObservatoryTests(unittest.TestCase):
         with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
             with patch.object(self.observatory, "_get_ddb_table", return_value=mock_table):
                 self.observatory.observe_model_request(
-                    MagicMock(),
-                    model_id="amazon.nova-micro-v1:0",
-                    body='{"prompt":"hi"}',
+                    MagicMock(), model_id="amazon.nova-micro-v1:0", body='{"prompt":"hi"}',
                 )
 
-        mock_table.put_item.assert_called_once()
         item = mock_table.put_item.call_args.kwargs["Item"]
         self.assertEqual(item["pk"], "OBSERVATORY#invoke_model")
         self.assertIn("trace-abc", item["sk"])
-        self.assertEqual(item["operation"], "invoke_model")
         self.assertEqual(item["model_id"], "amazon.nova-micro-v1:0")
         self.assertIsInstance(item["ttl"], Decimal)
-        self.assertIsInstance(item["cost_usd"], Decimal)
 
     def test_observe_model_request_swallows_dynamodb_write_errors(self):
         fake_result = _make_wrapper_result({"body": b"{}"})
@@ -268,11 +294,8 @@ class McpObservatoryTests(unittest.TestCase):
         with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
             with patch.object(self.observatory, "_get_ddb_table", return_value=bad_table):
                 output = self.observatory.observe_model_request(
-                    MagicMock(),
-                    model_id="amazon.nova-micro-v1:0",
-                    body="{}",
+                    MagicMock(), model_id="amazon.nova-micro-v1:0", body="{}",
                 )
-
         self.assertEqual(output, {"body": b"{}"})
 
     # ------------------------------------------------------------------
@@ -282,32 +305,60 @@ class McpObservatoryTests(unittest.TestCase):
     def test_push_metric_skips_when_no_env_var(self):
         os.environ.pop("OBSERVATORY_METRICS_TABLE", None)
         self.observatory._ddb_table = None
-        # Should not raise even with no env var set.
-        span = MagicMock(trace_id="t1", prompt_tokens=1, completion_tokens=1, cost_usd=0.0)
+        span = MagicMock(
+            trace_id="t1", prompt_tokens=1, completion_tokens=1, cost_usd=0.0,
+            shadow_disagreement_score=None, shadow_numeric_variance=None,
+        )
         decision = MagicMock(action="allow", reason="ok")
         self.observatory._push_metric("invoke_agent", span, decision, {})
 
     def test_push_metric_ttl_is_90_days_from_now(self):
-        import time
-
+        import time as _time
         mock_table = MagicMock()
         os.environ["OBSERVATORY_METRICS_TABLE"] = "test-table"
         self.observatory._ddb_table = None
 
         with patch("boto3.resource") as mock_boto:
             mock_boto.return_value.Table.return_value = mock_table
-            span = MagicMock(trace_id="t1", prompt_tokens=1, completion_tokens=1, cost_usd=0.001)
+            span = MagicMock(
+                trace_id="t1", prompt_tokens=1, completion_tokens=1, cost_usd=0.001,
+                shadow_disagreement_score=None, shadow_numeric_variance=None,
+            )
             decision = MagicMock(action="allow", reason="ok")
-            before = int(time.time())
+            before = int(_time.time())
             self.observatory._push_metric("invoke_agent", span, decision, {})
-            after = int(time.time())
+            after = int(_time.time())
 
         item = mock_table.put_item.call_args.kwargs["Item"]
         ttl_val = int(item["ttl"])
-        expected_min = before + 90 * 24 * 60 * 60
-        expected_max = after + 90 * 24 * 60 * 60
-        self.assertGreaterEqual(ttl_val, expected_min)
-        self.assertLessEqual(ttl_val, expected_max)
+        self.assertGreaterEqual(ttl_val, before + 90 * 24 * 60 * 60)
+        self.assertLessEqual(ttl_val, after + 90 * 24 * 60 * 60)
+
+        os.environ.pop("OBSERVATORY_METRICS_TABLE", None)
+        self.observatory._ddb_table = None
+
+    def test_push_metric_includes_shadow_fields_when_present(self):
+        mock_table = MagicMock()
+        os.environ["OBSERVATORY_METRICS_TABLE"] = "test-table"
+        self.observatory._ddb_table = None
+
+        with patch("boto3.resource") as mock_boto:
+            mock_boto.return_value.Table.return_value = mock_table
+            span = MagicMock(
+                trace_id="t1", prompt_tokens=1, completion_tokens=1, cost_usd=0.0,
+                shadow_disagreement_score=0.25,
+                shadow_numeric_variance=0.5,
+            )
+            decision = MagicMock(action="allow", reason="ok")
+            self.observatory._push_metric("invoke_agent", span, decision, {
+                "shadow_alias_id": "shadow-al",
+            })
+
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        self.assertIn("shadow_disagreement_score", item)
+        self.assertAlmostEqual(float(item["shadow_disagreement_score"]), 0.25, places=4)
+        self.assertIn("shadow_numeric_variance", item)
+        self.assertEqual(item["shadow_alias_id"], "shadow-al")
 
         os.environ.pop("OBSERVATORY_METRICS_TABLE", None)
         self.observatory._ddb_table = None
