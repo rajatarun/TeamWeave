@@ -75,6 +75,22 @@ log.setLevel(logging.INFO)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Model alias slugs — maps inference-profile model IDs to short alias names
+# used when creating per-model Bedrock agent aliases.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MODEL_ALIAS_SLUG: dict[str, str] = {
+    "us.amazon.nova-micro-v1:0":                    "nova-micro",
+    "us.amazon.nova-lite-v1:0":                     "nova-lite",
+    "us.amazon.nova-pro-v1:0":                      "nova-pro",
+    "us.amazon.nova-premier-v1:0":                  "nova-premier",
+    "us.anthropic.claude-3-haiku-20240307-v1:0":    "claude-3-haiku",
+    "us.anthropic.claude-3-5-haiku-20241022-v1:0":  "claude-35-haiku",
+}
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -308,6 +324,94 @@ def _build_instruction(agent: dict, role_obj: dict, gemini_enabled: bool = False
     )
 
 
+
+def _provision_model_aliases(
+    bedrock,
+    agent_id: str,
+    main_model_id: str,
+    main_alias_id: str,
+    model_aliases: dict,
+    instruction: str,
+    agent_name: str,
+) -> dict:
+    """
+    Create one Bedrock agent alias per model variant listed in *model_aliases*.
+
+    For the primary model the existing *main_alias_id* is recorded without any
+    API calls.  For every other model the agent foundation model is swapped,
+    the agent is prepared (creating a new version), and an alias named after
+    the model slug is created.  After all variants the agent is restored to
+    *main_model_id*.
+
+    Returns an updated ``model_aliases`` dict ``{model_id: alias_id}``.
+    """
+    result = dict(model_aliases)
+    result[main_model_id] = main_alias_id
+
+    try:
+        existing_by_name = {
+            a["agentAliasName"]: a["agentAliasId"]
+            for a in bedrock.list_agent_aliases(agentId=agent_id).get("agentAliasSummaries", [])
+        }
+    except Exception as e:
+        log.warning(f"  WARN list_aliases failed for {agent_id}: {e}")
+        return result
+
+    try:
+        current_agent = bedrock.get_agent(agentId=agent_id)["agent"]
+    except Exception as e:
+        log.warning(f"  WARN get_agent failed for {agent_id}: {e}")
+        return result
+
+    for model_id, alias_slug in _MODEL_ALIAS_SLUG.items():
+        if model_id == main_model_id or model_id not in model_aliases:
+            continue
+
+        if alias_slug in existing_by_name:
+            result[model_id] = existing_by_name[alias_slug]
+            log.info(f"  ALIAS EXISTS {agent_name}/{alias_slug} → {existing_by_name[alias_slug]}")
+            continue
+
+        try:
+            bedrock.update_agent(
+                agentId=agent_id,
+                agentName=current_agent["agentName"],
+                agentResourceRoleArn=current_agent["agentResourceRoleArn"],
+                foundationModel=model_id,
+                instruction=instruction,
+                description=current_agent.get("description", ""),
+            )
+            bedrock.prepare_agent(agentId=agent_id)
+            alias_resp = bedrock.create_agent_alias(
+                agentId=agent_id,
+                agentAliasName=alias_slug,
+                description=f"Model variant alias: {model_id}",
+                tags={"model_id": alias_slug, "alias_type": "model_variant"},
+            )
+            alias_id = alias_resp["agentAlias"]["agentAliasId"]
+            result[model_id] = alias_id
+            log.info(f"  ALIAS CREATED {agent_name}/{alias_slug} → {alias_id}")
+        except Exception as e:
+            log.warning(f"  WARN alias creation failed {agent_name}/{alias_slug}: {e}")
+
+    # Restore agent to its primary model
+    try:
+        bedrock.update_agent(
+            agentId=agent_id,
+            agentName=current_agent["agentName"],
+            agentResourceRoleArn=current_agent["agentResourceRoleArn"],
+            foundationModel=main_model_id,
+            instruction=instruction,
+            description=current_agent.get("description", ""),
+        )
+        bedrock.prepare_agent(agentId=agent_id)
+        log.info(f"  RESTORED {agent_name} → {main_model_id}")
+    except Exception as e:
+        log.warning(f"  WARN restore primary model failed for {agent_name}: {e}")
+
+    return result
+
+
 def _provision_team(team_data: dict, team_name: str, version: str,
                     role_index: dict, dept_index: dict, cfg: dict,
                     dry_run: bool = False) -> dict:
@@ -327,7 +431,8 @@ def _provision_team(team_data: dict, team_name: str, version: str,
 
     for i, agent in enumerate(output_team["agents"]):
         role_obj         = role_index[agent["role_id"]]
-        agent_fm         = agent.get("bedrock", {}).get("foundation_model", "").strip()
+        agent_fm         = (agent.get("bedrock", {}).get("model_id") or
+                            agent.get("bedrock", {}).get("foundation_model", "")).strip()
         foundation_model = agent_fm or cfg["foundation_model"]
         instruction      = _build_instruction(agent, role_obj, gemini_enabled)
 
@@ -353,6 +458,15 @@ def _provision_team(team_data: dict, team_name: str, version: str,
                 log.info(f"  ✓ SYNC {agent['name']} — instruction updated")
             except Exception as e:
                 log.warning(f"  WARN could not sync {agent['name']}: {e}")
+
+            # Ensure per-model aliases exist
+            model_aliases = agent.get("bedrock", {}).get("model_aliases", {})
+            if model_aliases:
+                updated_aliases = _provision_model_aliases(
+                    bedrock, existing_id, foundation_model, existing_ali,
+                    model_aliases, instruction, agent["name"],
+                )
+                output_team["agents"][i].setdefault("bedrock", {})["model_aliases"] = updated_aliases
             continue
 
         # Not yet provisioned — create or recover
@@ -389,6 +503,16 @@ def _provision_team(team_data: dict, team_name: str, version: str,
 
         bdrock = output_team["agents"][i].get("bedrock", {})
         bdrock.update({"agentId": aid, "aliasId": alid})
+
+        # Create per-model aliases
+        model_aliases = agent.get("bedrock", {}).get("model_aliases", {})
+        if model_aliases:
+            updated_aliases = _provision_model_aliases(
+                bedrock, aid, foundation_model, alid,
+                model_aliases, instruction, agent["name"],
+            )
+            bdrock["model_aliases"] = updated_aliases
+
         output_team["agents"][i]["bedrock"] = bdrock
         log.info(f"  ✓ {agent['name']} → agentId={aid} aliasId={alid}")
 

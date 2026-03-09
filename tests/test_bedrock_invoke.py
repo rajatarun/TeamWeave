@@ -1,44 +1,24 @@
 import importlib
+import os
 import sys
-import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+from botocore.exceptions import ClientError as _RealClientError
 
 
-class _FakeClientError(Exception):
+class _FakeClientError(_RealClientError):
     def __init__(self, error_response, operation_name):
-        super().__init__(error_response.get("Error", {}).get("Message", ""))
-        self.response = error_response
-        self.operation_name = operation_name
+        super().__init__(error_response, operation_name)
 
 
 class InvokeAgentTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if "boto3" not in sys.modules:
-            fake_boto3 = types.ModuleType("boto3")
-
-            class _FakeRuntimeClient:
-                def invoke_agent(self, **kwargs):
-                    return {"completion": []}
-
-            fake_boto3.client = lambda *_args, **_kwargs: _FakeRuntimeClient()
-            sys.modules["boto3"] = fake_boto3
-
-        if "botocore.config" not in sys.modules:
-            fake_botocore_config = types.ModuleType("botocore.config")
-
-            class _FakeConfig:
-                def __init__(self, **_kwargs):
-                    pass
-
-            fake_botocore_config.Config = _FakeConfig
-            sys.modules["botocore.config"] = fake_botocore_config
-
-        if "botocore.exceptions" not in sys.modules:
-            fake_botocore_exceptions = types.ModuleType("botocore.exceptions")
-            fake_botocore_exceptions.ClientError = _FakeClientError
-            sys.modules["botocore.exceptions"] = fake_botocore_exceptions
+        # Ensure a region is set so boto3 can create clients without AWS creds.
+        os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+        os.environ.setdefault("AWS_ACCESS_KEY_ID", "test")
+        os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test")
 
         cls.bedrock_invoke = importlib.import_module("src.orchestrator.bedrock_invoke")
         cls.StepFailed = importlib.import_module("src.orchestrator.models").StepFailed

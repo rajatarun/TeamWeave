@@ -126,6 +126,25 @@ Resources:
         - AttributeName: sk
           KeyType: RANGE
 
+  ObservatoryMetricsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-OBSERVATORY_METRICS"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
   WorkerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -666,6 +685,7 @@ Resources:
           GEMINI_MODEL: gemini-2.0-flash
           STATE_MACHINE_ARN: !Ref StateMachine
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
+          OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTable
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:
@@ -700,6 +720,7 @@ Resources:
           GEMINI_MODEL: gemini-2.0-flash
           GEMINI_LAMBDA_ARN: !GetAtt GeminiResearchFunction.Arn
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
+          OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTable
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:
@@ -985,3 +1006,5 @@ Outputs:
     Value: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
   ArtifactBucket:
     Value: !If [CreateArtifactBucket, !Ref TeamArtifactBucket, !Ref ArtifactBucketName]
+  ObservatoryMetricsTable:
+    Value: !Ref ObservatoryMetricsTable
