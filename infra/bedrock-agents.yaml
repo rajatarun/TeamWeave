@@ -6,8 +6,39 @@ Description: >-
 Parameters:
   FoundationModelId:
     Type: String
-    Default: amazon.nova-micro-v1:0
-    Description: Foundation model ID used by all Bedrock agents.
+    Default: us.amazon.nova-micro-v1:0
+    Description: >-
+      Primary (main) foundation model ID used by all Bedrock agents.
+      The provision Lambda creates one alias per agent using this model
+      as the live production alias.
+
+  ShadowFoundationModelId:
+    Type: String
+    Default: us.amazon.nova-lite-v1:0
+    Description: >-
+      Shadow model ID used for mcp-observatory dual_invoke comparison.
+      The provision Lambda creates a 'nova-lite' alias per agent pointing
+      to a version prepared with this model.
+
+  NovaProModelId:
+    Type: String
+    Default: us.amazon.nova-pro-v1:0
+    Description: Nova Pro model ID — balanced performance alias.
+
+  NovaPremierModelId:
+    Type: String
+    Default: us.amazon.nova-premier-v1:0
+    Description: Nova Premier model ID — complex reasoning alias.
+
+  ClaudeHaikuModelId:
+    Type: String
+    Default: us.anthropic.claude-3-haiku-20240307-v1:0
+    Description: Claude 3 Haiku model ID — fast agent response alias.
+
+  Claude35HaikuModelId:
+    Type: String
+    Default: us.anthropic.claude-3-5-haiku-20241022-v1:0
+    Description: Claude 3.5 Haiku model ID — enhanced fast response alias.
 
   AgentServiceRoleArn:
     Type: String
@@ -166,6 +197,7 @@ Resources:
         owner: Tarun Raja
         env: prod
         model: !Ref FoundationModelId
+        shadow_model: !Ref ShadowFoundationModelId
 
   VisibilityWriterLinkedinAgent:
     Type: AWS::Bedrock::Agent
@@ -203,6 +235,7 @@ Resources:
         owner: Tarun Raja
         env: prod
         model: !Ref FoundationModelId
+        shadow_model: !Ref ShadowFoundationModelId
 
   VisibilitySeoAgent:
     Type: AWS::Bedrock::Agent
@@ -243,6 +276,7 @@ Resources:
         owner: Tarun Raja
         env: prod
         model: !Ref FoundationModelId
+        shadow_model: !Ref ShadowFoundationModelId
 
   VisibilityEditorAgent:
     Type: AWS::Bedrock::Agent
@@ -285,6 +319,7 @@ Resources:
         owner: Tarun Raja
         env: prod
         model: !Ref FoundationModelId
+        shadow_model: !Ref ShadowFoundationModelId
 
   VisibilityDesignerAgent:
     Type: AWS::Bedrock::Agent
@@ -323,6 +358,7 @@ Resources:
         owner: Tarun Raja
         env: prod
         model: !Ref FoundationModelId
+        shadow_model: !Ref ShadowFoundationModelId
 
   VisibilityDistributionAgent:
     Type: AWS::Bedrock::Agent
@@ -361,6 +397,7 @@ Resources:
         owner: Tarun Raja
         env: prod
         model: !Ref FoundationModelId
+        shadow_model: !Ref ShadowFoundationModelId
 
   VisibilityDirectorApproveAgent:
     Type: AWS::Bedrock::Agent
@@ -399,6 +436,7 @@ Resources:
         owner: Tarun Raja
         env: prod
         model: !Ref FoundationModelId
+        shadow_model: !Ref ShadowFoundationModelId
 
   ImprovementStrategistAgent:
     Type: AWS::Bedrock::Agent
@@ -437,6 +475,7 @@ Resources:
         owner: Tarun Raja
         env: prod
         model: !Ref FoundationModelId
+        shadow_model: !Ref ShadowFoundationModelId
 
   ImprovementAdvisorAgent:
     Type: AWS::Bedrock::Agent
@@ -479,6 +518,7 @@ Resources:
         owner: Tarun Raja
         env: prod
         model: !Ref FoundationModelId
+        shadow_model: !Ref ShadowFoundationModelId
 
   VisibilityStrategistAlias:
     Type: AWS::Bedrock::AgentAlias
@@ -660,6 +700,7 @@ Resources:
         owner: Tarun Raja
         env: prod
         model: !Ref FoundationModelId
+        shadow_model: !Ref ShadowFoundationModelId
 
   ImprovementCoachAgent:
     Type: AWS::Bedrock::Agent
@@ -714,6 +755,7 @@ Resources:
         owner: Tarun Raja
         env: prod
         model: !Ref FoundationModelId
+        shadow_model: !Ref ShadowFoundationModelId
 
   VisibilityDirectorAlias:
     Type: AWS::Bedrock::AgentAlias

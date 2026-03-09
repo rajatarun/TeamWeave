@@ -5,6 +5,12 @@ InvocationWrapperAPI, recording per-call telemetry (trace ID, token
 estimates, cost, latency, policy decision) via structured log records
 and persisting each span as an item in the ObservatoryMetrics DynamoDB
 table (pk=OBSERVATORY#{operation}, sk={iso_timestamp}#{trace_id}).
+
+When a ``shadow_alias_id`` is supplied to ``observe_agent_request``,
+``dual_invoke=True`` is activated: the shadow alias is invoked in
+parallel, and shadow telemetry (disagreement score, numeric variance)
+is captured and written to DynamoDB alongside the primary span.
+
 Items expire automatically via a 90-day TTL attribute.
 """
 
@@ -56,6 +62,9 @@ def _to_decimal(value: float) -> Decimal:
 def _push_metric(operation: str, span, decision, extra: dict) -> None:
     """Best-effort write of a telemetry span to ObservatoryMetricsTable.
 
+    Includes shadow disagreement and numeric variance when a dual_invoke
+    was performed (fields are set on the primary span by mcp_observatory).
+
     Failures are logged as warnings and never propagate to the caller.
     """
     table = _get_ddb_table()
@@ -79,6 +88,13 @@ def _push_metric(operation: str, span, decision, extra: dict) -> None:
             "decision_reason": decision.reason or "none",
             "ttl": Decimal(expiry),
         }
+
+        # Shadow comparison fields (set when dual_invoke=True)
+        if span.shadow_disagreement_score is not None:
+            item["shadow_disagreement_score"] = _to_decimal(span.shadow_disagreement_score)
+        if span.shadow_numeric_variance is not None:
+            item["shadow_numeric_variance"] = _to_decimal(span.shadow_numeric_variance)
+
         item.update({k: str(v) if isinstance(v, float) else v for k, v in extra.items()})
 
         table.put_item(Item=item)
@@ -93,13 +109,27 @@ def observe_agent_request(
     alias_id: str,
     session_id: str,
     input_text: str,
+    shadow_alias_id: Optional[str] = None,
 ) -> dict:
     """Invoke a Bedrock agent through the mcp-observatory wrapper.
 
-    Delegates to ``invoke_agent_request`` while recording a telemetry span
-    (trace_id, token estimates, cost_usd, latency, policy decision),
-    emitting a structured log record, and persisting the span to DynamoDB.
+    When ``shadow_alias_id`` is provided the call is dual-invoked: the
+    primary alias and the shadow alias are both executed and telemetry
+    (disagreement score, numeric variance) is captured.
     """
+    has_shadow = bool(shadow_alias_id)
+
+    shadow_call = None
+    if has_shadow:
+        _sid = shadow_alias_id  # captured for closure
+        shadow_call = lambda: invoke_agent_request(  # noqa: E731
+            runtime_client,
+            agent_id=agent_id,
+            alias_id=_sid,
+            session_id=session_id,
+            input_text=input_text,
+        )
+
     result = asyncio.run(
         _wrapper.invoke(
             source="agent",
@@ -117,6 +147,15 @@ def observe_agent_request(
                 session_id=session_id,
                 input_text=input_text,
             ),
+            dual_invoke=has_shadow,
+            shadow_source="agent" if has_shadow else None,
+            shadow_model=f"bedrock-agent/{shadow_alias_id}" if has_shadow else None,
+            shadow_prompt=input_text if has_shadow else None,
+            shadow_input_payload=(
+                {"agent_id": agent_id, "alias_id": shadow_alias_id, "session_id": session_id}
+                if has_shadow else None
+            ),
+            shadow_call=shadow_call,
         )
     )
 
@@ -134,6 +173,8 @@ def observe_agent_request(
             "cost_usd": result.span.cost_usd,
             "decision": result.decision.action,
             "decision_reason": result.decision.reason,
+            "shadow_alias_id": shadow_alias_id,
+            "shadow_disagreement_score": result.span.shadow_disagreement_score,
         },
     )
 
@@ -146,6 +187,7 @@ def observe_agent_request(
             "alias_id": alias_id,
             "session_id": session_id,
             "input_len": Decimal(len(input_text)),
+            **({"shadow_alias_id": shadow_alias_id} if shadow_alias_id else {}),
         },
     )
 

@@ -39,7 +39,13 @@ def load_team_config(team: str, version: str) -> Tuple[TeamConfig, Dict[str, Any
         agents.append(AgentConfig(
             id=a["id"],
             name=a.get("name", a["id"]),
-            bedrock=BedrockRef(agentId=br.get("agentId",""), aliasId=br.get("aliasId","")),
+            bedrock=BedrockRef(
+                agentId=br.get("agentId",""),
+                aliasId=br.get("aliasId",""),
+                model_id=br.get("model_id", "us.amazon.nova-micro-v1:0"),
+                shadow_model_id=br.get("shadow_model_id", ""),
+                model_aliases=br.get("model_aliases", {}),
+            ),
             goal_template=a.get("goal_template",""),
             schema_ref=a.get("schema_ref",""),
         ))
