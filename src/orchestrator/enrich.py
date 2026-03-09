@@ -84,6 +84,31 @@ Tarun Raja's LinkedIn voice rules:
 _bedrock_runtime = None
 
 
+def _trim_for_prompt(value, max_str_len: int = 2000, max_items: int = 20):
+    """Recursively trim large prompt context values without breaking JSON encoding."""
+    if isinstance(value, str):
+        if len(value) <= max_str_len:
+            return value
+        return value[:max_str_len] + "...[truncated]"
+
+    if isinstance(value, list):
+        trimmed = [_trim_for_prompt(item, max_str_len=max_str_len, max_items=max_items) for item in value[:max_items]]
+        if len(value) > max_items:
+            trimmed.append(f"...[{len(value) - max_items} more items truncated]")
+        return trimmed
+
+    if isinstance(value, dict):
+        out = {}
+        for idx, (k, v) in enumerate(value.items()):
+            if idx >= max_items:
+                out["_truncated"] = f"...[{len(value) - max_items} more keys truncated]"
+                break
+            out[k] = _trim_for_prompt(v, max_str_len=max_str_len, max_items=max_items)
+        return out
+
+    return value
+
+
 def _client():
     global _bedrock_runtime
     if not _bedrock_runtime:
@@ -158,13 +183,7 @@ def _build_prompt(
         for k, v in step_inputs.items():
             if k in ("embedding", "rag_context", "owner_profile_context"):
                 continue
-            if isinstance(v, str) and len(v) > 2000:
-                safe_inputs[k] = v[:2000] + "...[truncated]"
-            elif isinstance(v, dict) or isinstance(v, list):
-                s = json.dumps(v)
-                safe_inputs[k] = json.loads(s[:3000]) if len(s) > 3000 else v
-            else:
-                safe_inputs[k] = v
+            safe_inputs[k] = _trim_for_prompt(v)
         context_block = f"\n\n## PIPELINE CONTEXT (use this to generate content):\n{json.dumps(safe_inputs, indent=2)}"
 
     if has_placeholders:
