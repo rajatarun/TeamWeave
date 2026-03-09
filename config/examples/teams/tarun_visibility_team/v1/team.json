@@ -49,7 +49,9 @@
         }
       },
       "goal_template": "Define a measurable goal to increase Tarun Raja's social visibility. Produce a Creative Brief with acceptance criteria and risks.",
-      "schema_ref": "creative_brief_v1"
+      "schema_ref": "creative_brief_v1",
+      "role_id": "PBM-001",
+      "department_id": "DEPT-001"
     },
     {
       "id": "strategist",
@@ -69,7 +71,9 @@
         }
       },
       "goal_template": "Derive strategy from Director brief. Generate hooks, narrative angle, and outline optimized for reach.",
-      "schema_ref": "strategy_pack_v1"
+      "schema_ref": "strategy_pack_v1",
+      "role_id": "PBM-003",
+      "department_id": "DEPT-003"
     },
     {
       "id": "writer_linkedin",
@@ -89,7 +93,9 @@
         }
       },
       "goal_template": "Write 2-3 LinkedIn draft variants aligned to Director acceptance criteria and Strategist outline.",
-      "schema_ref": "draft_pack_v1"
+      "schema_ref": "draft_pack_v1",
+      "role_id": "PBM-006",
+      "department_id": "DEPT-003"
     },
     {
       "id": "seo",
@@ -109,7 +115,9 @@
         }
       },
       "goal_template": "Provide discoverability improvements, keyword set, and title/meta suggestions without stuffing.",
-      "schema_ref": "seo_pack_v1"
+      "schema_ref": "seo_pack_v1",
+      "role_id": "PBM-010",
+      "department_id": "DEPT-005"
     },
     {
       "id": "editor",
@@ -129,7 +137,9 @@
         }
       },
       "goal_template": "Polish to final copy: high-signal, voice-consistent, and constraint-compliant.",
-      "schema_ref": "final_copy_v1"
+      "schema_ref": "final_copy_v1",
+      "role_id": "PBM-003E",
+      "department_id": "DEPT-003"
     },
     {
       "id": "designer",
@@ -149,7 +159,9 @@
         }
       },
       "goal_template": "Create carousel plan + hero image direction + image prompts aligned to final copy.",
-      "schema_ref": "design_pack_v1"
+      "schema_ref": "design_pack_v1",
+      "role_id": "PBM-005",
+      "department_id": "DEPT-002"
     },
     {
       "id": "distribution",
@@ -169,7 +181,9 @@
         }
       },
       "goal_template": "Create channel variants + posting checklist optimized for engagement and reach.",
-      "schema_ref": "distribution_pack_v1"
+      "schema_ref": "distribution_pack_v1",
+      "role_id": "PBM-004",
+      "department_id": "DEPT-003"
     },
     {
       "id": "director_approve",
@@ -189,7 +203,9 @@
         }
       },
       "goal_template": "Approve or request revisions. Output APPROVED boolean and revision_notes if not approved.",
-      "schema_ref": "approval_v1"
+      "schema_ref": "approval_v1",
+      "role_id": "PBM-001A",
+      "department_id": "DEPT-001"
     }
   ],
   "workflow": [

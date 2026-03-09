@@ -49,7 +49,9 @@
         }
       },
       "goal_template": "Understand Tarun's current expertise and target date. Produce a Learning Map: skill gaps, milestones, and success rubric.",
-      "schema_ref": "learning_map_v1"
+      "schema_ref": "learning_map_v1",
+      "role_id": "TIT-001",
+      "department_id": "TDEPT-001"
     },
     {
       "id": "strategist",
@@ -69,7 +71,9 @@
         }
       },
       "goal_template": "Turn Learning Map into a calendar: weekly themes, daily cadence, and checkpoints. Keep it flexible.",
-      "schema_ref": "learning_plan_v1"
+      "schema_ref": "learning_plan_v1",
+      "role_id": "TIT-002",
+      "department_id": "TDEPT-001"
     },
     {
       "id": "advisor",
@@ -89,7 +93,9 @@
         }
       },
       "goal_template": "Generate today's tasks: read, practice, reflect. Use COMPLETED_TASKS_HISTORY to avoid repeating same topic/level. Provide best links and a reflection prompt.",
-      "schema_ref": "daily_tasks_v1"
+      "schema_ref": "daily_tasks_v1",
+      "role_id": "TIT-003",
+      "department_id": "TDEPT-002"
     }
   ],
   "workflow": [
