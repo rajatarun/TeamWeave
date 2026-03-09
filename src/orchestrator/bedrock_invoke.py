@@ -6,8 +6,8 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from .bedrock_wrappers import invoke_agent_request
 from .logger import get_logger
+from .mcp_observatory import observe_agent_request
 from .models import StepFailed
 
 log = get_logger("bedrock_invoke")
@@ -36,7 +36,7 @@ def invoke_agent(agent_id: str, alias_id: str, session_id: str, input_text: str,
                     "input_text": input_text[:1000],
                 },
             )
-            resp = invoke_agent_request(
+            resp = observe_agent_request(
                 brt,
                 agent_id=agent_id,
                 alias_id=alias_id,
