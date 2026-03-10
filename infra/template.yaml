@@ -92,8 +92,8 @@ Parameters:
     Description: Optional alias for the AMP workspace. Defaults to {StackName}-observatory.
   AllowedCorsOrigin:
     Type: String
-    Default: "'*'"
-    Description: "Allowed CORS origin for the API Gateway (e.g. 'https://app.example.com'). Use '*' to allow all origins including Lambda invocations."
+    Default: "'https://tarunraja.info'"
+    Description: "Allowed CORS origin for the API Gateway (e.g. 'https://app.example.com'). Use '*' for dev/local."
   EnableWAF:
     Type: String
     Default: "false"
@@ -306,6 +306,11 @@ Resources:
                   - !GetAtt ProvisionTeamFunction.Arn
               - Effect: Allow
                 Action:
+                  - execute-api:Invoke
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${TeamWeaveApi}/prod/*"
+              - Effect: Allow
+                Action:
                   - bedrock:InvokeAgent
                   - bedrock-agent-runtime:InvokeAgent
                 Resource:
@@ -431,6 +436,11 @@ Resources:
                   - lambda:InvokeFunction
                 Resource:
                   - !GetAtt ProvisionTeamFunction.Arn
+              - Effect: Allow
+                Action:
+                  - execute-api:Invoke
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${TeamWeaveApi}/prod/*"
               - Effect: Allow
                 Action:
                   - aps:QueryMetrics
@@ -1268,7 +1278,7 @@ Resources:
     Properties:
       StageName: prod
       Auth:
-        ApiKeyRequired: true
+        DefaultAuthorizer: AWS_IAM
         UsagePlan:
           CreateUsagePlan: PER_API
           Quota:
