@@ -5,7 +5,7 @@
 !include AWSPuml/AWSCommon.puml
 
 !include AWSPuml/Compute/Lambda.puml
-!include AWSPuml/ApplicationIntegration/APIGateway.puml
+!include AWSPuml/NetworkingContentDelivery/APIGateway.puml
 !include AWSPuml/ApplicationIntegration/StepFunctions.puml
 !include AWSPuml/Database/DynamoDB.puml
 !include AWSPuml/Database/RDS.puml
