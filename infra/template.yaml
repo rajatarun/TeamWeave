@@ -436,6 +436,8 @@ Resources:
                   - bedrock:ListAgentAliases
                   - bedrock:DeleteAgent
                   - bedrock:DeleteAgentAlias
+                  - bedrock:TagResource
+                  - bedrock:UntagResource
                 Resource: "*"
               - Effect: Allow
                 Action:
