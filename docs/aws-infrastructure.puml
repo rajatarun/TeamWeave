@@ -15,7 +15,9 @@
 !include AWSPuml/ManagementGovernance/CloudWatch.puml
 !include AWSPuml/DeveloperTools/XRay.puml
 !include AWSPuml/NetworkingContentDelivery/VirtualPrivateCloud.puml
+!include AWSPuml/NetworkingContentDelivery/VPCEndpoint.puml
 !include AWSPuml/ArtificialIntelligence/Bedrock.puml
+!include AWSPuml/SecurityIdentityCompliance/WAF.puml
 
 ' ─── Skinparam / Style ────────────────────────────────────────────────────────
 skinparam {
@@ -56,7 +58,8 @@ package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD
 
     ' ─── API LAYER ────────────────────────────────────────────────────────────
     package "API Layer" as api_layer #E3F2FD {
-        APIGateway(apigw, "API Gateway\n(REST API)", "TeamWeaveApi")
+        WAF(waf, "WAF WebACL\n(Regional, optional)", "AWSManagedRules:\nCommon + KnownBadInputs")
+        APIGateway(apigw, "API Gateway\n(REST API)", "TeamWeaveApi\nAPI Key required\nThrottle: 100 burst / 50 RPS\nQuota: 10k req/day")
     }
 
     ' ─── CONTROL PLANE ────────────────────────────────────────────────────────
@@ -64,7 +67,7 @@ package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD
         Lambda(trigger_fn, "Trigger\nLambda", "trigger_handler.py\nPython 3.12")
         Lambda(status_fn, "Status\nLambda", "status_handler.py\nPython 3.12")
         Lambda(provision_fn, "Provision\nLambda", "provision_team.py\nPython 3.12")
-        StepFunctions(sfn, "Step Functions\nState Machine", "Standard Workflow\n(Async)")
+        StepFunctions(sfn, "Step Functions\nState Machine", "Express Workflow\n(Async, cheaper at scale)")
     }
 
     ' ─── EXECUTION PLANE ──────────────────────────────────────────────────────
@@ -80,6 +83,14 @@ package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD
             RDS(rds, "PostgreSQL 15\n+ pgvector", "resume-rag-db\nrag_chunks table\nSSL verify-full")
         }
         rectangle "OrchestratorSecurityGroup\nInbound: TCP 5432 from Lambda ENIs" as sg #F3E5F5
+        package "VPC Interface Endpoints" as vpc_iface_ep #F3E5F5 {
+            rectangle "bedrock-runtime\nEndpoint" as ep_bedrock
+            rectangle "bedrock-agent-runtime\nEndpoint" as ep_bedrock_agent
+        }
+        package "VPC Gateway Endpoints" as vpc_gw_ep #F3E5F5 {
+            rectangle "S3 Gateway\nEndpoint" as ep_s3
+            rectangle "DynamoDB Gateway\nEndpoint" as ep_ddb
+        }
     }
 
     ' ─── AI / ML SERVICES ─────────────────────────────────────────────────────
@@ -99,7 +110,7 @@ package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD
 
     ' ─── SECURITY ─────────────────────────────────────────────────────────────
     package "Security" as security #FFF9C4 {
-        SecretsManager(secrets, "Secrets Manager", "gemini/api_key")
+        SecretsManager(secrets, "Secrets Manager", "gemini/api_key\n{stack}/vector-db-credentials")
         IdentityAccessManagementRole(worker_role, "WorkerRole\n(IAM)", "Bedrock, S3, DynamoDB\nLambda, EC2-VPC, APS")
         IdentityAccessManagementRole(trigger_role, "TriggerRole\n(IAM)", "Step Functions, S3\nDynamoDB, APS")
         IdentityAccessManagementRole(sfn_role, "StepFunctionsRole\n(IAM)", "Lambda Invoke\nX-Ray, CloudWatch")
@@ -122,8 +133,9 @@ package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD
 
 ' ─── RELATIONSHIPS ────────────────────────────────────────────────────────────
 
-' Client → API Gateway
-client --> apigw : "HTTPS\nPOST /team/task\nGET /team/task/{id}\nAdmin CRUD"
+' Client → WAF → API Gateway
+client --> waf : "HTTPS\n(x-api-key required)"
+waf --> apigw : "Filtered requests\n(optional when EnableWAF=true)"
 
 ' API Gateway → Lambdas
 apigw --> trigger_fn : "Workflow &\nCRUD requests"
@@ -133,7 +145,7 @@ apigw --> observatory_fn : "GET /observability/metrics"
 ' Control plane flow
 trigger_fn --> sfn : "start_execution()\n(async)"
 trigger_fn --> dynamo_pipeline : "Write RUN#id/META\n(status=RUNNING)"
-status_fn --> sfn : "describe_execution()"
+status_fn --> sfn : "describe_execution()\n(N/A for EXPRESS — use DDB)"
 sfn --> worker_fn : "Invoke (sync)\npipeline runs"
 sfn --> provision_fn : "Invoke (sync)\nCRUD operations"
 provision_fn --> bedrock_agents : "Create/update\nagents & aliases"
@@ -141,9 +153,12 @@ provision_fn --> s3_config : "Write team.json"
 
 ' Worker pipeline flow
 worker_fn --> s3_config : "Load team.json\n& schemas"
-worker_fn --> bedrock_agents : "InvokeAgent\n(streaming)"
-worker_fn --> dynamo_pipeline : "Write STEP records\n& final RUN status"
-worker_fn --> s3_artifacts : "Write step\nartifacts"
+worker_fn --> ep_bedrock : "InvokeAgent\n(via VPC Interface Endpoint)"
+ep_bedrock --> bedrock_agents : "InvokeAgent\n(streaming)"
+worker_fn --> ep_ddb : "DynamoDB writes\n(via VPC Gateway Endpoint)"
+ep_ddb --> dynamo_pipeline : "Write STEP records\n& final RUN status"
+worker_fn --> ep_s3 : "S3 reads/writes\n(via VPC Gateway Endpoint)"
+ep_s3 --> s3_artifacts : "Write step\nartifacts"
 worker_fn --> dynamo_obs : "Write telemetry\nspans (MCP Observatory)"
 worker_fn --> amp : "Prometheus remote_write\n(protobuf+Snappy, SigV4)"
 worker_fn --> rds : "pgvector similarity\nsearch (RAG)\nTCP 5432 / VPC SSL"
@@ -151,7 +166,9 @@ worker_fn --> rds : "pgvector similarity\nsearch (RAG)\nTCP 5432 / VPC SSL"
 ' Bedrock agents → Gemini Lambda (tool action)
 bedrock_agents --> gemini_fn : "Invoke as\ntool action"
 gemini_fn --> gemini_api : "Web research\nvia Gemini 2.0 Flash"
-gemini_fn --> secrets : "GetSecretValue\ngimini/api_key"
+gemini_fn --> secrets : "GetSecretValue\ngemini/api_key"
+worker_fn --> secrets : "GetSecretValue\nvector-db-credentials"
+trigger_fn --> secrets : "GetSecretValue\nvector-db-credentials"
 
 ' Bedrock composition
 bedrock_agents --> bedrock_models : "Inference\nrequests"
@@ -186,11 +203,15 @@ cfn_bedrock --> bedrock_agents
 ' Notes
 note right of worker_fn
   <b>Worker Lambda VPC Configuration</b>
-  - Deployed in private subnets
+  - Deployed in private subnets (1024MB / 300s)
   - ENIs created for VPC connectivity
   - Uses OrchestratorSecurityGroup
   - Connects to RDS on TCP 5432
   - SSL verify-full with RDS CA bundle
+  - Bedrock calls via VPC Interface Endpoint
+  - DynamoDB / S3 via VPC Gateway Endpoints
+  - DB credentials from Secrets Manager
+    (VECTOR_DB_SECRET_ARN env var)
 end note
 
 note bottom of bedrock_agents
