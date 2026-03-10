@@ -1092,14 +1092,10 @@ Resources:
     Type: AWS::StepFunctions::StateMachine
     Properties:
       StateMachineName: !Sub "${AWS::StackName}-state-machine"
-      # EXPRESS: cheaper at scale (~100x vs STANDARD for short-lived async workflows).
-      # NOTE: EXPRESS executions are not queryable via DescribeExecution after completion.
-      # Status polling must rely on DynamoDB records written by WorkerFunction, not DescribeExecution.
-      StateMachineType: EXPRESS
+      StateMachineType: STANDARD
       RoleArn: !GetAtt StepFunctionsRole.Arn
       LoggingConfiguration:
-        # Level: ALL required for EXPRESS — execution history is not stored in console, logs are the only audit trail.
-        Level: ALL
+        Level: ERROR
         IncludeExecutionData: false
         Destinations:
           - CloudWatchLogsLogGroup:
