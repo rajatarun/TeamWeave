@@ -89,7 +89,7 @@ _MODEL_ALIAS_SLUG: dict[str, str] = {
     "us.anthropic.claude-3-5-haiku-20241022-v1:0":  "claude-35-haiku",
 }
 
-_RETRYABLE_AGENT_STATES = {"PREPARING", "UPDATING"}
+_RETRYABLE_AGENT_STATES = {"PREPARING", "UPDATING", "VERSIONING"}
 
 
 def _wait_for_agent_stable_state(
@@ -124,10 +124,11 @@ def _update_agent_with_retry(bedrock, *, agent_id: str, max_attempts: int = 6, *
             err = e.response.get("Error", {}) if isinstance(e.response, dict) else {}
             code = err.get("Code", "")
             msg = err.get("Message", str(e))
+            msg_upper = msg.upper()
             retryable = (
                 code == "ValidationException"
-                and "can't be performed on Agent" in msg
-                and any(state in msg for state in _RETRYABLE_AGENT_STATES)
+                and "CAN'T BE PERFORMED ON AGENT" in msg_upper
+                and any(state in msg_upper for state in _RETRYABLE_AGENT_STATES)
             )
             if not retryable or attempt == max_attempts:
                 raise
