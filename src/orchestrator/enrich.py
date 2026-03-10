@@ -36,6 +36,8 @@ _REFUSAL_PHRASES = [
     "i do not have",
     "i apologize",
     "not to describe",
+    "sorry",
+    "task is to",
     "i apologise",
     "please provide",
     "not provided",
