@@ -67,7 +67,7 @@ package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD
         Lambda(trigger_fn, "Trigger\nLambda", "trigger_handler.py\nPython 3.12")
         Lambda(status_fn, "Status\nLambda", "status_handler.py\nPython 3.12")
         Lambda(provision_fn, "Provision\nLambda", "provision_team.py\nPython 3.12")
-        StepFunctions(sfn, "Step Functions\nState Machine", "Express Workflow\n(Async, cheaper at scale)")
+        StepFunctions(sfn, "Step Functions\nState Machine", "Standard Workflow\n(Async)")
     }
 
     ' ─── EXECUTION PLANE ──────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ apigw --> observatory_fn : "GET /observability/metrics"
 ' Control plane flow
 trigger_fn --> sfn : "start_execution()\n(async)"
 trigger_fn --> dynamo_pipeline : "Write RUN#id/META\n(status=RUNNING)"
-status_fn --> sfn : "describe_execution()\n(N/A for EXPRESS — use DDB)"
+status_fn --> sfn : "describe_execution()"
 sfn --> worker_fn : "Invoke (sync)\npipeline runs"
 sfn --> provision_fn : "Invoke (sync)\nCRUD operations"
 provision_fn --> bedrock_agents : "Create/update\nagents & aliases"
