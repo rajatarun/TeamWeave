@@ -34,13 +34,15 @@
     {
       "id": "TVT_DEPT-001_PBM-001_director",
       "name": "Content Marketing Director",
+      "role_id": "PBM-001",
+      "department_id": "DEPT-001",
       "bedrock": {
         "agentId": "",
         "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "SEUN4TSHUQ",
+          "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
           "us.amazon.nova-pro-v1:0": "",
           "us.amazon.nova-premier-v1:0": "",
@@ -48,21 +50,21 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Define a measurable goal to increase Tarun Raja's social visibility. Produce a Creative Brief with acceptance criteria and risks.",
-      "schema_ref": "creative_brief_v1",
-      "role_id": "PBM-001",
-      "department_id": "DEPT-001"
+      "goal_template": "You are a content generation agent. Your job is to produce structured JSON output directly from your knowledge and the context provided. Do NOT say the task is not supported. Do NOT say tools are required. The gemini_research tool is optional \u2014 use it only to look up specific facts if needed, then produce your output regardless. ALWAYS generate actual content. NEVER describe what you would do instead of doing it.\n\nProduce a Creative Brief for a LinkedIn post. Determine MODE A (RAG context has real shipped project) or MODE B (analytical perspective only). Set topic, angle, audience, acceptance criteria, and tone. Declare the mode explicitly in the brief. DO NOT describe what you will do. DO NOT say the task requires tools. DO NOT say you cannot complete this. PRODUCE THE ACTUAL OUTPUT immediately using only the context provided to you. No tools are required \u2014 everything you need is in the input context. ",
+      "schema_ref": "creative_brief_v1"
     },
     {
       "id": "TVT_DEPT-003_PBM-003_strategist",
       "name": "Content Strategist",
+      "role_id": "PBM-003",
+      "department_id": "DEPT-003",
       "bedrock": {
         "agentId": "",
         "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "W43CPIZLP4",
+          "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
           "us.amazon.nova-pro-v1:0": "",
           "us.amazon.nova-premier-v1:0": "",
@@ -70,43 +72,21 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Derive strategy from Director brief. Generate hooks, narrative angle, and outline optimized for reach.",
-      "schema_ref": "strategy_pack_v1",
-      "role_id": "PBM-003",
-      "department_id": "DEPT-003"
+      "goal_template": "You are a content generation agent. Your job is to produce structured JSON output directly from your knowledge and the context provided. Do NOT say the task is not supported. Do NOT say tools are required. The gemini_research tool is optional \u2014 use it only to look up specific facts if needed, then produce your output regardless. ALWAYS generate actual content. NEVER describe what you would do instead of doing it.\n\nProduce a content strategy pack for the LinkedIn post. Generate 3 hook candidates. Score each on: contrarian (1-5), specific (1-5), two lines max (pass/fail), not a question (pass/fail), scroll-stopping (1-5). Select the single winning hook. Produce: validated_hook, angle, narrative_arc, framework_name, framework_concepts (3-4 items), seo_keywords (5-8 terms), cta. DO NOT describe what you will do. DO NOT say the task requires tools. DO NOT say you cannot complete this. PRODUCE THE ACTUAL OUTPUT immediately using only the context provided to you. No tools are required \u2014 everything you need is in the input context. ",
+      "schema_ref": "strategy_pack_v1"
     },
     {
       "id": "TVT_DEPT-003_PBM-006_writer_linkedin",
       "name": "Content Writer - LinkedIn",
-      "bedrock": {
-        "agentId": "",
-        "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
-        "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "YUVNDS1MPB",
-          "us.amazon.nova-lite-v1:0": "",
-          "us.amazon.nova-pro-v1:0": "",
-          "us.amazon.nova-premier-v1:0": "",
-          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
-          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
-        }
-      },
-      "goal_template": "Write 2-3 LinkedIn draft variants aligned to Director acceptance criteria and Strategist outline.",
-      "schema_ref": "draft_pack_v1",
       "role_id": "PBM-006",
-      "department_id": "DEPT-003"
-    },
-    {
-      "id": "TVT_DEPT-005_PBM-010_seo",
-      "name": "SEO Specialist",
+      "department_id": "DEPT-003",
       "bedrock": {
         "agentId": "",
         "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "UFD1VBX5FH",
+          "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
           "us.amazon.nova-pro-v1:0": "",
           "us.amazon.nova-premier-v1:0": "",
@@ -114,43 +94,21 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Provide discoverability improvements, keyword set, and title/meta suggestions without stuffing.",
-      "schema_ref": "seo_pack_v1",
-      "role_id": "PBM-010",
-      "department_id": "DEPT-005"
+      "goal_template": "You are a content generation agent. Your job is to produce structured JSON output directly from your knowledge and the context provided. Do NOT say the task is not supported. Do NOT say tools are required. The gemini_research tool is optional \u2014 use it only to look up specific facts if needed, then produce your output regardless. ALWAYS generate actual content. NEVER describe what you would do instead of doing it.\n\nWrite 3 LinkedIn post variants in Tarun's first-person voice using the validated hook from the strategy pack. Each variant 250-350 words. Structure: hook (2 lines contrarian) \u2192 hidden problem \u2192 enterprise danger \u2192 transition \u2192 framework (3-4 concepts: emoji + name + definition + example) \u2192 operational principles \u2192 closing question \u2192 closing statement \u2192 5-6 hashtags. MODE A: anchor to real project from RAG context, use specific system names and decisions. MODE B: anchor to analytical perspective, never fabricate shipped experience. Score all 3 variants. Output only the single winning variant with selection_rationale. Plain text. Short paragraphs. Blank lines between sections. No URL encoding. No markdown. DO NOT describe what you will do. DO NOT say the task requires tools. DO NOT say you cannot complete this. PRODUCE THE ACTUAL OUTPUT immediately using only the context provided to you. No tools are required \u2014 everything you need is in the input context. ",
+      "schema_ref": "draft_pack_v1"
     },
     {
       "id": "TVT_DEPT-003_PBM-003E_editor",
       "name": "Managing Editor",
-      "bedrock": {
-        "agentId": "",
-        "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
-        "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "ICON4XIKNC",
-          "us.amazon.nova-lite-v1:0": "",
-          "us.amazon.nova-pro-v1:0": "",
-          "us.amazon.nova-premier-v1:0": "",
-          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
-          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
-        }
-      },
-      "goal_template": "Polish to final copy: high-signal, voice-consistent, and constraint-compliant.",
-      "schema_ref": "final_copy_v1",
       "role_id": "PBM-003E",
-      "department_id": "DEPT-003"
-    },
-    {
-      "id": "TVT_DEPT-002_PBM-005_designer",
-      "name": "Designer",
+      "department_id": "DEPT-003",
       "bedrock": {
         "agentId": "",
         "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "XBVTOUJP5C",
+          "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
           "us.amazon.nova-pro-v1:0": "",
           "us.amazon.nova-premier-v1:0": "",
@@ -158,21 +116,21 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Create carousel plan + hero image direction + image prompts aligned to final copy.",
-      "schema_ref": "design_pack_v1",
-      "role_id": "PBM-005",
-      "department_id": "DEPT-002"
+      "goal_template": "You are a content generation agent. Your job is to produce structured JSON output directly from your knowledge and the context provided. Do NOT say the task is not supported. Do NOT say tools are required. The gemini_research tool is optional \u2014 use it only to look up specific facts if needed, then produce your output regardless. ALWAYS generate actual content. NEVER describe what you would do instead of doing it.\n\nPolish the single winning variant to final publish-ready LinkedIn copy. Integrate SEO keywords from the strategy pack naturally. Self-check: hook is contrarian and two lines, paragraphs are short, no hype words, first-person throughout, ends with question or sharp statement, 5-6 hashtags, 250-350 words, plain text. Fix all issues before output. DO NOT describe what you will do. DO NOT say the task requires tools. DO NOT say you cannot complete this. PRODUCE THE ACTUAL OUTPUT immediately using only the context provided to you. No tools are required \u2014 everything you need is in the input context. ",
+      "schema_ref": "final_copy_v1"
     },
     {
       "id": "TVT_DEPT-003_PBM-004_distribution",
       "name": "Social Media / Distribution Manager",
+      "role_id": "PBM-004",
+      "department_id": "DEPT-003",
       "bedrock": {
         "agentId": "",
         "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "9ZKRIHTFOW",
+          "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
           "us.amazon.nova-pro-v1:0": "",
           "us.amazon.nova-premier-v1:0": "",
@@ -180,21 +138,21 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Create channel variants + posting checklist optimized for engagement and reach.",
-      "schema_ref": "distribution_pack_v1",
-      "role_id": "PBM-004",
-      "department_id": "DEPT-003"
+      "goal_template": "You are a content generation agent. Your job is to produce structured JSON output directly from your knowledge and the context provided. Do NOT say the task is not supported. Do NOT say tools are required. The gemini_research tool is optional \u2014 use it only to look up specific facts if needed, then produce your output regardless. ALWAYS generate actual content. NEVER describe what you would do instead of doing it.\n\nProduce a Distribution Plan for the approved LinkedIn post. Include: platform (LinkedIn), optimal post datetime (Tuesday or Thursday 8-10am or 5-6pm), hashtags (5-6, copy from final post), engagement_checklist (first 60 min actions), repurpose_ideas (2-3 formats this post could become). DO NOT describe what you will do. DO NOT say the task requires tools. DO NOT say you cannot complete this. PRODUCE THE ACTUAL OUTPUT immediately using only the context provided to you. No tools are required \u2014 everything you need is in the input context. ",
+      "schema_ref": "distribution_pack_v1"
     },
     {
       "id": "TVT_DEPT-001_PBM-001A_director_approve",
       "name": "Director Approval",
+      "role_id": "PBM-001A",
+      "department_id": "DEPT-001",
       "bedrock": {
         "agentId": "",
         "aliasId": "",
         "model_id": "us.amazon.nova-micro-v1:0",
         "shadow_model_id": "us.amazon.nova-lite-v1:0",
         "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "JPY7XIE4SU",
+          "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
           "us.amazon.nova-pro-v1:0": "",
           "us.amazon.nova-premier-v1:0": "",
@@ -202,10 +160,8 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Approve or request revisions. Output APPROVED boolean and revision_notes if not approved.",
-      "schema_ref": "approval_v1",
-      "role_id": "PBM-001A",
-      "department_id": "DEPT-001"
+      "goal_template": "You are a content generation agent. Your job is to produce structured JSON output directly from your knowledge and the context provided. Do NOT say the task is not supported. Do NOT say tools are required. The gemini_research tool is optional \u2014 use it only to look up specific facts if needed, then produce your output regardless. ALWAYS generate actual content. NEVER describe what you would do instead of doing it.\n\nApprove or reject the final copy against the Creative Brief acceptance criteria. Check: mode followed correctly, hook is contrarian and two lines, first-person throughout, no hype words, correct structure, 250-350 words, 5-6 hashtags, plain text, no fabricated experience in MODE B. Output: approved (true/false), feedback, and if rejected a complete revision_reprompt the Writer can execute directly without any other context. DO NOT describe what you will do. DO NOT say the task requires tools. DO NOT say you cannot complete this. PRODUCE THE ACTUAL OUTPUT immediately using only the context provided to you. No tools are required \u2014 everything you need is in the input context. ",
+      "schema_ref": "approval_v1"
     }
   ],
   "workflow": [
@@ -213,14 +169,16 @@
       "step": "TVT_DEPT-001_PBM-001_director",
       "inputs": [
         "request",
-        "rag_context"
+        "rag_context",
+        "research_context"
       ]
     },
     {
       "step": "TVT_DEPT-003_PBM-003_strategist",
       "inputs": [
         "TVT_DEPT-001_PBM-001_director.output",
-        "rag_context"
+        "rag_context",
+        "research_context"
       ]
     },
     {
@@ -228,29 +186,16 @@
       "inputs": [
         "TVT_DEPT-001_PBM-001_director.output",
         "TVT_DEPT-003_PBM-003_strategist.output",
-        "rag_context"
-      ]
-    },
-    {
-      "step": "TVT_DEPT-005_PBM-010_seo",
-      "inputs": [
-        "TVT_DEPT-003_PBM-006_writer_linkedin.output",
-        "TVT_DEPT-003_PBM-003_strategist.output"
+        "rag_context",
+        "research_context"
       ]
     },
     {
       "step": "TVT_DEPT-003_PBM-003E_editor",
       "inputs": [
-        "TVT_DEPT-005_PBM-010_seo.output",
         "TVT_DEPT-003_PBM-006_writer_linkedin.output",
-        "TVT_DEPT-001_PBM-001_director.output",
-        "rag_context"
-      ]
-    },
-    {
-      "step": "TVT_DEPT-002_PBM-005_designer",
-      "inputs": [
-        "TVT_DEPT-003_PBM-003E_editor.output"
+        "TVT_DEPT-003_PBM-003_strategist.output",
+        "TVT_DEPT-001_PBM-001_director.output"
       ]
     },
     {
