@@ -1,7 +1,6 @@
 @startuml TeamWeave - C4 Level 3: Component Diagram (Worker Lambda)
 
-!define C4Component https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
-!include C4Component
+!include c4-plantuml-dist/C4_Component.puml
 
 LAYOUT_WITH_LEGEND()
 LAYOUT_LEFT_RIGHT()
