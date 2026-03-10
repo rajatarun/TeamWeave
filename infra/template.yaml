@@ -81,6 +81,23 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional alias for the AMP workspace. Defaults to {StackName}-observatory.
+  AllowedCorsOrigin:
+    Type: String
+    Default: "'https://tarunraja.info'"
+    Description: "Allowed CORS origin for the API Gateway (e.g. 'https://app.example.com'). Use '*' for dev/local."
+  CognitoUserPoolArn:
+    Type: String
+    Default: ""
+    Description: Optional Cognito User Pool ARN for API Gateway authorization. If set, enables Cognito authorizer.
+  EnableWAF:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Set to 'true' to deploy a WAF WebACL with AWS managed rule sets and attach it to the API Gateway stage.
+  PrivateRouteTableId:
+    Type: String
+    Default: ""
+    Description: Route table ID for private subnets. Required to associate S3 and DynamoDB Gateway VPC endpoints.
 
 Conditions:
   HasAmpWorkspaceAlias: !Not [!Equals [!Ref AmpWorkspaceAlias, ""]]
@@ -94,25 +111,72 @@ Conditions:
     - !Not [!Equals [!Ref LambdaSubnetIds, ""]]
   HasSamDeployerRoleName: !Not [!Equals [!Ref SamDeployerRoleName, ""]]
   HasSamAssumeRoleName: !Not [!Equals [!Ref SamAssumeRoleName, ""]]
+  HasCognitoAuth: !Not [!Equals [!Ref CognitoUserPoolArn, ""]]
+  DeployWAF: !Equals [!Ref EnableWAF, "true"]
+  HasPrivateRouteTable: !And
+    - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
+    - !Not [!Equals [!Ref VpcId, ""]]
 
 Globals:
   Function:
     Runtime: python3.12
-    Timeout: 300
-    MemorySize: 1024
     Tracing: Active
     Environment:
       Variables:
         LOG_LEVEL: INFO
 
 Resources:
+  VectorDbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}/vector-db-credentials"
+      Description: PostgreSQL credentials for the TeamWeave RDS instance
+      SecretString: !Sub |
+        {
+          "host": "${VectorDbHost}",
+          "port": "${VectorDbPort}",
+          "dbname": "${VectorDbName}",
+          "username": "${VectorDbUser}",
+          "password": "${VectorDbPassword}",
+          "url": "${VectorDbUrl}"
+        }
+
   TeamConfigBucket:
     Type: AWS::S3::Bucket
     Condition: CreateConfigBucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
 
   TeamArtifactBucket:
     Type: AWS::S3::Bucket
     Condition: CreateArtifactBucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionAndExpireArtifacts
+            Status: Enabled
+            Prefix: runs/
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+            ExpirationInDays: 365
 
   ContentPipelineRunsTable:
     Type: AWS::DynamoDB::Table
@@ -227,8 +291,10 @@ Resources:
                   - dynamodb:Query
                   - dynamodb:Scan
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*/index/*"
+                  - !If [CreateDdbTable, !GetAtt ContentPipelineRunsTable.Arn, !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DdbTableName}"]
+                  - !If [CreateDdbTable, !Sub "${ContentPipelineRunsTable.Arn}/index/*", !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DdbTableName}/index/*"]
+                  - !GetAtt ObservatoryMetricsTable.Arn
+                  - !Sub "${ObservatoryMetricsTable.Arn}/index/*"
               - Effect: Allow
                 Action:
                   - lambda:InvokeFunction
@@ -241,11 +307,6 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent-alias/*"
-              - Effect: Allow
-                Action:
-                  - bedrock:InvokeAgent
-                  - bedrock-agent-runtime:InvokeAgent
-                Resource: "*"
               - Effect: Allow
                 Action:
                   - bedrock:InvokeModel
@@ -274,15 +335,12 @@ Resources:
                   Resource: !Ref GeminiSecretArn
                 - !Ref "AWS::NoValue"
               - Effect: Allow
+                Action: [secretsmanager:GetSecretValue]
+                Resource: !Ref VectorDbSecret
+              - Effect: Allow
                 Action:
                   - aps:RemoteWrite
                 Resource: !GetAtt AMPWorkspace.Arn
-              - Effect: Allow
-                Action:
-                  - aws-marketplace:ViewSubscriptions
-                  - aws-marketplace:Subscribe
-                  - aws-marketplace:Unsubscribe
-                Resource: "*"
 
   TriggerRole:
     Type: AWS::IAM::Role
@@ -319,6 +377,17 @@ Resources:
                   - states:StartExecution
                   - sfn:StartExecution
                 Resource: !Ref StateMachine
+              - !If
+                - HasVpcConfig
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:AssignPrivateIpAddresses
+                    - ec2:UnassignPrivateIpAddresses
+                  Resource: "*"
+                - !Ref AWS::NoValue
               - Effect: Allow
                 Action: [s3:ListBucket]
                 Resource:
@@ -349,8 +418,10 @@ Resources:
                   - dynamodb:Query
                   - dynamodb:Scan
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*/index/*"
+                  - !If [CreateDdbTable, !GetAtt ContentPipelineRunsTable.Arn, !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DdbTableName}"]
+                  - !If [CreateDdbTable, !Sub "${ContentPipelineRunsTable.Arn}/index/*", !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DdbTableName}/index/*"]
+                  - !GetAtt ObservatoryMetricsTable.Arn
+                  - !Sub "${ObservatoryMetricsTable.Arn}/index/*"
               - Effect: Allow
                 Action:
                   - lambda:InvokeFunction
@@ -364,11 +435,8 @@ Resources:
                   - aps:GetMetricMetadata
                 Resource: !GetAtt AMPWorkspace.Arn
               - Effect: Allow
-                Action:
-                  - aws-marketplace:ViewSubscriptions
-                  - aws-marketplace:Subscribe
-                  - aws-marketplace:Unsubscribe
-                Resource: "*"
+                Action: [secretsmanager:GetSecretValue]
+                Resource: !Ref VectorDbSecret
 
   StatusRole:
     Type: AWS::IAM::Role
@@ -396,14 +464,8 @@ Resources:
                 Action:
                   - states:DescribeExecution
                   - sfn:DescribeExecution
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - aws-marketplace:ViewSubscriptions
-                  - aws-marketplace:Subscribe
-                  - aws-marketplace:Unsubscribe
-                Resource: "*"
-
+                Resource:
+                  - !Sub "${StateMachine}:*"
 
   ProvisionTeamRole:
     Type: AWS::IAM::Role
@@ -471,12 +533,6 @@ Resources:
                   - iam:PassRole
                 Resource:
                   - !Ref BedrockAgentServiceRoleArn
-              - Effect: Allow
-                Action:
-                  - aws-marketplace:ViewSubscriptions
-                  - aws-marketplace:Subscribe
-                  - aws-marketplace:Unsubscribe
-                Resource: "*"
 
   ObservatoryRole:
     Type: AWS::IAM::Role
@@ -507,12 +563,6 @@ Resources:
                   - aps:GetSeries
                   - aps:GetMetricMetadata
                 Resource: !GetAtt AMPWorkspace.Arn
-              - Effect: Allow
-                Action:
-                  - aws-marketplace:ViewSubscriptions
-                  - aws-marketplace:Subscribe
-                  - aws-marketplace:Unsubscribe
-                Resource: "*"
 
   StepFunctionsRole:
     Type: AWS::IAM::Role
@@ -542,6 +592,7 @@ Resources:
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
                 Resource: "*"
+              # Log delivery control-plane actions require Resource: "*" (AWS constraint)
               - Effect: Allow
                 Action:
                   - logs:CreateLogDelivery
@@ -549,10 +600,13 @@ Resources:
                   - logs:UpdateLogDelivery
                   - logs:DeleteLogDelivery
                   - logs:ListLogDeliveries
+                Resource: "*"
+              - Effect: Allow
+                Action:
                   - logs:PutResourcePolicy
                   - logs:DescribeResourcePolicies
                   - logs:DescribeLogGroups
-                Resource: "*"
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
 
   StateMachineLogGroup:
     Type: AWS::Logs::LogGroup
@@ -560,14 +614,54 @@ Resources:
       LogGroupName: !Sub "/aws/states/${AWS::StackName}-state-machine"
       RetentionInDays: 30
 
+  TriggerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-TriggerFunction"
+      RetentionInDays: 30
+
+  WorkerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-WorkerFunction"
+      RetentionInDays: 30
+
+  StatusFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-StatusFunction"
+      RetentionInDays: 30
+
+  ProvisionTeamFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-ProvisionTeamFunction"
+      RetentionInDays: 30
+
+  ObservatoryMetricsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-ObservatoryMetricsFunction"
+      RetentionInDays: 30
+
+  GeminiResearchFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      # GeminiResearchFunction has explicit FunctionName: pbm-gemini-research
+      LogGroupName: /aws/lambda/pbm-gemini-research
+      RetentionInDays: 30
+
   TriggerFunction:
     Type: AWS::Serverless::Function
+    DependsOn: TriggerFunctionLogGroup
     Metadata:
       BuildMethod: makefile
     Properties:
       CodeUri: ../
       Handler: src/orchestrator/trigger_handler.handler
       Role: !GetAtt TriggerRole.Arn
+      MemorySize: 512
+      Timeout: 60
       Events:
         TeamTaskEvent:
           Type: Api
@@ -742,8 +836,8 @@ Resources:
           VECTOR_DB_PORT: !Ref VectorDbPort
           VECTOR_DB_NAME: !Ref VectorDbName
           VECTOR_DB_USER: !Ref VectorDbUser
-          VECTOR_DB_PASSWORD: !Ref VectorDbPassword
-          VECTOR_DB_URL: !Ref VectorDbUrl
+          # VECTOR_DB_PASSWORD and VECTOR_DB_URL removed; fetch at runtime via VECTOR_DB_SECRET_ARN
+          VECTOR_DB_SECRET_ARN: !Ref VectorDbSecret
           VECTOR_DB_SSLMODE: verify-full
           VECTOR_DB_SSL_ROOT_CERT: /var/task/certs/rds-ca-bundle.pem
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
@@ -762,12 +856,15 @@ Resources:
 
   WorkerFunction:
     Type: AWS::Serverless::Function
+    DependsOn: WorkerFunctionLogGroup
     Metadata:
       BuildMethod: makefile
     Properties:
       CodeUri: ../
       Handler: src/orchestrator/worker_handler.handler
       Role: !GetAtt WorkerRole.Arn
+      MemorySize: 1024
+      Timeout: 300
       Environment:
         Variables:
           CONFIG_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
@@ -779,8 +876,8 @@ Resources:
           VECTOR_DB_PORT: !Ref VectorDbPort
           VECTOR_DB_NAME: !Ref VectorDbName
           VECTOR_DB_USER: !Ref VectorDbUser
-          VECTOR_DB_PASSWORD: !Ref VectorDbPassword
-          VECTOR_DB_URL: !Ref VectorDbUrl
+          # VECTOR_DB_PASSWORD and VECTOR_DB_URL removed; fetch at runtime via VECTOR_DB_SECRET_ARN
+          VECTOR_DB_SECRET_ARN: !Ref VectorDbSecret
           VECTOR_DB_SSLMODE: verify-full
           VECTOR_DB_SSL_ROOT_CERT: /var/task/certs/rds-ca-bundle.pem
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
@@ -823,15 +920,10 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:gemini/api_key-*"
-              - Effect: Allow
-                Action:
-                  - aws-marketplace:ViewSubscriptions
-                  - aws-marketplace:Subscribe
-                  - aws-marketplace:Unsubscribe
-                Resource: "*"
 
   GeminiResearchFunction:
     Type: AWS::Serverless::Function
+    DependsOn: GeminiResearchFunctionLogGroup
     Metadata:
       BuildMethod: makefile
     Properties:
@@ -839,6 +931,8 @@ Resources:
       CodeUri: ../
       Handler: config/examples/gemini_lambda.handler
       Role: !GetAtt GeminiResearchRole.Arn
+      MemorySize: 512
+      Timeout: 60
       Environment:
         Variables:
           GEMINI_MODEL: gemini-2.0-flash
@@ -850,15 +944,19 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName: !Ref GeminiResearchFunction
       Principal: bedrock.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*"
 
   ObservatoryMetricsFunction:
     Type: AWS::Serverless::Function
+    DependsOn: ObservatoryMetricsFunctionLogGroup
     Metadata:
       BuildMethod: makefile
     Properties:
       CodeUri: ../
       Handler: src/orchestrator/observatory_handler.handler
       Role: !GetAtt ObservatoryRole.Arn
+      MemorySize: 256
+      Timeout: 30
       Environment:
         Variables:
           AMP_WORKSPACE_ID: !GetAtt AMPWorkspace.WorkspaceId
@@ -873,12 +971,15 @@ Resources:
 
   StatusFunction:
     Type: AWS::Serverless::Function
+    DependsOn: StatusFunctionLogGroup
     Metadata:
       BuildMethod: makefile
     Properties:
       CodeUri: ../
       Handler: src/orchestrator/status_handler.handler
       Role: !GetAtt StatusRole.Arn
+      MemorySize: 256
+      Timeout: 30
       Environment:
         Variables:
           STATE_MACHINE_ARN: !Ref StateMachine
@@ -907,12 +1008,15 @@ Resources:
 
   ProvisionTeamFunction:
     Type: AWS::Serverless::Function
+    DependsOn: ProvisionTeamFunctionLogGroup
     Metadata:
       BuildMethod: makefile
     Properties:
       CodeUri: ../
       Handler: config/examples/lambda_handler.handler
       Role: !GetAtt ProvisionTeamRole.Arn
+      MemorySize: 512
+      Timeout: 120
       Environment:
         Variables:
           ARTIFACT_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
@@ -988,11 +1092,14 @@ Resources:
     Type: AWS::StepFunctions::StateMachine
     Properties:
       StateMachineName: !Sub "${AWS::StackName}-state-machine"
-      # ASSUMPTION: Express workflow is required for low-latency polling and high-throughput invocation.
-      StateMachineType: STANDARD
+      # EXPRESS: cheaper at scale (~100x vs STANDARD for short-lived async workflows).
+      # NOTE: EXPRESS executions are not queryable via DescribeExecution after completion.
+      # Status polling must rely on DynamoDB records written by WorkerFunction, not DescribeExecution.
+      StateMachineType: EXPRESS
       RoleArn: !GetAtt StepFunctionsRole.Arn
       LoggingConfiguration:
-        Level: ERROR
+        # Level: ALL required for EXPRESS — execution history is not stored in console, logs are the only audit trail.
+        Level: ALL
         IncludeExecutionData: false
         Destinations:
           - CloudWatchLogsLogGroup:
@@ -1063,13 +1170,116 @@ Resources:
       ToPort: 5432
       SourceSecurityGroupId: !Ref OrchestratorSecurityGroup
 
+  S3VpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasPrivateRouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTableId
+
+  DynamoDbVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasPrivateRouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.dynamodb"
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTableId
+
+  BedrockRuntimeVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasVpcConfig
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-runtime"
+      VpcEndpointType: Interface
+      SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+      SecurityGroupIds:
+        - !Ref OrchestratorSecurityGroup
+      PrivateDnsEnabled: true
+
+  BedrockAgentRuntimeVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasVpcConfig
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-agent-runtime"
+      VpcEndpointType: Interface
+      SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+      SecurityGroupIds:
+        - !Ref OrchestratorSecurityGroup
+      PrivateDnsEnabled: true
+
+  # NOTE: OrchestratorToAwsServicesEgress443 retains 0.0.0.0/0 egress as fallback.
+  # Once VPC endpoints are confirmed working in staging, this rule can be restricted
+  # to the VPC CIDR for Interface endpoints (traffic stays within VPC).
+
+  TeamWeaveWAF:
+    Type: AWS::WAFv2::WebACL
+    Condition: DeployWAF
+    Properties:
+      Name: !Sub "${AWS::StackName}-waf"
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      Rules:
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 1
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub "${AWS::StackName}-common-rules"
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub "${AWS::StackName}-bad-inputs"
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub "${AWS::StackName}-waf"
+
+  TeamWeaveWAFAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Condition: DeployWAF
+    Properties:
+      ResourceArn: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${TeamWeaveApi}/stages/prod"
+      WebACLArn: !GetAtt TeamWeaveWAF.Arn
+
   TeamWeaveApi:
     Type: AWS::Serverless::Api
     Properties:
       StageName: prod
+      Auth:
+        ApiKeyRequired: true
+        UsagePlan:
+          CreateUsagePlan: PER_API
+          Quota:
+            Limit: 10000
+            Period: DAY
+          Throttle:
+            BurstLimit: 100
+            RateLimit: 50
       Cors:
-        AllowOrigin: "'*'"
-        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: !Ref AllowedCorsOrigin
+        AllowHeaders: "'Content-Type,Authorization,x-api-key'"
         AllowMethods: "'OPTIONS,GET,POST,PUT,DELETE'"
 
 Outputs:
@@ -1103,3 +1313,9 @@ Outputs:
     Value: !GetAtt AMPWorkspace.WorkspaceId
   ObservatoryMetricsFunctionArn:
     Value: !GetAtt ObservatoryMetricsFunction.Arn
+  VectorDbSecretArn:
+    Value: !Ref VectorDbSecret
+    Description: ARN of the Secrets Manager secret holding RDS credentials
+  TeamWeaveWAFArn:
+    Condition: DeployWAF
+    Value: !GetAtt TeamWeaveWAF.Arn
