@@ -458,9 +458,8 @@ AWS X-Ray tracing is enabled on Lambda functions and Step Functions for end-to-e
 | `StepFunctionsRole` | Lambda InvokeFunction, X-Ray, CloudWatch Logs Delivery |
 
 ### Secrets Management
-- Google Gemini API key stored in AWS Secrets Manager (`gemini/api_key`)
-- Retrieved at Lambda cold start; cached in memory for warm invocations
-- RDS credentials managed via RDS IAM authentication (SSL verify-full)
+- **Gemini API key** — stored in Secrets Manager (`gemini/api_key`), fetched at cold start and cached in memory.
+- **RDS credentials** — stored in Secrets Manager (`VectorDbSecret`), fetched at runtime via `VECTOR_DB_SECRET_ARN` and cached per Lambda container. `VECTOR_DB_PASSWORD` is never passed as an environment variable.
 
 ### Network Security
 - Worker Lambda deployed in VPC private subnets
@@ -531,18 +530,19 @@ Trigger: push to main | manual workflow_dispatch
 
 ## Diagram Index
 
-The following C4 and infrastructure diagrams are available in `docs/c4/`:
+### Rendered PNGs
 
-| File | Description |
-|------|-------------|
-| `docs/c4/context.puml` | C4 Level 1 — System Context diagram |
-| `docs/c4/container.puml` | C4 Level 2 — Container diagram |
-| `docs/c4/component.puml` | C4 Level 3 — Component diagram (Worker Lambda) |
-| `docs/aws-infrastructure.puml` | AWS Infrastructure diagram (Lucidchart style) |
+| Diagram | PNG | PUML Source |
+|---------|-----|-------------|
+| C4 Level 1 — System Context | [View](c4/TeamWeave%20-%20C4%20Level%201:%20System%20Context.png) | [context.puml](c4/context.puml) |
+| C4 Level 2 — Container | [View](c4/TeamWeave%20-%20C4%20Level%202:%20Container%20Diagram.png) | [container.puml](c4/container.puml) |
+| C4 Level 3 — Worker Lambda Components | [View](c4/TeamWeave%20-%20C4%20Level%203:%20Component%20Diagram%20(Worker%20Lambda).png) | [component.puml](c4/component.puml) |
+| AWS Infrastructure | [View](TeamWeave%20-%20AWS%20Infrastructure%20Diagram.png) | [aws-infrastructure.puml](aws-infrastructure.puml) |
 
-To render diagrams, use [PlantUML](https://plantuml.com/) or the PlantUML VS Code extension.
+To re-render after PUML changes:
 
 ```bash
-# Render all diagrams to PNG
 plantuml docs/c4/*.puml docs/aws-infrastructure.puml
+# or use the helper script:
+python docs/puml_to_png.py
 ```
