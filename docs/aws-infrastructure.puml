@@ -1,24 +1,21 @@
 @startuml TeamWeave - AWS Infrastructure Diagram
 
 ' ─── AWSlib / Lucidchart-style AWS icons ──────────────────────────────────────
-!define AWSPuml https://raw.githubusercontent.com/awslabs/aws-icons-for-plantuml/v18.0/dist
+!define AWSPuml aws-plantuml-dist
 !include AWSPuml/AWSCommon.puml
-!include AWSPuml/AWSSimplified.puml
 
 !include AWSPuml/Compute/Lambda.puml
-!include AWSPuml/ApplicationIntegration/APIGateway.puml
+!include AWSPuml/NetworkingContentDelivery/APIGateway.puml
 !include AWSPuml/ApplicationIntegration/StepFunctions.puml
 !include AWSPuml/Database/DynamoDB.puml
-!include AWSPuml/Database/RDSPostgreSQLinstance.puml
-!include AWSPuml/Storage/S3.puml
+!include AWSPuml/Database/RDS.puml
+!include AWSPuml/Storage/SimpleStorageService.puml
 !include AWSPuml/SecurityIdentityCompliance/SecretsManager.puml
-!include AWSPuml/SecurityIdentityCompliance/IAMRole.puml
+!include AWSPuml/SecurityIdentityCompliance/IdentityAccessManagementRole.puml
 !include AWSPuml/ManagementGovernance/CloudWatch.puml
-!include AWSPuml/ManagementGovernance/XRay.puml
-!include AWSPuml/Networking/VPC.puml
-!include AWSPuml/Networking/VPCSubnetPrivate.puml
-!include AWSPuml/MachineLearning/Bedrock.puml
-!include AWSPuml/BusinessApplications/Chime.puml
+!include AWSPuml/DeveloperTools/XRay.puml
+!include AWSPuml/NetworkingContentDelivery/VirtualPrivateCloud.puml
+!include AWSPuml/ArtificialIntelligence/Bedrock.puml
 
 ' ─── Skinparam / Style ────────────────────────────────────────────────────────
 skinparam {
@@ -80,7 +77,7 @@ package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD
     package "VPC: vpc-f3c92a8a" as vpc #FCE4EC {
         package "Private Subnets (us-east-1a/b)" as private_subnets #F8BBD9 {
             Lambda(worker_fn, "Worker\nLambda", "worker_handler.py\nPython 3.12\n(VPC-enabled)")
-            RDSPostgreSQLinstance(rds, "PostgreSQL 15\n+ pgvector", "resume-rag-db\nrag_chunks table\nSSL verify-full")
+            RDS(rds, "PostgreSQL 15\n+ pgvector", "resume-rag-db\nrag_chunks table\nSSL verify-full")
         }
         rectangle "OrchestratorSecurityGroup\nInbound: TCP 5432 from Lambda ENIs" as sg #F3E5F5
     }
@@ -96,17 +93,17 @@ package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD
     package "Data Layer" as data_layer #E0F2F1 {
         DynamoDB(dynamo_pipeline, "DynamoDB\nPipelineRunsTable", "pk: RUN#id / TASK#id\nsk: META / STEP#id / TASK#id\nGSI: status+updatedAt")
         DynamoDB(dynamo_obs, "DynamoDB\nObservatoryTable", "pk: OBSERVATORY#op\nsk: timestamp#trace_id\nTTL: 90 days")
-        S3(s3_config, "S3\nTeamConfig Bucket", "teams/{team}/{ver}/team.json\nJSON schemas")
-        S3(s3_artifacts, "S3\nArtifact Bucket", "runs/{run_id}/{step}.json\nStep output artifacts")
+        SimpleStorageService(s3_config, "S3\nTeamConfig Bucket", "teams/{team}/{ver}/team.json\nJSON schemas")
+        SimpleStorageService(s3_artifacts, "S3\nArtifact Bucket", "runs/{run_id}/{step}.json\nStep output artifacts")
     }
 
     ' ─── SECURITY ─────────────────────────────────────────────────────────────
     package "Security" as security #FFF9C4 {
         SecretsManager(secrets, "Secrets Manager", "gemini/api_key")
-        IAMRole(worker_role, "WorkerRole\n(IAM)", "Bedrock, S3, DynamoDB\nLambda, EC2-VPC, APS")
-        IAMRole(trigger_role, "TriggerRole\n(IAM)", "Step Functions, S3\nDynamoDB, APS")
-        IAMRole(sfn_role, "StepFunctionsRole\n(IAM)", "Lambda Invoke\nX-Ray, CloudWatch")
-        IAMRole(bedrock_agent_role, "BedrockAgentServiceRole\n(IAM)", "Lambda Invoke\n(action groups)")
+        IdentityAccessManagementRole(worker_role, "WorkerRole\n(IAM)", "Bedrock, S3, DynamoDB\nLambda, EC2-VPC, APS")
+        IdentityAccessManagementRole(trigger_role, "TriggerRole\n(IAM)", "Step Functions, S3\nDynamoDB, APS")
+        IdentityAccessManagementRole(sfn_role, "StepFunctionsRole\n(IAM)", "Lambda Invoke\nX-Ray, CloudWatch")
+        IdentityAccessManagementRole(bedrock_agent_role, "BedrockAgentServiceRole\n(IAM)", "Lambda Invoke\n(action groups)")
     }
 
     ' ─── OBSERVABILITY ────────────────────────────────────────────────────────
