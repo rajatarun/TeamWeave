@@ -77,8 +77,13 @@ Parameters:
     Type: String
     Default: "arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun"
     Description: IAM role ARN passed to Bedrock CreateAgent as AgentResourceRoleArn.
+  AmpWorkspaceAlias:
+    Type: String
+    Default: ""
+    Description: Optional alias for the AMP workspace. Defaults to {StackName}-observatory.
 
 Conditions:
+  HasAmpWorkspaceAlias: !Not [!Equals [!Ref AmpWorkspaceAlias, ""]]
   CreateConfigBucket: !Equals [!Ref ConfigBucketName, ""]
   CreateArtifactBucket: !Equals [!Ref ArtifactBucketName, ""]
   CreateDdbTable: !Equals [!Ref DdbTableName, ""]
@@ -144,6 +149,17 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
+
+  AMPWorkspace:
+    Type: AWS::APS::Workspace
+    Properties:
+      Alias: !If
+        - HasAmpWorkspaceAlias
+        - !Ref AmpWorkspaceAlias
+        - !Sub "${AWS::StackName}-observatory"
+      Tags:
+        - Key: Stack
+          Value: !Ref AWS::StackName
 
   WorkerRole:
     Type: AWS::IAM::Role
@@ -259,6 +275,10 @@ Resources:
                 - !Ref "AWS::NoValue"
               - Effect: Allow
                 Action:
+                  - aps:RemoteWrite
+                Resource: !GetAtt AMPWorkspace.Arn
+              - Effect: Allow
+                Action:
                   - aws-marketplace:ViewSubscriptions
                   - aws-marketplace:Subscribe
                   - aws-marketplace:Unsubscribe
@@ -336,6 +356,13 @@ Resources:
                   - lambda:InvokeFunction
                 Resource:
                   - !GetAtt ProvisionTeamFunction.Arn
+              - Effect: Allow
+                Action:
+                  - aps:QueryMetrics
+                  - aps:GetLabels
+                  - aps:GetSeries
+                  - aps:GetMetricMetadata
+                Resource: !GetAtt AMPWorkspace.Arn
               - Effect: Allow
                 Action:
                   - aws-marketplace:ViewSubscriptions
@@ -444,6 +471,42 @@ Resources:
                   - iam:PassRole
                 Resource:
                   - !Ref BedrockAgentServiceRoleArn
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:ViewSubscriptions
+                  - aws-marketplace:Subscribe
+                  - aws-marketplace:Unsubscribe
+                Resource: "*"
+
+  ObservatoryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-observatory-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: observatory-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - aps:QueryMetrics
+                  - aps:GetLabels
+                  - aps:GetSeries
+                  - aps:GetMetricMetadata
+                Resource: !GetAtt AMPWorkspace.Arn
               - Effect: Allow
                 Action:
                   - aws-marketplace:ViewSubscriptions
@@ -688,6 +751,8 @@ Resources:
           STATE_MACHINE_ARN: !Ref StateMachine
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
           OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTable
+          AMP_WORKSPACE_ID: !GetAtt AMPWorkspace.WorkspaceId
+          AMP_REGION: !Ref AWS::Region
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:
@@ -723,6 +788,8 @@ Resources:
           GEMINI_LAMBDA_ARN: !GetAtt GeminiResearchFunction.Arn
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
           OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTable
+          AMP_WORKSPACE_ID: !GetAtt AMPWorkspace.WorkspaceId
+          AMP_REGION: !Ref AWS::Region
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:
@@ -783,6 +850,26 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName: !Ref GeminiResearchFunction
       Principal: bedrock.amazonaws.com
+
+  ObservatoryMetricsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../
+      Handler: src/orchestrator/observatory_handler.handler
+      Role: !GetAtt ObservatoryRole.Arn
+      Environment:
+        Variables:
+          AMP_WORKSPACE_ID: !GetAtt AMPWorkspace.WorkspaceId
+          AMP_REGION: !Ref AWS::Region
+      Events:
+        ObservatoryMetricsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /observability/metrics
+            Method: get
 
   StatusFunction:
     Type: AWS::Serverless::Function
@@ -1010,3 +1097,9 @@ Outputs:
     Value: !If [CreateArtifactBucket, !Ref TeamArtifactBucket, !Ref ArtifactBucketName]
   ObservatoryMetricsTable:
     Value: !Ref ObservatoryMetricsTable
+  AMPWorkspaceArn:
+    Value: !GetAtt AMPWorkspace.Arn
+  AMPWorkspaceId:
+    Value: !GetAtt AMPWorkspace.WorkspaceId
+  ObservatoryMetricsFunctionArn:
+    Value: !GetAtt ObservatoryMetricsFunction.Arn
