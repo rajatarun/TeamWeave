@@ -1,0 +1,40 @@
+@startuml TeamWeave - C4 Level 1: System Context
+
+!define C4Context https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+!include C4Context
+
+LAYOUT_WITH_LEGEND()
+LAYOUT_TOP_DOWN()
+
+title TeamWeave — System Context Diagram (C4 Level 1)
+
+' ─── People ────────────────────────────────────────────────────────────────────
+Person(user, "End User", "A professional (e.g., job seeker, marketer)\nwho submits workflow requests\nand receives AI-generated outputs.")
+
+Person(admin, "Platform Admin", "Configures teams, agents, roles,\nand departments via the management API.")
+
+' ─── Core System ──────────────────────────────────────────────────────────────
+System(teamweave, "TeamWeave", "Config-driven multi-agent orchestration platform.\nRoutes user requests through fleets of AI agents\nto produce structured outputs (content, learning plans, etc.).")
+
+' ─── External Systems ─────────────────────────────────────────────────────────
+System_Ext(bedrock, "Amazon Bedrock", "Managed AWS AI service.\nHosts Amazon Nova and Claude models.\nProvides agent runtime with tool-use and\ncollaborative supervisor capabilities.")
+
+System_Ext(gemini, "Google Gemini 2.0 Flash", "Google's multimodal AI model.\nUsed for real-time web research\nand content augmentation by agents.")
+
+System_Ext(pgvector, "PostgreSQL + pgvector\n(Amazon RDS)", "Relational database with vector extension.\nStores knowledge base embeddings\nfor retrieval-augmented generation (RAG).")
+
+System_Ext(github, "GitHub", "Source code repository.\nHosts CI/CD pipeline via GitHub Actions.")
+
+' ─── Relationships ────────────────────────────────────────────────────────────
+Rel(user, teamweave, "Submits workflow tasks\n(e.g., create LinkedIn content,\ngenerate learning plan)", "HTTPS / REST")
+Rel(user, teamweave, "Polls for results", "HTTPS / REST")
+
+Rel(admin, teamweave, "Manages agents, teams,\nroles, and departments", "HTTPS / REST")
+
+Rel(teamweave, bedrock, "Invokes AI agents\nand foundation models", "AWS SDK / HTTPS")
+Rel(teamweave, gemini, "Performs web research\nvia Gemini API", "HTTPS (via Lambda)")
+Rel(teamweave, pgvector, "Queries vector embeddings\nfor RAG context", "TCP / PostgreSQL (VPC)")
+
+Rel(github, teamweave, "Deploys via SAM / CloudFormation\nusing OIDC role assumption", "CI/CD")
+
+@enduml
