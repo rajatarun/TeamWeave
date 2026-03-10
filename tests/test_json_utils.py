@@ -31,6 +31,15 @@ class ExtractJsonPayloadTests(unittest.TestCase):
         raw = 'prefix {"content":"{\\n  \\\"status\\\": \\\"ok\\\"\\n}"} suffix'
         self.assertEqual(extract_json_payload(raw), {"content": {"status": "ok"}})
 
+    def test_parses_json_with_control_characters(self):
+        # Simulate an LLM response containing raw control chars (e.g. \x0c form-feed)
+        # embedded inside a JSON string value — invalid per RFC 8259.
+        raw = '{"status":"ok","body":"line1\x0cline2\x0bline3"}'
+        result = extract_json_payload(raw)
+        self.assertEqual(result["status"], "ok")
+        self.assertNotIn("\x0c", result["body"])
+        self.assertNotIn("\x0b", result["body"])
+
     def test_raises_when_no_json(self):
         with self.assertRaises(ValueError):
             extract_json_payload("no payload")
