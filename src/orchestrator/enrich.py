@@ -18,6 +18,7 @@ Environment variables:
 import json
 import os
 import boto3
+from .json_utils import extract_json_payload
 from .logger import get_logger
 
 log = get_logger("enrich")
@@ -260,13 +261,13 @@ def enrich_step_output(
 
     try:
         text     = _invoke_claude(prompt)
-        enriched = json.loads(text)
+        enriched = extract_json_payload(text)
         log.info(
             "enrich_ok agent=%s schema=%s placeholders_fixed=%s",
             agent_name, schema_ref, has_placeholders,
         )
         return enriched
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, ValueError) as e:
         log.warning("enrich_json_parse_failed agent=%s err=%s", agent_name, e)
         return raw_output
     except Exception as e:
