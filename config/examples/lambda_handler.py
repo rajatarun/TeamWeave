@@ -49,6 +49,7 @@ import json
 import logging
 import os
 import re
+import time
 from collections import defaultdict
 from urllib.parse import unquote_plus
 
@@ -88,6 +89,65 @@ _MODEL_ALIAS_SLUG: dict[str, str] = {
     "us.anthropic.claude-3-5-haiku-20241022-v1:0":  "claude-35-haiku",
 }
 
+_RETRYABLE_AGENT_STATES = {"PREPARING", "UPDATING"}
+
+
+def _wait_for_agent_stable_state(
+    bedrock,
+    agent_id: str,
+    retry_states: set[str] | None = None,
+    max_wait_seconds: int = 120,
+    poll_interval_seconds: int = 5,
+) -> str:
+    """Wait until the Bedrock agent leaves transient states and return status."""
+    states = retry_states or _RETRYABLE_AGENT_STATES
+    waited = 0
+    while waited <= max_wait_seconds:
+        status = bedrock.get_agent(agentId=agent_id)["agent"].get("agentStatus", "")
+        if status not in states:
+            return status
+        log.info(f"  Agent {agent_id} status={status}; waiting before retry")
+        time.sleep(poll_interval_seconds)
+        waited += poll_interval_seconds
+    raise TimeoutError(
+        f"Agent {agent_id} stayed in transient states {sorted(states)} for more than "
+        f"{max_wait_seconds}s"
+    )
+
+
+def _update_agent_with_retry(bedrock, *, agent_id: str, max_attempts: int = 6, **kwargs):
+    """Retry update_agent when Bedrock rejects updates for transient agent states."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return bedrock.update_agent(agentId=agent_id, **kwargs)
+        except ClientError as e:
+            err = e.response.get("Error", {}) if isinstance(e.response, dict) else {}
+            code = err.get("Code", "")
+            msg = err.get("Message", str(e))
+            retryable = (
+                code == "ValidationException"
+                and "can't be performed on Agent" in msg
+                and any(state in msg for state in _RETRYABLE_AGENT_STATES)
+            )
+            if not retryable or attempt == max_attempts:
+                raise
+            log.warning(
+                f"  WARN update_agent retry {attempt}/{max_attempts} for {agent_id}: {msg}"
+            )
+            _wait_for_agent_stable_state(bedrock, agent_id)
+
+
+
+def _prepare_agent_and_wait(bedrock, agent_id: str) -> None:
+    """Prepare an agent and wait for it to leave PREPARING state."""
+    bedrock.prepare_agent(agentId=agent_id)
+    _wait_for_agent_stable_state(
+        bedrock,
+        agent_id,
+        retry_states={"PREPARING"},
+        max_wait_seconds=180,
+        poll_interval_seconds=5,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -373,15 +433,16 @@ def _provision_model_aliases(
             continue
 
         try:
-            bedrock.update_agent(
-                agentId=agent_id,
+            _update_agent_with_retry(
+                bedrock,
+                agent_id=agent_id,
                 agentName=current_agent["agentName"],
                 agentResourceRoleArn=current_agent["agentResourceRoleArn"],
                 foundationModel=model_id,
                 instruction=instruction,
                 description=current_agent.get("description", ""),
             )
-            bedrock.prepare_agent(agentId=agent_id)
+            _prepare_agent_and_wait(bedrock, agent_id)
             alias_resp = bedrock.create_agent_alias(
                 agentId=agent_id,
                 agentAliasName=alias_slug,
@@ -396,15 +457,16 @@ def _provision_model_aliases(
 
     # Restore agent to its primary model
     try:
-        bedrock.update_agent(
-            agentId=agent_id,
+        _update_agent_with_retry(
+            bedrock,
+            agent_id=agent_id,
             agentName=current_agent["agentName"],
             agentResourceRoleArn=current_agent["agentResourceRoleArn"],
             foundationModel=main_model_id,
             instruction=instruction,
             description=current_agent.get("description", ""),
         )
-        bedrock.prepare_agent(agentId=agent_id)
+        _prepare_agent_and_wait(bedrock, agent_id)
         log.info(f"  RESTORED {agent_name} → {main_model_id}")
     except Exception as e:
         log.warning(f"  WARN restore primary model failed for {agent_name}: {e}")
@@ -444,8 +506,9 @@ def _provision_team(team_data: dict, team_name: str, version: str,
             log.info(f"  SYNC {agent['name']} ({existing_id}) — updating instruction")
             try:
                 current = bedrock.get_agent(agentId=existing_id)["agent"]
-                bedrock.update_agent(
-                    agentId=existing_id,
+                _update_agent_with_retry(
+                    bedrock,
+                    agent_id=existing_id,
                     agentName=current["agentName"],
                     agentResourceRoleArn=current["agentResourceRoleArn"],
                     foundationModel=foundation_model,
@@ -454,7 +517,7 @@ def _provision_team(team_data: dict, team_name: str, version: str,
                 )
                 if gemini_enabled:
                     _attach_gemini_action_group(bedrock, existing_id, gemini_lambda_arn)
-                bedrock.prepare_agent(agentId=existing_id)
+                _prepare_agent_and_wait(bedrock, existing_id)
                 log.info(f"  ✓ SYNC {agent['name']} — instruction updated")
             except Exception as e:
                 log.warning(f"  WARN could not sync {agent['name']}: {e}")
@@ -475,8 +538,9 @@ def _provision_team(team_data: dict, team_name: str, version: str,
             aid = existing["agentId"]
             try:
                 current = bedrock.get_agent(agentId=aid)["agent"]
-                bedrock.update_agent(
-                    agentId=aid,
+                _update_agent_with_retry(
+                    bedrock,
+                    agent_id=aid,
                     agentName=current["agentName"],
                     agentResourceRoleArn=current["agentResourceRoleArn"],
                     foundationModel=foundation_model,
@@ -485,7 +549,7 @@ def _provision_team(team_data: dict, team_name: str, version: str,
                 )
                 if gemini_enabled:
                     _attach_gemini_action_group(bedrock, aid, gemini_lambda_arn)
-                bedrock.prepare_agent(agentId=aid)
+                _prepare_agent_and_wait(bedrock, aid)
             except Exception as e:
                 log.warning(f"  WARN could not update recovered agent {agent['name']}: {e}")
             als  = bedrock.list_agent_aliases(agentId=aid).get("agentAliasSummaries", [])
@@ -702,15 +766,16 @@ def handle_agents(method, path_param, body, cfg) -> dict:
             updated_fm          = resolved.get("foundation_model") or resolved.get("foundationModel") or current["foundationModel"]
             updated_instruction = resolved.get("instruction",      current.get("instruction", ""))
             updated_description = resolved.get("description",      current.get("description", ""))
-            bedrock.update_agent(
-                agentId=aid,
+            _update_agent_with_retry(
+                bedrock,
+                agent_id=aid,
                 agentName=current["agentName"],
                 agentResourceRoleArn=current["agentResourceRoleArn"],
                 foundationModel=updated_fm,
                 instruction=updated_instruction,
                 description=updated_description,
             )
-            bedrock.prepare_agent(agentId=aid)
+            _prepare_agent_and_wait(bedrock, aid)
             return _ok({
                 "updated":    True,
                 "agentId":    aid,
