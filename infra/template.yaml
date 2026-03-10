@@ -92,8 +92,8 @@ Parameters:
     Description: Optional alias for the AMP workspace. Defaults to {StackName}-observatory.
   AllowedCorsOrigin:
     Type: String
-    Default: "'https://tarunraja.info'"
-    Description: "Allowed CORS origin for the API Gateway (e.g. 'https://app.example.com'). Use '*' for dev/local."
+    Default: "'*'"
+    Description: "Allowed CORS origin for the API Gateway (e.g. 'https://app.example.com'). Use '*' to allow all origins including Lambda invocations."
   EnableWAF:
     Type: String
     Default: "false"
