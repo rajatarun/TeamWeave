@@ -15,7 +15,7 @@
 !include AWSPuml/ManagementGovernance/CloudWatch.puml
 !include AWSPuml/DeveloperTools/XRay.puml
 !include AWSPuml/NetworkingContentDelivery/VirtualPrivateCloud.puml
-!include AWSPuml/NetworkingContentDelivery/VPCEndpoint.puml
+!include AWSPuml/NetworkingContentDelivery/VPCEndpoints.puml
 !include AWSPuml/ArtificialIntelligence/Bedrock.puml
 !include AWSPuml/SecurityIdentityCompliance/WAF.puml
 
