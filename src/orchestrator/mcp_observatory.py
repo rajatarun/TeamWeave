@@ -26,6 +26,7 @@ from typing import Optional
 import boto3
 from mcp_observatory.instrument import instrument_wrapper_api
 
+from . import amp_metrics as _amp
 from .bedrock_wrappers import invoke_agent_request, invoke_model_request
 from .logger import get_logger
 
@@ -60,46 +61,52 @@ def _to_decimal(value: float) -> Decimal:
 
 
 def _push_metric(operation: str, span, decision, extra: dict) -> None:
-    """Best-effort write of a telemetry span to ObservatoryMetricsTable.
+    """Best-effort write of a telemetry span to ObservatoryMetricsTable and AMP.
 
     Includes shadow disagreement and numeric variance when a dual_invoke
     was performed (fields are set on the primary span by mcp_observatory).
 
-    Failures are logged as warnings and never propagate to the caller.
+    Both the DynamoDB write and the AMP remote_write are best-effort:
+    failures are logged as warnings and never propagate to the caller.
     """
+    # --- DynamoDB write (guarded by table availability) ---
     table = _get_ddb_table()
-    if table is None:
-        return
+    if table is not None:
+        try:
+            now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")
+            expiry = int(time.time()) + _TTL_SECONDS
 
-    try:
-        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")
-        expiry = int(time.time()) + _TTL_SECONDS
+            item: dict = {
+                "pk": f"OBSERVATORY#{operation}",
+                "sk": f"{now_iso}#{span.trace_id}",
+                "trace_id": span.trace_id,
+                "operation": operation,
+                "timestamp": now_iso,
+                "prompt_tokens": Decimal(span.prompt_tokens),
+                "completion_tokens": Decimal(span.completion_tokens),
+                "cost_usd": _to_decimal(span.cost_usd),
+                "decision": decision.action,
+                "decision_reason": decision.reason or "none",
+                "ttl": Decimal(expiry),
+            }
 
-        item: dict = {
-            "pk": f"OBSERVATORY#{operation}",
-            "sk": f"{now_iso}#{span.trace_id}",
-            "trace_id": span.trace_id,
-            "operation": operation,
-            "timestamp": now_iso,
-            "prompt_tokens": Decimal(span.prompt_tokens),
-            "completion_tokens": Decimal(span.completion_tokens),
-            "cost_usd": _to_decimal(span.cost_usd),
-            "decision": decision.action,
-            "decision_reason": decision.reason or "none",
-            "ttl": Decimal(expiry),
-        }
+            # Shadow comparison fields (set when dual_invoke=True)
+            if span.shadow_disagreement_score is not None:
+                item["shadow_disagreement_score"] = _to_decimal(span.shadow_disagreement_score)
+            if span.shadow_numeric_variance is not None:
+                item["shadow_numeric_variance"] = _to_decimal(span.shadow_numeric_variance)
 
-        # Shadow comparison fields (set when dual_invoke=True)
-        if span.shadow_disagreement_score is not None:
-            item["shadow_disagreement_score"] = _to_decimal(span.shadow_disagreement_score)
-        if span.shadow_numeric_variance is not None:
-            item["shadow_numeric_variance"] = _to_decimal(span.shadow_numeric_variance)
+            item.update({k: str(v) if isinstance(v, float) else v for k, v in extra.items()})
 
-        item.update({k: str(v) if isinstance(v, float) else v for k, v in extra.items()})
+            table.put_item(Item=item)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("observatory_metric_write_failed", extra={"err": str(exc)})
 
-        table.put_item(Item=item)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("observatory_metric_write_failed", extra={"err": str(exc)})
+    # --- AMP remote_write (independent of DynamoDB availability) ---
+    if operation == "invoke_agent":
+        _amp.record_agent_span(span, decision, extra)
+    else:
+        _amp.record_model_span(span, decision, extra)
 
 
 def observe_agent_request(
