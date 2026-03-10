@@ -1,0 +1,82 @@
+@startuml TeamWeave - C4 Level 3: Component Diagram (Worker Lambda)
+
+!define C4Component https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+!include C4Component
+
+LAYOUT_WITH_LEGEND()
+LAYOUT_LEFT_RIGHT()
+
+title TeamWeave — Component Diagram (C4 Level 3)\nWorker Lambda — Pipeline Execution Engine
+
+' ─── External Containers ──────────────────────────────────────────────────────
+Container_Ext(sfn, "Step Functions\nState Machine", "AWS Step Functions", "Invokes Worker Lambda\nwith run context")
+
+Container_Ext(s3_config, "S3 TeamConfig Bucket", "Amazon S3", "Stores team.json\nworkflow definitions")
+
+Container_Ext(bedrock_agents, "Amazon Bedrock\nAgent Runtime", "AWS Bedrock", "Executes AI agents\nwith streaming responses")
+
+Container_Ext(rds, "PostgreSQL + pgvector", "Amazon RDS (VPC)", "Vector similarity search\nfor RAG context")
+
+Container_Ext(bedrock_embed, "Amazon Bedrock\nTitan Embed", "AWS Bedrock", "Generates text embeddings\nfor RAG queries")
+
+Container_Ext(bedrock_transform, "Amazon Bedrock\nClaude / Nova", "AWS Bedrock", "Schema transformation\nof agent outputs")
+
+Container_Ext(dynamo, "DynamoDB\nPipeline Table", "Amazon DynamoDB", "Stores run metadata\nand step records")
+
+Container_Ext(s3_artifacts, "S3 Artifact Bucket", "Amazon S3", "Stores step output\nartifacts as JSON")
+
+Container_Ext(dynamo_obs, "DynamoDB\nObservatory Table", "Amazon DynamoDB", "Stores telemetry spans\n(tokens, latency, cost)")
+
+Container_Ext(amp, "Amazon Managed\nPrometheus", "AMP", "Time-series metrics\nstore")
+
+' ─── Worker Lambda Boundary ───────────────────────────────────────────────────
+Container_Boundary(worker, "Worker Lambda (src/orchestrator/worker_handler.py)") {
+
+    Component(handler, "Lambda Handler\n(worker_handler.py)", "Python function", "Entry point invoked by Step Functions.\nOrchestrates the full pipeline run.\nIterates workflow steps sequentially.\nPersists final run status to DynamoDB.")
+
+    Component(config_loader, "Team Config Loader\n(models.py)", "Python dataclass module", "Downloads team.json from S3.\nDeserializes into typed dataclasses:\n  - TeamConfig\n  - AgentConfig\n  - TeamGlobals\n  - BedrockRef")
+
+    Component(schema_resolver, "Schema Resolver", "Python component", "Resolves JSON Schema definitions\nfor each workflow step.\nSupports inline schemas and\nS3-referenced schema files.\nUsed to validate and transform\nagent outputs.")
+
+    Component(rag_engine, "RAG Engine\n(rag_handler.py)", "Python component", "Generates text embeddings\nvia Bedrock Titan Embed.\nExecutes pgvector similarity\nsearch (cosine, top-k).\nInjects retrieved chunks\ninto agent prompts.\nSupports 'explicit' and 'history' modes.")
+
+    Component(prompt_builder, "Prompt Builder", "Python component", "Constructs agent goal prompts\nfrom goal_template + inputs.\nMerges: request data, RAG context,\nuser profile, prior step outputs.\nApplies global constraints\n(north_star, hard_constraints).")
+
+    Component(bedrock_client, "Bedrock Agent Client\n(bedrock_handler.py)", "Python / boto3", "Invokes Bedrock agents\nwith 30-minute timeout.\nHandles streaming event chunks.\nExtracts structured JSON from\nraw agent response text.\nSupports session continuity.")
+
+    Component(observatory, "MCP Observatory\n(observatory_handler.py)", "Python / mcp-observatory", "Wraps every Bedrock call\nwith telemetry instrumentation.\nCaptures: trace_id, tokens,\nlatency, cost, policy decisions.\nShadow mode: dual-invokes primary\nand shadow models, scores disagreement.\nPushes metrics to DynamoDB + AMP.")
+
+    Component(output_transformer, "Output Transformer\n(transform_handler.py)", "Python / boto3", "Validates agent output\nagainst target JSON Schema.\nUses Bedrock Claude/Nova to\ntransform output when schema\nmismatch is detected.\nEnsures structured, schema-compliant\nstep outputs.")
+
+    Component(artifact_store, "Artifact Store\n(artifact_handler.py)", "Python / boto3", "Writes validated step outputs\nto S3 as JSON artifacts.\nUpdates DynamoDB STEP records\nwith status, output, artifact_uri.\nApplies team-specific side effects\n(e.g., writes improvement tasks\nfor ImprovementTeam runs).")
+}
+
+' ─── Relationships: Entry ─────────────────────────────────────────────────────
+Rel(sfn, handler, "Invokes with:\n{ run_id, team, version,\n  owner, request }", "Lambda invoke (sync)")
+
+' ─── Internal Component Flow ──────────────────────────────────────────────────
+Rel(handler, config_loader, "Loads and parses\nteam configuration", "function call")
+Rel(config_loader, s3_config, "GET teams/{team}/{version}/team.json", "S3 GetObject")
+
+Rel(handler, schema_resolver, "Resolves step schemas\nfrom team config", "function call")
+
+Rel(handler, rag_engine, "Fetches RAG context\nfor each step (if enabled)", "function call")
+Rel(rag_engine, bedrock_embed, "Generates query embedding\n(Titan Embed Text v1)", "AWS SDK / HTTPS")
+Rel(rag_engine, rds, "Executes vector similarity\nsearch (cosine, top-k)", "TCP 5432 / VPC SSL")
+
+Rel(handler, prompt_builder, "Builds step prompt\nfrom template + context", "function call")
+
+Rel(handler, bedrock_client, "Invokes Bedrock agent\nwith built prompt", "function call")
+Rel(bedrock_client, observatory, "Wraps invocation\nwith telemetry", "function call")
+Rel(observatory, bedrock_agents, "Primary + shadow\nagent invocations", "AWS SDK / HTTPS")
+Rel(observatory, dynamo_obs, "Writes telemetry span", "AWS SDK")
+Rel(observatory, amp, "Pushes Prometheus metrics\n(remote_write, SigV4)", "HTTPS")
+
+Rel(handler, output_transformer, "Transforms agent output\nto target schema", "function call")
+Rel(output_transformer, bedrock_transform, "Schema transformation\n(if output mismatch)", "AWS SDK / HTTPS")
+
+Rel(handler, artifact_store, "Persists step result\nand side effects", "function call")
+Rel(artifact_store, s3_artifacts, "PUT runs/{run_id}/{step}.json", "S3 PutObject")
+Rel(artifact_store, dynamo, "UPDATE STEP record\n(status, output, artifact_uri)", "AWS SDK DynamoDB")
+
+@enduml

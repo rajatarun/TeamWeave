@@ -1,0 +1,222 @@
+@startuml TeamWeave - AWS Infrastructure Diagram
+
+' ─── AWSlib / Lucidchart-style AWS icons ──────────────────────────────────────
+!define AWSPuml https://raw.githubusercontent.com/awslabs/aws-icons-for-plantuml/v18.0/dist
+!include AWSPuml/AWSCommon.puml
+!include AWSPuml/AWSSimplified.puml
+
+!include AWSPuml/Compute/Lambda.puml
+!include AWSPuml/ApplicationIntegration/APIGateway.puml
+!include AWSPuml/ApplicationIntegration/StepFunctions.puml
+!include AWSPuml/Database/DynamoDB.puml
+!include AWSPuml/Database/RDSPostgreSQLinstance.puml
+!include AWSPuml/Storage/S3.puml
+!include AWSPuml/SecurityIdentityCompliance/SecretsManager.puml
+!include AWSPuml/SecurityIdentityCompliance/IAMRole.puml
+!include AWSPuml/ManagementGovernance/CloudWatch.puml
+!include AWSPuml/ManagementGovernance/XRay.puml
+!include AWSPuml/Networking/VPC.puml
+!include AWSPuml/Networking/VPCSubnetPrivate.puml
+!include AWSPuml/MachineLearning/Bedrock.puml
+!include AWSPuml/BusinessApplications/Chime.puml
+
+' ─── Skinparam / Style ────────────────────────────────────────────────────────
+skinparam {
+    BackgroundColor #F8F9FA
+    ArrowColor #545B64
+    ArrowThickness 1.5
+    FontName "Helvetica Neue"
+    FontSize 11
+    DefaultTextAlignment center
+    PackageBorderColor #AAB7B8
+    PackageBorderThickness 1.5
+    PackageBackgroundColor #FFFFFF
+    NoteBackgroundColor #FFF9C4
+    NoteBorderColor #F9A825
+}
+
+skinparam rectangle {
+    BackgroundColor #FFFFFF
+    BorderColor #AAB7B8
+    BorderThickness 1
+    FontSize 10
+}
+
+title <size:18><b>TeamWeave — AWS Infrastructure Diagram</b></size>\n<size:12>Region: us-east-1 | Account: 239571291755</size>
+
+' ─── INTERNET / EXTERNAL ──────────────────────────────────────────────────────
+actor "End User /\nAdmin Client" as client #LightBlue
+rectangle "GitHub Actions\n(CI/CD)" as github #LightYellow {
+    rectangle "OIDC Role\nAssumption" as oidc
+}
+
+rectangle "Google\nGemini 2.0 Flash" as gemini_ext #FFF3E0 {
+    rectangle "Gemini API\n(web research)" as gemini_api
+}
+
+' ─── AWS ACCOUNT BOUNDARY ─────────────────────────────────────────────────────
+package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD {
+
+    ' ─── API LAYER ────────────────────────────────────────────────────────────
+    package "API Layer" as api_layer #E3F2FD {
+        APIGateway(apigw, "API Gateway\n(REST API)", "TeamWeaveApi")
+    }
+
+    ' ─── CONTROL PLANE ────────────────────────────────────────────────────────
+    package "Control Plane" as control_plane #E8F5E9 {
+        Lambda(trigger_fn, "Trigger\nLambda", "trigger_handler.py\nPython 3.12")
+        Lambda(status_fn, "Status\nLambda", "status_handler.py\nPython 3.12")
+        Lambda(provision_fn, "Provision\nLambda", "provision_team.py\nPython 3.12")
+        StepFunctions(sfn, "Step Functions\nState Machine", "Standard Workflow\n(Async)")
+    }
+
+    ' ─── EXECUTION PLANE ──────────────────────────────────────────────────────
+    package "Execution Plane" as exec_plane #FFF3E0 {
+        Lambda(observatory_fn, "Observatory\nMetrics Lambda", "observatory_handler.py\nPython 3.12")
+        Lambda(gemini_fn, "Gemini Research\nLambda", "gemini_lambda.py\nPython 3.12")
+    }
+
+    ' ─── VPC ──────────────────────────────────────────────────────────────────
+    package "VPC: vpc-f3c92a8a" as vpc #FCE4EC {
+        package "Private Subnets (us-east-1a/b)" as private_subnets #F8BBD9 {
+            Lambda(worker_fn, "Worker\nLambda", "worker_handler.py\nPython 3.12\n(VPC-enabled)")
+            RDSPostgreSQLinstance(rds, "PostgreSQL 15\n+ pgvector", "resume-rag-db\nrag_chunks table\nSSL verify-full")
+        }
+        rectangle "OrchestratorSecurityGroup\nInbound: TCP 5432 from Lambda ENIs" as sg #F3E5F5
+    }
+
+    ' ─── AI / ML SERVICES ─────────────────────────────────────────────────────
+    package "Amazon Bedrock" as bedrock_pkg #EDE7F6 {
+        Bedrock(bedrock_agents, "Bedrock Agents\n(Agent Runtime)", "11 agents across\n2 teams")
+        Bedrock(bedrock_models, "Foundation Models", "Nova micro/lite/pro/premier\nClaude 3/3.5 Haiku\nTitan Embed Text v1")
+        rectangle "Bedrock Guardrail\n(Shared, v1 Baseline)" as guardrail #EDE7F6
+    }
+
+    ' ─── DATA STORES ──────────────────────────────────────────────────────────
+    package "Data Layer" as data_layer #E0F2F1 {
+        DynamoDB(dynamo_pipeline, "DynamoDB\nPipelineRunsTable", "pk: RUN#id / TASK#id\nsk: META / STEP#id / TASK#id\nGSI: status+updatedAt")
+        DynamoDB(dynamo_obs, "DynamoDB\nObservatoryTable", "pk: OBSERVATORY#op\nsk: timestamp#trace_id\nTTL: 90 days")
+        S3(s3_config, "S3\nTeamConfig Bucket", "teams/{team}/{ver}/team.json\nJSON schemas")
+        S3(s3_artifacts, "S3\nArtifact Bucket", "runs/{run_id}/{step}.json\nStep output artifacts")
+    }
+
+    ' ─── SECURITY ─────────────────────────────────────────────────────────────
+    package "Security" as security #FFF9C4 {
+        SecretsManager(secrets, "Secrets Manager", "gemini/api_key")
+        IAMRole(worker_role, "WorkerRole\n(IAM)", "Bedrock, S3, DynamoDB\nLambda, EC2-VPC, APS")
+        IAMRole(trigger_role, "TriggerRole\n(IAM)", "Step Functions, S3\nDynamoDB, APS")
+        IAMRole(sfn_role, "StepFunctionsRole\n(IAM)", "Lambda Invoke\nX-Ray, CloudWatch")
+        IAMRole(bedrock_agent_role, "BedrockAgentServiceRole\n(IAM)", "Lambda Invoke\n(action groups)")
+    }
+
+    ' ─── OBSERVABILITY ────────────────────────────────────────────────────────
+    package "Observability" as observability #E8EAF6 {
+        CloudWatch(cloudwatch, "CloudWatch Logs", "Lambda execution logs\nAll functions")
+        XRay(xray, "X-Ray", "Distributed tracing\nLambda + Step Functions")
+        rectangle "Amazon Managed\nPrometheus (AMP)\nWorkspace" as amp #E8EAF6
+    }
+
+    ' ─── CI/CD ────────────────────────────────────────────────────────────────
+    package "Deployment (SAM + CloudFormation)" as deploy_pkg #FFFDE7 {
+        rectangle "CloudFormation Stack\nTeamWeaveStack" as cfn_main
+        rectangle "CloudFormation Stack\nbedrock-agents.yaml" as cfn_bedrock
+    }
+}
+
+' ─── RELATIONSHIPS ────────────────────────────────────────────────────────────
+
+' Client → API Gateway
+client --> apigw : "HTTPS\nPOST /team/task\nGET /team/task/{id}\nAdmin CRUD"
+
+' API Gateway → Lambdas
+apigw --> trigger_fn : "Workflow &\nCRUD requests"
+apigw --> status_fn : "Status polls"
+apigw --> observatory_fn : "GET /observability/metrics"
+
+' Control plane flow
+trigger_fn --> sfn : "start_execution()\n(async)"
+trigger_fn --> dynamo_pipeline : "Write RUN#id/META\n(status=RUNNING)"
+status_fn --> sfn : "describe_execution()"
+sfn --> worker_fn : "Invoke (sync)\npipeline runs"
+sfn --> provision_fn : "Invoke (sync)\nCRUD operations"
+provision_fn --> bedrock_agents : "Create/update\nagents & aliases"
+provision_fn --> s3_config : "Write team.json"
+
+' Worker pipeline flow
+worker_fn --> s3_config : "Load team.json\n& schemas"
+worker_fn --> bedrock_agents : "InvokeAgent\n(streaming)"
+worker_fn --> dynamo_pipeline : "Write STEP records\n& final RUN status"
+worker_fn --> s3_artifacts : "Write step\nartifacts"
+worker_fn --> dynamo_obs : "Write telemetry\nspans (MCP Observatory)"
+worker_fn --> amp : "Prometheus remote_write\n(protobuf+Snappy, SigV4)"
+worker_fn --> rds : "pgvector similarity\nsearch (RAG)\nTCP 5432 / VPC SSL"
+
+' Bedrock agents → Gemini Lambda (tool action)
+bedrock_agents --> gemini_fn : "Invoke as\ntool action"
+gemini_fn --> gemini_api : "Web research\nvia Gemini 2.0 Flash"
+gemini_fn --> secrets : "GetSecretValue\ngimini/api_key"
+
+' Bedrock composition
+bedrock_agents --> bedrock_models : "Inference\nrequests"
+bedrock_agents --> guardrail : "Content policy\ncheck"
+bedrock_agent_role --> bedrock_agents : "Service role"
+
+' Observability
+observatory_fn --> amp : "PromQL query\nmetrics"
+worker_fn --> cloudwatch : "Lambda logs"
+trigger_fn --> cloudwatch : "Lambda logs"
+worker_fn --> xray : "Trace segments"
+sfn --> xray : "Trace segments"
+
+' Security
+trigger_fn --> trigger_role : "Assumes"
+worker_fn --> worker_role : "Assumes"
+sfn --> sfn_role : "Assumes"
+
+' CI/CD
+github --> cfn_main : "SAM Deploy\n(OIDC auth)"
+github --> cfn_bedrock : "SAM Deploy\n(OIDC auth)"
+cfn_main --> trigger_fn
+cfn_main --> worker_fn
+cfn_main --> status_fn
+cfn_main --> sfn
+cfn_main --> dynamo_pipeline
+cfn_main --> dynamo_obs
+cfn_main --> s3_config
+cfn_main --> s3_artifacts
+cfn_bedrock --> bedrock_agents
+
+' Notes
+note right of worker_fn
+  <b>Worker Lambda VPC Configuration</b>
+  - Deployed in private subnets
+  - ENIs created for VPC connectivity
+  - Uses OrchestratorSecurityGroup
+  - Connects to RDS on TCP 5432
+  - SSL verify-full with RDS CA bundle
+end note
+
+note bottom of bedrock_agents
+  <b>Bedrock Agent Teams</b>
+  Visibility Team (7 agents):
+    director, strategist, writer-linkedin,
+    editor, designer, distribution, approve
+
+  Improvement Team (4 agents):
+    coach, strategist, advisor (+ supervisors)
+
+  Supervisor mode: SUPERVISOR_ROUTER
+  Models: Nova micro/lite/pro, Claude 3/3.5 Haiku
+end note
+
+note bottom of dynamo_pipeline
+  <b>Single-Table Design</b>
+  Partition patterns:
+  - RUN#{uuid} / META
+  - RUN#{uuid} / STEP#{step_id}
+  - TASK#{task_id} / TASK#{task_id}
+
+  GSI on (status, updatedAt)
+end note
+
+@enduml
