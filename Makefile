@@ -4,7 +4,8 @@
 	build-StatusFunction \
 	build-GeminiResearchFunction \
 	build-ProvisionTeamFunction \
-	build-OrchestratorFunction
+	build-OrchestratorFunction \
+	build-ObservatoryMetricsFunction
 
 package-lambda:
 	python -m pip install -r src/requirements.txt -t "$(ARTIFACTS_DIR)"
@@ -25,3 +26,5 @@ build-ProvisionTeamFunction: package-lambda
 
 # Backward-compatible alias for older templates.
 build-OrchestratorFunction: package-lambda
+
+build-ObservatoryMetricsFunction: package-lambda
