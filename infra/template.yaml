@@ -103,6 +103,10 @@ Parameters:
     Type: String
     Default: ""
     Description: Route table ID for private subnets. Required to associate S3 and DynamoDB Gateway VPC endpoints.
+  SiweAuthorizerFunctionArn:
+    Type: String
+    Default: "arn:aws:lambda:us-east-1:239571291755:function:siwe-authorizer-lambda-siwe-infra"
+    Description: ARN of the SIWE Lambda authorizer function exported from the siwe-infra CloudFormation stack (AuthorizerFunctionArn output).
 
 Conditions:
   HasAmpWorkspaceAlias: !Not [!Equals [!Ref AmpWorkspaceAlias, ""]]
@@ -1218,6 +1222,14 @@ Resources:
   # Once VPC endpoints are confirmed working in staging, this rule can be restricted
   # to the VPC CIDR for Interface endpoints (traffic stays within VPC).
 
+  SiweAuthorizerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SiweAuthorizerFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${TeamWeaveApi}/authorizers/*"
+
   TeamWeaveWAF:
     Type: AWS::WAFv2::WebACL
     Condition: DeployWAF
@@ -1269,6 +1281,14 @@ Resources:
       StageName: prod
       Auth:
         ApiKeyRequired: true
+        DefaultAuthorizer: SiweTokenAuthorizer
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          SiweTokenAuthorizer:
+            FunctionArn: !Ref SiweAuthorizerFunctionArn
+            FunctionPayloadType: TOKEN
+            Identity:
+              Header: Authorization
         UsagePlan:
           CreateUsagePlan: PER_API
           Quota:
@@ -1281,6 +1301,7 @@ Resources:
         AllowOrigin: !Ref AllowedCorsOrigin
         AllowHeaders: "'Content-Type,Authorization,x-api-key'"
         AllowMethods: "'OPTIONS,GET,POST,PUT,DELETE'"
+        AllowCredentials: false
 
 Outputs:
   HttpApiUrl:

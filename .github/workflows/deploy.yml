@@ -47,6 +47,15 @@ jobs:
           cd infra
           sam validate --lint
           aws cloudformation validate-template --template-body file://template.yaml
+      - name: Fetch siwe-infra outputs
+        run: |
+          SIWE_AUTHORIZER_FUNCTION_ARN=$(aws cloudformation describe-stacks \
+            --stack-name siwe-infra \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='AuthorizerFunctionArn'].OutputValue" \
+            --output text)
+          echo "SIWE_AUTHORIZER_FUNCTION_ARN=${SIWE_AUTHORIZER_FUNCTION_ARN}" >> $GITHUB_ENV
+
       - name: SAM Deploy
         run: |
           cd infra
@@ -62,7 +71,8 @@ jobs:
               "VectorDbTable=${VECTOR_DB_TABLE}" \
               "GeminiSecretArn=${GEMINI_SECRET_ARN}" \
               "SamDeployerRoleName=${SAM_DEPLOYER_ROLE_NAME}" \
-              "SamAssumeRoleName=${ASSUME_ROLE_NAME}"
+              "SamAssumeRoleName=${ASSUME_ROLE_NAME}" \
+              "SiweAuthorizerFunctionArn=${SIWE_AUTHORIZER_FUNCTION_ARN}"
       - name: Dump CloudFormation events on failure
         if: failure()
         run: |
