@@ -4,23 +4,32 @@ import subprocess
 
 def puml_to_png(puml_filename, extra_args=None):
     """
-    Converts a PlantUML file to a PNG image using a local plantuml.jar.
+    Converts a PlantUML file to a PNG image.
+
+    Prefers a local plantuml.jar (same directory as this script) because the
+    bundled AWSCommon.puml requires PlantUML >= 2024. Falls back to the system
+    `plantuml` command if the jar is not present.
+
+    Download the jar from: https://github.com/plantuml/plantuml/releases
 
     Args:
         puml_filename (str): The path to the input PlantUML (.puml) file.
-        extra_args (list): Optional extra arguments passed to plantuml (e.g. ["-DRELATIVE_INCLUDE=relative"]).
+        extra_args (list): Optional extra arguments (e.g. ["-DRELATIVE_INCLUDE=relative"]).
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     jar_path = os.path.join(script_dir, "plantuml.jar")
     out_dir = os.path.dirname(os.path.abspath(puml_filename))
 
-    cmd = ["java", "-jar", jar_path, "-tpng", "-o", out_dir] + (extra_args or []) + [puml_filename]
+    if os.path.exists(jar_path):
+        cmd = ["java", "-jar", jar_path, "-tpng", "-o", out_dir] + (extra_args or []) + [puml_filename]
+    else:
+        cmd = ["plantuml", "-tpng", "-o", out_dir] + (extra_args or []) + [puml_filename]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
-            print(f"Successfully generated PNG for: {os.path.basename(puml_filename)}")
+            print(f"OK: {os.path.basename(puml_filename)}")
         else:
-            print(f"An error occurred:\n{result.stderr}")
+            print(f"ERROR: {os.path.basename(puml_filename)}\n{result.stderr}")
     except Exception as e:
         print(f"An error occurred: {e}")
 

@@ -11,6 +11,24 @@ from .db import DbDao
 
 log = get_logger("rag")
 bedrock_runtime = boto3.client("bedrock-runtime")
+_secretsmanager = boto3.client("secretsmanager")
+_db_secret_cache: dict = {}
+
+
+def _get_db_secret() -> dict:
+    """Fetch VectorDB credentials from Secrets Manager (cached per Lambda container)."""
+    if _db_secret_cache:
+        return _db_secret_cache
+    arn = os.environ.get("VECTOR_DB_SECRET_ARN", "").strip()
+    if not arn:
+        return {}
+    try:
+        resp = _secretsmanager.get_secret_value(SecretId=arn)
+        secret = json.loads(resp.get("SecretString") or "{}")
+        _db_secret_cache.update(secret)
+    except Exception:
+        log.exception("vector_db_secret_fetch_failed", extra={"arn": arn})
+    return _db_secret_cache
 
 
 def _embed_text(text: str) -> Optional[List[float]]:
@@ -60,13 +78,14 @@ def _embedding_dimension(cur: psycopg.Cursor, table_name: str) -> Optional[int]:
     return int(row[0])
 
 def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> List[Dict[str, str]]:
+    secret = _get_db_secret()
     table_name = os.environ.get("VECTOR_DB_TABLE", "").strip()
-    db_url = os.environ.get("VECTOR_DB_URL", "").strip()
-    host = os.environ.get("VECTOR_DB_HOST", "").strip()
-    dbname = os.environ.get("VECTOR_DB_NAME", "").strip()
-    user = os.environ.get("VECTOR_DB_USER", "").strip()
-    password = os.environ.get("VECTOR_DB_PASSWORD", "").strip()
-    port = int(os.environ.get("VECTOR_DB_PORT", "5432"))
+    db_url = secret.get("url") or ""
+    host = secret.get("host") or os.environ.get("VECTOR_DB_HOST", "").strip()
+    dbname = secret.get("dbname") or os.environ.get("VECTOR_DB_NAME", "").strip()
+    user = secret.get("username") or os.environ.get("VECTOR_DB_USER", "").strip()
+    password = secret.get("password") or ""
+    port = int(secret.get("port") or os.environ.get("VECTOR_DB_PORT", "5432"))
     ssl_mode = os.environ.get("VECTOR_DB_SSLMODE", "verify-full").strip() or "verify-full"
     ssl_root_cert = os.environ.get("VECTOR_DB_SSL_ROOT_CERT", "/var/task/certs/rds-ca-bundle.pem").strip()
 
@@ -88,7 +107,7 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
     if not all([host, dbname, user, password]):
         log.warning(
             "vector_store_not_configured",
-            extra={"required": ["VECTOR_DB_HOST", "VECTOR_DB_NAME", "VECTOR_DB_USER", "VECTOR_DB_PASSWORD"]},
+            extra={"required": ["VECTOR_DB_SECRET_ARN (host/dbname/username/password)"]},
         )
         return []
 
