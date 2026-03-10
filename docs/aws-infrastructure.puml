@@ -1,7 +1,7 @@
 @startuml TeamWeave - AWS Infrastructure Diagram
 
 ' ─── AWSlib / Lucidchart-style AWS icons ──────────────────────────────────────
-!define AWSPuml https://raw.githubusercontent.com/awslabs/aws-icons-for-plantuml/v20.0/dist
+!define AWSPuml aws-plantuml-dist
 !include AWSPuml/AWSCommon.puml
 
 !include AWSPuml/Compute/Lambda.puml
@@ -9,7 +9,7 @@
 !include AWSPuml/ApplicationIntegration/StepFunctions.puml
 !include AWSPuml/Database/DynamoDB.puml
 !include AWSPuml/Database/RDS.puml
-!include AWSPuml/Storage/S3.puml
+!include AWSPuml/Storage/SimpleStorageService.puml
 !include AWSPuml/SecurityIdentityCompliance/SecretsManager.puml
 !include AWSPuml/SecurityIdentityCompliance/IdentityAccessManagementRole.puml
 !include AWSPuml/ManagementGovernance/CloudWatch.puml
@@ -93,8 +93,8 @@ package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD
     package "Data Layer" as data_layer #E0F2F1 {
         DynamoDB(dynamo_pipeline, "DynamoDB\nPipelineRunsTable", "pk: RUN#id / TASK#id\nsk: META / STEP#id / TASK#id\nGSI: status+updatedAt")
         DynamoDB(dynamo_obs, "DynamoDB\nObservatoryTable", "pk: OBSERVATORY#op\nsk: timestamp#trace_id\nTTL: 90 days")
-        S3(s3_config, "S3\nTeamConfig Bucket", "teams/{team}/{ver}/team.json\nJSON schemas")
-        S3(s3_artifacts, "S3\nArtifact Bucket", "runs/{run_id}/{step}.json\nStep output artifacts")
+        SimpleStorageService(s3_config, "S3\nTeamConfig Bucket", "teams/{team}/{ver}/team.json\nJSON schemas")
+        SimpleStorageService(s3_artifacts, "S3\nArtifact Bucket", "runs/{run_id}/{step}.json\nStep output artifacts")
     }
 
     ' ─── SECURITY ─────────────────────────────────────────────────────────────

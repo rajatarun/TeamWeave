@@ -31,3 +31,6 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# PlantUML
+docs/plantuml.jar
