@@ -2,6 +2,15 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Bedrock multi-agent teams + personal improvement tasks (config-driven)
 
+Metadata:
+  cfn-lint:
+    config:
+      # W3005: SAM auto-generates DependsOn for TeamWeaveApiUsagePlan and
+      # TeamWeaveApiUsagePlanKey that are redundant with Ref dependencies in
+      # their properties. These cannot be removed from the source template.
+      ignore_checks:
+        - W3005
+
 Parameters:
   ConfigBucketName:
     Type: String
@@ -85,10 +94,6 @@ Parameters:
     Type: String
     Default: "'https://tarunraja.info'"
     Description: "Allowed CORS origin for the API Gateway (e.g. 'https://app.example.com'). Use '*' for dev/local."
-  CognitoUserPoolArn:
-    Type: String
-    Default: ""
-    Description: Optional Cognito User Pool ARN for API Gateway authorization. If set, enables Cognito authorizer.
   EnableWAF:
     Type: String
     Default: "false"
@@ -111,7 +116,6 @@ Conditions:
     - !Not [!Equals [!Ref LambdaSubnetIds, ""]]
   HasSamDeployerRoleName: !Not [!Equals [!Ref SamDeployerRoleName, ""]]
   HasSamAssumeRoleName: !Not [!Equals [!Ref SamAssumeRoleName, ""]]
-  HasCognitoAuth: !Not [!Equals [!Ref CognitoUserPoolArn, ""]]
   DeployWAF: !Equals [!Ref EnableWAF, "true"]
   HasPrivateRouteTable: !And
     - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
