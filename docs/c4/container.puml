@@ -1,0 +1,91 @@
+@startuml TeamWeave - C4 Level 2: Container Diagram
+
+!define C4Container https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include C4Container
+
+LAYOUT_WITH_LEGEND()
+
+title TeamWeave — Container Diagram (C4 Level 2)
+
+' ─── External Actors ──────────────────────────────────────────────────────────
+Person(user, "End User", "Submits tasks and\npolls for results.")
+Person(admin, "Platform Admin", "Manages teams,\nagents, roles.")
+
+' ─── External Systems ─────────────────────────────────────────────────────────
+System_Ext(bedrock, "Amazon Bedrock", "AI agents + foundation models\n(Nova, Claude)")
+System_Ext(gemini_api, "Google Gemini API", "Web research &\ncontent augmentation")
+System_Ext(amp, "Amazon Managed\nPrometheus (AMP)", "Time-series metrics store")
+
+' ─── TeamWeave System Boundary ────────────────────────────────────────────────
+System_Boundary(tw, "TeamWeave (AWS Account: us-east-1)") {
+
+    ' API Layer
+    Container(apigw, "API Gateway", "AWS API Gateway (REST)", "Single entry point for all\nclient and admin HTTP requests.\nRoutes to Trigger or Status Lambda.")
+
+    ' Control Plane
+    Container(trigger, "Trigger Lambda", "Python 3.12 / AWS Lambda", "Validates requests.\nStarts async Step Functions executions.\nReturns run_id immediately.\nHandles CRUD operations.")
+
+    Container(status, "Status Lambda", "Python 3.12 / AWS Lambda", "Polls Step Functions\nexecution state.\nReturns result payload\nwhen SUCCEEDED.")
+
+    Container(provision, "Provision Lambda", "Python 3.12 / AWS Lambda", "Creates/updates Bedrock agents\nand aliases.\nSyncs team configs to S3.")
+
+    Container(sfn, "Step Functions\nState Machine", "AWS Step Functions (Standard)", "Async workflow coordinator.\nInvokes Worker Lambda per run.\nRoutes CRUD to Provision Lambda.\nManages retries and errors.")
+
+    ' Execution Plane
+    Container(worker, "Worker Lambda", "Python 3.12 / AWS Lambda\n(VPC-enabled)", "Pipeline execution engine.\nLoads team config from S3.\nRuns each workflow step:\n  - Fetches RAG context\n  - Builds agent prompts\n  - Invokes Bedrock agents\n  - Persists outputs.")
+
+    Container(gemini_lambda, "Gemini Research Lambda", "Python 3.12 / AWS Lambda", "Tool action for Bedrock agents.\nCalls Google Gemini 2.0 Flash\nfor web research.\nAPI key from Secrets Manager.")
+
+    Container(observatory, "Observatory Metrics Lambda", "Python 3.12 / AWS Lambda", "Exposes /observability/metrics.\nQueries AMP workspace for\nBedrock telemetry data.")
+
+    ' Data Stores
+    ContainerDb(dynamo, "DynamoDB\nContentPipelineRunsTable", "Amazon DynamoDB", "Single-table store for:\n- Run metadata (RUN#id/META)\n- Step records (RUN#id/STEP#id)\n- Improvement tasks (TASK#id)")
+
+    ContainerDb(dynamo_obs, "DynamoDB\nObservatoryMetricsTable", "Amazon DynamoDB", "Bedrock telemetry spans.\npk: OBSERVATORY#{operation}\nsk: {timestamp}#{trace_id}\nTTL: 90 days")
+
+    ContainerDb(s3_config, "S3 TeamConfig Bucket", "Amazon S3", "Team workflow definitions.\nPath: teams/{team}/{version}/team.json\nJSON schemas for output validation.")
+
+    ContainerDb(s3_artifacts, "S3 Artifact Bucket", "Amazon S3", "Step output artifacts.\nPath: runs/{run_id}/{step_id}.json")
+
+    ContainerDb(rds, "PostgreSQL + pgvector\n(RDS)", "Amazon RDS (VPC Private)", "Vector embeddings for RAG.\nTable: rag_chunks\nSSL verify-full.\nConnected via VPC private subnet.")
+
+    ContainerDb(secrets, "Secrets Manager", "AWS Secrets Manager", "Gemini API key storage.\nSecret: gemini/api_key")
+}
+
+' ─── Relationships: User / Admin → API ────────────────────────────────────────
+Rel(user, apigw, "POST /team/task\nGET /team/task/{id}\nGET /improve/tasks", "HTTPS")
+Rel(admin, apigw, "GET/POST/PUT/DELETE\n/agents, /teams,\n/roles, /departments", "HTTPS")
+
+' ─── API Gateway → Lambdas ────────────────────────────────────────────────────
+Rel(apigw, trigger, "Routes workflow\nand CRUD requests", "Lambda invoke")
+Rel(apigw, status, "Routes status\npoll requests", "Lambda invoke")
+Rel(apigw, observatory, "Routes metrics\nrequests", "Lambda invoke")
+
+' ─── Control Plane Flow ───────────────────────────────────────────────────────
+Rel(trigger, sfn, "Starts async execution\n(start_execution)", "AWS SDK")
+Rel(trigger, dynamo, "Writes RUN#id/META\n(status=RUNNING)", "AWS SDK")
+
+Rel(status, sfn, "Polls execution state\n(describe_execution)", "AWS SDK")
+
+Rel(sfn, worker, "Invokes (sync)\nfor pipeline runs", "Lambda invoke")
+Rel(sfn, provision, "Invokes (sync)\nfor CRUD operations", "Lambda invoke")
+
+' ─── Execution Plane Flow ─────────────────────────────────────────────────────
+Rel(worker, s3_config, "Loads team.json\nand schemas", "AWS SDK / S3 GetObject")
+Rel(worker, rds, "Queries vector embeddings\n(top-k similarity search)", "TCP 5432 / VPC SSL")
+Rel(worker, bedrock, "Invokes agents (streaming)\n(InvokeAgent API)", "AWS SDK / HTTPS")
+Rel(worker, dynamo, "Writes STEP records\nand final RUN result", "AWS SDK")
+Rel(worker, s3_artifacts, "Writes step artifact JSON", "AWS SDK / S3 PutObject")
+Rel(worker, dynamo_obs, "Writes telemetry spans\n(MCP Observatory)", "AWS SDK")
+Rel(worker, amp, "Pushes Prometheus metrics\n(remote_write, SigV4)", "HTTPS")
+
+Rel(bedrock, gemini_lambda, "Invokes as tool action\nfor research tasks", "Lambda invoke")
+Rel(gemini_lambda, gemini_api, "Performs web research", "HTTPS")
+Rel(gemini_lambda, secrets, "Retrieves Gemini API key", "AWS SDK")
+
+Rel(provision, s3_config, "Writes team.json\nconfigurations", "AWS SDK / S3 PutObject")
+Rel(provision, bedrock, "Creates/updates agents\nand aliases", "AWS SDK / HTTPS")
+
+Rel(observatory, amp, "Queries Prometheus metrics\n(PromQL)", "HTTPS")
+
+@enduml
