@@ -1,5 +1,10 @@
 import json
+import re
 from typing import Any
+
+# Control characters that are illegal in JSON strings (excludes \t 0x09, \n 0x0a, \r 0x0d
+# which are handled by explicit replacement below).
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
 def _normalize_json_text(raw_text: str) -> str:
@@ -7,6 +12,9 @@ def _normalize_json_text(raw_text: str) -> str:
     normalized = (raw_text or "").strip()
     if not normalized:
         return ""
+
+    # Strip raw ASCII control characters that are illegal inside JSON strings.
+    normalized = _CONTROL_CHARS_RE.sub("", normalized)
 
     # Remove markdown fences and normalize common escape artifacts.
     normalized = normalized.replace("```json", "").replace("```JSON", "").replace("```", "")
