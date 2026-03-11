@@ -5,7 +5,13 @@ Description: Bedrock multi-agent teams + personal improvement tasks (config-driv
 Metadata:
   cfn-lint:
     config:
-      ignore_checks: []
+      ignore_checks:
+        # W3660: CorsGatewayResponseDefault4XX and CorsGatewayResponseDefault5XX are
+        # intentionally separate AWS::ApiGateway::GatewayResponse resources. They add
+        # CORS headers to gateway-level error responses (auth failures, WAF blocks,
+        # throttling) that the inline Cors setting on TeamWeaveApi does not cover.
+        # These resources are complementary to the API Body, not conflicting with it.
+        - W3660
 
 Parameters:
   ConfigBucketName:
