@@ -1297,8 +1297,33 @@ Resources:
       ResponseType: DEFAULT_5XX
       RestApiId: !Ref TeamWeaveApi
 
+  ApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayCloudWatchRole.Arn
+
+  ApiGatewayAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/${AWS::StackName}/access-logs"
+      RetentionInDays: 30
+
   TeamWeaveApi:
     Type: AWS::Serverless::Api
+    DependsOn: ApiGatewayAccount
     Properties:
       StageName: prod
       Auth:
@@ -1318,6 +1343,15 @@ Resources:
         AllowOrigin: !Ref AllowedCorsOrigin
         AllowHeaders: "'Content-Type,Authorization,x-api-key'"
         AllowMethods: "'OPTIONS,GET,POST,PUT,DELETE'"
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiGatewayAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationLatency":"$context.integrationLatency","responseLatency":"$context.responseLatency"}'
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          LoggingLevel: INFO
+          DataTraceEnabled: false
+          MetricsEnabled: true
 
 Outputs:
   HttpApiUrl:
@@ -1356,3 +1390,6 @@ Outputs:
   TeamWeaveWAFArn:
     Condition: DeployWAF
     Value: !GetAtt TeamWeaveWAF.Arn
+  ApiGatewayAccessLogGroupArn:
+    Value: !GetAtt ApiGatewayAccessLogGroup.Arn
+    Description: CloudWatch Log Group ARN for API Gateway access logs
