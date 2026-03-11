@@ -5,11 +5,7 @@ Description: Bedrock multi-agent teams + personal improvement tasks (config-driv
 Metadata:
   cfn-lint:
     config:
-      # W3005: SAM auto-generates DependsOn for TeamWeaveApiUsagePlan and
-      # TeamWeaveApiUsagePlanKey that are redundant with Ref dependencies in
-      # their properties. These cannot be removed from the source template.
-      ignore_checks:
-        - W3005
+      ignore_checks: []
 
 Parameters:
   ConfigBucketName:
@@ -103,6 +99,10 @@ Parameters:
     Type: String
     Default: ""
     Description: Route table ID for private subnets. Required to associate S3 and DynamoDB Gateway VPC endpoints.
+  SiweAuthorizerFunctionArn:
+    Type: String
+    Default: ""
+    Description: ARN of the SIWE Lambda authorizer function exported from the siwe-infra CloudFormation stack (AuthorizerFunctionArn output).
 
 Conditions:
   HasAmpWorkspaceAlias: !Not [!Equals [!Ref AmpWorkspaceAlias, ""]]
@@ -120,6 +120,7 @@ Conditions:
   HasPrivateRouteTable: !And
     - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
     - !Not [!Equals [!Ref VpcId, ""]]
+  HasSiweAuthorizer: !Not [!Equals [!Ref SiweAuthorizerFunctionArn, ""]]
 
 Globals:
   Function:
@@ -1218,6 +1219,15 @@ Resources:
   # Once VPC endpoints are confirmed working in staging, this rule can be restricted
   # to the VPC CIDR for Interface endpoints (traffic stays within VPC).
 
+  SiweAuthorizerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasSiweAuthorizer
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SiweAuthorizerFunctionArn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${TeamWeaveApi}/authorizers/*"
+
   TeamWeaveWAF:
     Type: AWS::WAFv2::WebACL
     Condition: DeployWAF
@@ -1268,15 +1278,18 @@ Resources:
     Properties:
       StageName: prod
       Auth:
-        ApiKeyRequired: true
-        UsagePlan:
-          CreateUsagePlan: PER_API
-          Quota:
-            Limit: 10000
-            Period: DAY
-          Throttle:
-            BurstLimit: 100
-            RateLimit: 50
+        DefaultAuthorizer: SiweAuthorizer
+        # Allow OPTIONS preflight requests to pass through without invoking the authorizer.
+        # Without this, browsers' CORS preflight requests are rejected with 401 before
+        # reaching the Lambda, breaking all cross-origin calls.
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          SiweAuthorizer:
+            FunctionArn: !Ref SiweAuthorizerFunctionArn
+            FunctionPayloadType: TOKEN
+            Identity:
+              Header: Authorization
+              ReauthorizeEvery: 300
       Cors:
         AllowOrigin: !Ref AllowedCorsOrigin
         AllowHeaders: "'Content-Type,Authorization,x-api-key'"
