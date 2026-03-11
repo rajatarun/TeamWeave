@@ -1273,6 +1273,30 @@ Resources:
       ResourceArn: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${TeamWeaveApi}/stages/prod"
       WebACLArn: !GetAtt TeamWeaveWAF.Arn
 
+  # GatewayResponse resources add CORS headers to 4xx/5xx responses that API Gateway
+  # generates itself (e.g. 401 from the Lambda authorizer, 403 WAF block, 429 throttle).
+  # Without these, auth failures return no Access-Control-Allow-Origin header and
+  # browsers report the error as a CORS failure, masking the real cause.
+  CorsGatewayResponseDefault4XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: !Ref AllowedCorsOrigin
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,x-api-key'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
+      ResponseType: DEFAULT_4XX
+      RestApiId: !Ref TeamWeaveApi
+
+  CorsGatewayResponseDefault5XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: !Ref AllowedCorsOrigin
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,x-api-key'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,GET,POST,PUT,DELETE'"
+      ResponseType: DEFAULT_5XX
+      RestApiId: !Ref TeamWeaveApi
+
   TeamWeaveApi:
     Type: AWS::Serverless::Api
     Properties:
