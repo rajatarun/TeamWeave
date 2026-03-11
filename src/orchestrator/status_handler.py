@@ -13,8 +13,8 @@ def _cors() -> Dict[str, str]:
     return {
         "content-type": "application/json",
         "access-control-allow-origin": "*",
-        "access-control-allow-headers": "content-type",
-        "access-control-allow-methods": "POST,GET,OPTIONS",
+        "access-control-allow-headers": "Content-Type,Authorization",
+        "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
     }
 
 

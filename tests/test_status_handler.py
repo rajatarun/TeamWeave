@@ -38,7 +38,7 @@ class StatusHandlerTests(unittest.TestCase):
 
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(response["body"], "")
-        self.assertEqual(response["headers"]["access-control-allow-methods"], "POST,GET,OPTIONS")
+        self.assertEqual(response["headers"]["access-control-allow-methods"], "OPTIONS,GET,POST,PUT,DELETE")
 
     def test_get_status_accepts_execution_arn_directly(self):
         response = self.status_handler.handler(
