@@ -48,6 +48,7 @@ def load_team_config(team: str, version: str) -> Tuple[TeamConfig, Dict[str, Any
             ),
             goal_template=a.get("goal_template",""),
             schema_ref=a.get("schema_ref",""),
+            role=a.get("agentRole", a.get("role", "")),
         ))
 
     tc = TeamConfig(

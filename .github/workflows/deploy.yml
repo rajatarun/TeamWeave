@@ -36,6 +36,14 @@ jobs:
       - name: Setup SAM
         uses: aws-actions/setup-sam@v2
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate team config (bootstrap format)
+        run: python scripts/validate_team_config.py
+
       - name: SAM Build
         run: |
           cd infra

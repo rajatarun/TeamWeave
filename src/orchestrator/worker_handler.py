@@ -22,6 +22,15 @@ from .structured_transform import transform_json_to_schema
 log = get_logger("worker_handler")
 lambda_client = boto3.client("lambda")
 
+REFUSAL_PHRASES = [
+    "I'm not able to",
+    "I cannot",
+    "I don't think I should",
+    "I must decline",
+    "I'm unable to",
+    "This request",
+]
+
 
 # ASSUMPTION: The Step Functions execution input preserves the existing POST body contract:
 # {"team": "...", "version": "...", "request": {...}}.
@@ -226,6 +235,15 @@ def run_team_pipeline(
             agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt,
             shadow_alias_id=shadow_alias_id,
         )
+
+        if any(phrase in raw_text for phrase in REFUSAL_PHRASES):
+            log.warning(
+                "agent_refusal_detected step=%s run_id=%s raw=%s",
+                step_id,
+                run_id,
+                raw_text[:400],
+            )
+            raise StepFailed(step_id, f"Agent refusal detected for step '{step_id}': {raw_text[:200]}")
 
         try:
             out_json = extract_json_payload(raw_text)

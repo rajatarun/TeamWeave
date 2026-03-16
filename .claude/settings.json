@@ -1,0 +1,49 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sam build)",
+      "Bash(sam deploy*)",
+      "Bash(sam logs*)",
+      "Bash(aws s3*)",
+      "Bash(aws bedrock*)",
+      "Bash(aws stepfunctions*)",
+      "Bash(aws cloudformation*)",
+      "Bash(python scripts/*)",
+      "Bash(python -m pytest*)",
+      "Bash(pip install*)"
+    ],
+    "deny": [
+      "Bash(aws iam delete*)",
+      "Bash(aws s3 rb*)",
+      "Bash(aws cloudformation delete-stack*)",
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(samconfig.toml)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [[ \"$CLAUDE_FILE_PATHS\" =~ \\.py$ ]]; then python -m py_compile $CLAUDE_FILE_PATHS && echo '✅ syntax ok' || echo '❌ syntax error'; fi",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash(sam deploy*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"block\": false, \"feedback\": \"Remember: sam deploy requires --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM on first deploy\"}'"
+          }
+        ]
+      }
+    ]
+  }
+}
