@@ -1,0 +1,32 @@
+{
+  "teamId": "content-team",
+  "description": "Multi-agent content generation pipeline (simple/bootstrap format)",
+  "agents": [
+    {
+      "agentId": "TODO_BEDROCK_AGENT_ID",
+      "agentAliasId": "TODO_AGENT_ALIAS_ID",
+      "agentRole": "supervisor",
+      "model": "amazon.nova-premier-v1:0",
+      "description": "Supervisor: plans content strategy, routes to writers"
+    },
+    {
+      "agentId": "TODO_BEDROCK_AGENT_ID_2",
+      "agentAliasId": "TODO_AGENT_ALIAS_ID_2",
+      "agentRole": "linkedin_writer",
+      "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+      "description": "Writes LinkedIn posts from supervisor brief"
+    },
+    {
+      "agentId": "TODO_BEDROCK_AGENT_ID_3",
+      "agentAliasId": "TODO_AGENT_ALIAS_ID_3",
+      "agentRole": "research_analyst",
+      "model": "amazon.nova-pro-v1:0",
+      "description": "Researches topic, returns structured brief"
+    }
+  ],
+  "guardrail": {
+    "guardrailId": "TODO_GUARDRAIL_ID",
+    "guardrailVersion": "DRAFT"
+  },
+  "outputBucket": "TODO_RUNS_BUCKET_NAME"
+}

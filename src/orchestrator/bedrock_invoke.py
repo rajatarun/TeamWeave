@@ -10,6 +10,18 @@ from .logger import get_logger
 from .mcp_observatory import observe_agent_request
 from .models import StepFailed
 
+# mcp-observatory stub: gracefully degrade if external package is not installed.
+# The local .mcp_observatory module (above) is the primary implementation;
+# this stub enables the @trace decorator pattern for future direct use.
+try:
+    from mcp_observatory import trace  # type: ignore[import]
+    OBSERVATORY_ENABLED = True
+except ImportError:
+    OBSERVATORY_ENABLED = False
+
+    def trace(fn):  # type: ignore[misc]
+        return fn
+
 log = get_logger("bedrock_invoke")
 brt = boto3.client(
     "bedrock-agent-runtime",
@@ -19,7 +31,16 @@ brt = boto3.client(
         retries={"max_attempts": 0},
     ),
 )
-def invoke_agent(agent_id: str, alias_id: str, session_id: str, input_text: str, max_retries: int = 2, shadow_alias_id: Optional[str] = None) -> str:
+def invoke_agent(
+    agent_id: str,
+    alias_id: str,
+    session_id: str,
+    input_text: str,
+    max_retries: int = 2,
+    shadow_alias_id: Optional[str] = None,
+    guardrail_id: Optional[str] = None,
+    guardrail_version: Optional[str] = None,
+) -> str:
     if not agent_id or not alias_id:
         raise StepFailed("invoke_agent", "Missing agentId/aliasId in config")
 
@@ -43,6 +64,8 @@ def invoke_agent(agent_id: str, alias_id: str, session_id: str, input_text: str,
                 session_id=session_id,
                 input_text=input_text,
                 shadow_alias_id=shadow_alias_id,
+                guardrail_id=guardrail_id,
+                guardrail_version=guardrail_version,
             )
 
             guardrail_action = resp.get("amazon-bedrock-guardrailAction")

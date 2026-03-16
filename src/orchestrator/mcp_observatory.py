@@ -117,6 +117,8 @@ def observe_agent_request(
     session_id: str,
     input_text: str,
     shadow_alias_id: Optional[str] = None,
+    guardrail_id: Optional[str] = None,
+    guardrail_version: Optional[str] = None,
 ) -> dict:
     """Invoke a Bedrock agent through the mcp-observatory wrapper.
 
@@ -135,6 +137,8 @@ def observe_agent_request(
             alias_id=_sid,
             session_id=session_id,
             input_text=input_text,
+            guardrail_id=guardrail_id,
+            guardrail_version=guardrail_version,
         )
 
     result = asyncio.run(
@@ -153,6 +157,8 @@ def observe_agent_request(
                 alias_id=alias_id,
                 session_id=session_id,
                 input_text=input_text,
+                guardrail_id=guardrail_id,
+                guardrail_version=guardrail_version,
             ),
             dual_invoke=has_shadow,
             shadow_source="agent" if has_shadow else None,

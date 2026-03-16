@@ -16,6 +16,7 @@ class AgentConfig:
     bedrock: BedrockRef
     goal_template: str
     schema_ref: str
+    role: str = ""  # "supervisor" identifies the pipeline orchestrator; all others are workers
 
 @dataclass
 class TeamGlobals:
