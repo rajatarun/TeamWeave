@@ -39,7 +39,8 @@ jobs:
       - name: Push docs to expertise RAG artifacts
         run: |
           REPO_NAME="${GITHUB_REPOSITORY##*/}"
-          find . \( -name "*.md" -o -name "*.puml" \) | while read -r file; do
+          find . \( -name "*.md" -o -name "*.puml" \) \
+            -not -path "*-assets/*" | while read -r file; do
             aws s3 cp "$file" "s3://expertise-rag-artifacts-239571291755-prod/raw/${REPO_NAME}/${file#./}"
           done
 
