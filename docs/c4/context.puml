@@ -1,6 +1,6 @@
 @startuml TeamWeave - C4 Level 1: System Context
 
-!include c4-plantuml-dist/C4_Context.puml
+!include ../assets/c4-plantuml/C4_Context.puml
 
 LAYOUT_WITH_LEGEND()
 LAYOUT_TOP_DOWN()
