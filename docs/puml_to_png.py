@@ -37,10 +37,10 @@ def puml_to_png(puml_filename, extra_args=None):
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # AWS infrastructure diagram (uses local aws-plantuml-dist/)
+    # AWS infrastructure diagram (uses local assets/aws-plantuml/)
     puml_to_png(os.path.join(script_dir, "aws-infrastructure.puml"))
 
-    # C4 diagrams (use -DRELATIVE_INCLUDE so C4-PlantUML picks up local c4-plantuml-dist/)
+    # C4 diagrams (use -DRELATIVE_INCLUDE so C4-PlantUML picks up assets/c4-plantuml/)
     c4_dir = os.path.join(script_dir, "c4")
     for name in ("context.puml", "container.puml", "component.puml"):
         puml_to_png(os.path.join(c4_dir, name), extra_args=["-DRELATIVE_INCLUDE=relative"])
