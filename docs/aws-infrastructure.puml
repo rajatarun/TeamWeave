@@ -1,7 +1,7 @@
 @startuml TeamWeave - AWS Infrastructure Diagram
 
 ' ─── AWSlib / Lucidchart-style AWS icons ──────────────────────────────────────
-!define AWSPuml aws-plantuml-assets
+!define AWSPuml assets/aws-plantuml
 !include AWSPuml/AWSCommon.puml
 
 !include AWSPuml/Compute/Lambda.puml
