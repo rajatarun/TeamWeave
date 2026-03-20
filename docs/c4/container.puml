@@ -1,6 +1,6 @@
 @startuml TeamWeave - C4 Level 2: Container Diagram
 
-!include c4-plantuml-dist/C4_Container.puml
+!include c4-plantuml-assets/C4_Container.puml
 
 LAYOUT_WITH_LEGEND()
 
