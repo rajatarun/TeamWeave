@@ -105,6 +105,14 @@ Parameters:
     Type: String
     Default: ""
     Description: Route table ID for private subnets. Required to associate S3 and DynamoDB Gateway VPC endpoints.
+  EgressOnlyInternetGatewayId:
+    Type: String
+    Default: ""
+    Description: >
+      Egress-Only Internet Gateway ID attached to the VPC. When provided together with
+      PrivateRouteTableId, a ::/0 IPv6 route is added so Lambda can reach AWS public
+      endpoints (Bedrock, Secrets Manager, AMP) via IPv6 instead of a NAT Gateway,
+      eliminating NAT data-processing charges for those calls.
   SiweAuthorizerFunctionArn:
     Type: String
     Default: ""
@@ -126,6 +134,11 @@ Conditions:
   HasPrivateRouteTable: !And
     - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
     - !Not [!Equals [!Ref VpcId, ""]]
+  HasEigw: !Not [!Equals [!Ref EgressOnlyInternetGatewayId, ""]]
+  HasPrivateRouteTableAndEigw: !And
+    - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
+    - !Not [!Equals [!Ref VpcId, ""]]
+    - !Not [!Equals [!Ref EgressOnlyInternetGatewayId, ""]]
   HasSiweAuthorizer: !Not [!Equals [!Ref SiweAuthorizerFunctionArn, ""]]
 
 Globals:
@@ -671,6 +684,8 @@ Resources:
       CodeUri: ../
       Handler: src/orchestrator/trigger_handler.handler
       Role: !GetAtt TriggerRole.Arn
+      Architectures:
+        - arm64
       MemorySize: 512
       Timeout: 60
       Events:
@@ -874,6 +889,8 @@ Resources:
       CodeUri: ../
       Handler: src/orchestrator/worker_handler.handler
       Role: !GetAtt WorkerRole.Arn
+      Architectures:
+        - arm64
       MemorySize: 1024
       Timeout: 300
       Environment:
@@ -942,6 +959,8 @@ Resources:
       CodeUri: ../
       Handler: config/examples/gemini_lambda.handler
       Role: !GetAtt GeminiResearchRole.Arn
+      Architectures:
+        - arm64
       MemorySize: 512
       Timeout: 60
       Environment:
@@ -966,6 +985,8 @@ Resources:
       CodeUri: ../
       Handler: src/orchestrator/observatory_handler.handler
       Role: !GetAtt ObservatoryRole.Arn
+      Architectures:
+        - arm64
       MemorySize: 256
       Timeout: 30
       Environment:
@@ -989,6 +1010,8 @@ Resources:
       CodeUri: ../
       Handler: src/orchestrator/status_handler.handler
       Role: !GetAtt StatusRole.Arn
+      Architectures:
+        - arm64
       MemorySize: 256
       Timeout: 30
       Environment:
@@ -1026,6 +1049,8 @@ Resources:
       CodeUri: ../
       Handler: config/examples/lambda_handler.handler
       Role: !GetAtt ProvisionTeamRole.Arn
+      Architectures:
+        - arm64
       MemorySize: 512
       Timeout: 120
       Environment:
@@ -1167,6 +1192,29 @@ Resources:
       ToPort: 443
       CidrIp: "0.0.0.0/0"
 
+  # IPv6 egress: Lambda → AWS public endpoints via EIGW (no NAT Gateway required).
+  # Covers Bedrock, Secrets Manager, AMP, and other dual-stack AWS services.
+  OrchestratorToAwsServicesEgressIPv6443:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: HasVpcConfig
+    Properties:
+      GroupId: !Ref OrchestratorSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIpv6: "::/0"
+
+  # Route ::/0 IPv6 traffic to the Egress-Only Internet Gateway so Lambda ENIs
+  # in the dual-stack private subnet can reach AWS public APIs without a NAT Gateway.
+  # EIGW is stateful and blocks all unsolicited inbound connections.
+  Ipv6RouteToEigw:
+    Type: AWS::EC2::Route
+    Condition: HasPrivateRouteTableAndEigw
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableId
+      DestinationIpv6CidrBlock: "::/0"
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyInternetGatewayId
+
   RdsIngressFromOrchestrator5432:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: HasVpcConfig
@@ -1197,33 +1245,12 @@ Resources:
       RouteTableIds:
         - !Ref PrivateRouteTableId
 
-  BedrockRuntimeVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasVpcConfig
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-runtime"
-      VpcEndpointType: Interface
-      SubnetIds: !Split [",", !Ref LambdaSubnetIds]
-      SecurityGroupIds:
-        - !Ref OrchestratorSecurityGroup
-      PrivateDnsEnabled: true
-
-  BedrockAgentRuntimeVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasVpcConfig
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-agent-runtime"
-      VpcEndpointType: Interface
-      SubnetIds: !Split [",", !Ref LambdaSubnetIds]
-      SecurityGroupIds:
-        - !Ref OrchestratorSecurityGroup
-      PrivateDnsEnabled: true
-
-  # NOTE: OrchestratorToAwsServicesEgress443 retains 0.0.0.0/0 egress as fallback.
-  # Once VPC endpoints are confirmed working in staging, this rule can be restricted
-  # to the VPC CIDR for Interface endpoints (traffic stays within VPC).
+  # NOTE: Bedrock Interface VPC endpoints removed for cost savings (~$14-21/month).
+  # Bedrock Runtime and Bedrock Agent Runtime traffic routes via IPv6 EIGW (dual-stack
+  # subnets) at no data-processing cost. The OrchestratorToAwsServicesEgress443 rule
+  # (0.0.0.0/0 IPv4) provides fallback for any non-dual-stack paths.
+  # Gateway endpoints (S3, DynamoDB) are retained — they are free and keep that
+  # traffic within the AWS network.
 
   SiweAuthorizerInvokePermission:
     Type: AWS::Lambda::Permission
@@ -1399,3 +1426,6 @@ Outputs:
   ApiGatewayAccessLogGroupArn:
     Value: !GetAtt ApiGatewayAccessLogGroup.Arn
     Description: CloudWatch Log Group ARN for API Gateway access logs
+  Ipv6EgressEnabled:
+    Value: !If [HasPrivateRouteTableAndEigw, "true", "false"]
+    Description: Whether a ::/0 IPv6 route to the Egress-Only Internet Gateway is active (dual-stack cost saving mode)
