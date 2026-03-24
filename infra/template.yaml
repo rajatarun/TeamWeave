@@ -134,7 +134,6 @@ Conditions:
   HasPrivateRouteTable: !And
     - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
     - !Not [!Equals [!Ref VpcId, ""]]
-  HasEigw: !Not [!Equals [!Ref EgressOnlyInternetGatewayId, ""]]
   HasPrivateRouteTableAndEigw: !And
     - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
     - !Not [!Equals [!Ref VpcId, ""]]
