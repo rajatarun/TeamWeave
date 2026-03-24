@@ -1245,35 +1245,12 @@ Resources:
       RouteTableIds:
         - !Ref PrivateRouteTableId
 
-  BedrockRuntimeVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasVpcConfig
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-runtime"
-      VpcEndpointType: Interface
-      SubnetIds: !Split [",", !Ref LambdaSubnetIds]
-      SecurityGroupIds:
-        - !Ref OrchestratorSecurityGroup
-      PrivateDnsEnabled: true
-
-  BedrockAgentRuntimeVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasVpcConfig
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-agent-runtime"
-      VpcEndpointType: Interface
-      SubnetIds: !Split [",", !Ref LambdaSubnetIds]
-      SecurityGroupIds:
-        - !Ref OrchestratorSecurityGroup
-      PrivateDnsEnabled: true
-
-  # NOTE: OrchestratorToAwsServicesEgress443 retains 0.0.0.0/0 (IPv4) egress as fallback
-  # for any AWS services that are not yet dual-stack or reachable via Interface endpoints.
-  # With dual-stack subnets + EIGW, Lambda ENIs use their IPv6 address to reach
-  # dual-stack AWS public endpoints (Bedrock, Secrets Manager, AMP) at no NAT cost.
-  # Once VPC endpoints are confirmed in staging, the IPv4 0.0.0.0/0 rule can be tightened.
+  # NOTE: Bedrock Interface VPC endpoints removed for cost savings (~$14-21/month).
+  # Bedrock Runtime and Bedrock Agent Runtime traffic routes via IPv6 EIGW (dual-stack
+  # subnets) at no data-processing cost. The OrchestratorToAwsServicesEgress443 rule
+  # (0.0.0.0/0 IPv4) provides fallback for any non-dual-stack paths.
+  # Gateway endpoints (S3, DynamoDB) are retained — they are free and keep that
+  # traffic within the AWS network.
 
   SiweAuthorizerInvokePermission:
     Type: AWS::Lambda::Permission
