@@ -1,0 +1,129 @@
+{
+  "team": {
+    "name": "doc_rewrite_team",
+    "version": "v1",
+    "owner": ""
+  },
+  "globals": {
+    "north_star": "Rewrite a document so every paragraph precisely matches the target job description while preserving the original structure, factual accuracy, and professional format.",
+    "default_channel": "other",
+    "hard_constraints": [
+      "Preserve all factual claims from the original document — do not fabricate experience, skills, or achievements.",
+      "Maintain the original section structure and order.",
+      "Align language, keywords, and tone with the job description.",
+      "Do not remove sections — rewrite them to be more relevant.",
+      "Output valid JSON only. No markdown fences."
+    ],
+    "features": {
+      "gemini_research": false,
+      "explicit_rag": false
+    },
+    "rag": {
+      "mode": "none"
+    },
+    "artifact_store": {
+      "artifact_bucket_env": "ARTIFACT_BUCKET",
+      "dynamo_table_env": "DDB_TABLE"
+    },
+    "revision": {
+      "enabled": false
+    }
+  },
+  "agents": [
+    {
+      "id": "analyzer",
+      "name": "Document Analyzer",
+      "role_id": "DRT-001",
+      "department_id": "DDEPT-001",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
+      },
+      "goal_template": "You are an expert document analyst. You will receive a parsed document (sections with headers and content) and a job description under STEP_INPUTS_JSON.\n\nYour task:\n1. Read each section of the document.\n2. Compare it against the job description requirements, keywords, and desired skills.\n3. For each section, decide if it needs rewriting and provide clear, actionable rewrite_instructions.\n4. Identify specific keywords from the job description that should be woven into each section.\n5. State an overall_strategy summarising how to best align the document to the job.\n\nOutput a doc_analysis JSON object with the schema provided. Be concise and precise in your instructions.",
+      "schema_ref": "doc_analysis_v1"
+    },
+    {
+      "id": "rewriter",
+      "name": "Paragraph Rewriter",
+      "role_id": "DRT-002",
+      "department_id": "DDEPT-001",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
+      },
+      "goal_template": "You are an expert document rewriter specialising in tailoring documents to job descriptions.\n\nYou will receive under STEP_INPUTS_JSON:\n- analyzer: the document analysis with per-section rewrite instructions\n- tool_results.parse_document: the original parsed sections (header + content)\n- request.job_description: the target job description\n\nYour task:\nFor every section in the original document, produce a rewritten version that:\n- Incorporates the keywords_to_add identified by the analyzer\n- Follows the rewrite_instructions exactly\n- Preserves all factual claims (do not fabricate)\n- Keeps the same approximate length as the original\n\nOutput a rewritten_sections JSON object containing every section, even those that did not need major changes.",
+      "schema_ref": "rewritten_sections_v1"
+    },
+    {
+      "id": "formatter",
+      "name": "Document Formatter",
+      "role_id": "DRT-003",
+      "department_id": "DDEPT-001",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
+      },
+      "goal_template": "You are an expert document formatter.\n\nYou will receive under STEP_INPUTS_JSON:\n- rewriter: the rewritten sections array\n- analyzer: the original analysis including overall_strategy\n\nYour task:\n1. Take all rewritten sections and assemble them into a final_document.\n2. Ensure consistent tone and smooth transitions between sections.\n3. Apply any last polish — remove redundant phrases, ensure professional presentation.\n4. For each section include: index, header, and final content.\n5. Provide a brief summary_of_changes describing what was changed and why.\n\nThe post-processing pipeline will reconstruct the full document text from your sections array, so make sure every section has a non-empty content field.\n\nOutput a final_document JSON object.",
+      "schema_ref": "final_document_v1"
+    }
+  ],
+  "workflow": [
+    {
+      "step": "analyzer",
+      "pre_tools": [
+        {
+          "name": "parse_document",
+          "args": {
+            "source_key": "request.document_text"
+          }
+        }
+      ],
+      "inputs": ["request"]
+    },
+    {
+      "step": "rewriter",
+      "inputs": ["analyzer", "request"]
+    },
+    {
+      "step": "formatter",
+      "post_tools": [
+        {
+          "name": "reconstruct_document",
+          "args": {
+            "source_key": "formatter"
+          }
+        }
+      ],
+      "inputs": ["rewriter", "analyzer"]
+    }
+  ],
+  "schemas": {
+    "doc_analysis_v1": {
+      "path": "config/examples/schemas/doc_analysis_v1.json"
+    },
+    "rewritten_sections_v1": {
+      "path": "config/examples/schemas/rewritten_sections_v1.json"
+    },
+    "final_document_v1": {
+      "path": "config/examples/schemas/final_document_v1.json"
+    }
+  }
+}
