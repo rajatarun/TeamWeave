@@ -18,6 +18,7 @@ from .prompt_builder import build_prompt
 from .rag import get_rag_context
 from .storage import save_artifact
 from .structured_transform import transform_json_to_schema
+from .tool_registry import execute_post_tools, execute_pre_tools
 
 log = get_logger("worker_handler")
 lambda_client = boto3.client("lambda")
@@ -200,6 +201,9 @@ def run_team_pipeline(
             supervisor_brief,
         )
 
+        # ── Pre-tools — run before agent, inject results into step context ──
+        step_inputs = execute_pre_tools(step_def, step_inputs)
+
         prompt = build_prompt(
             team_cfg,
             agent,
@@ -261,6 +265,9 @@ def run_team_pipeline(
                     agent.schema_ref,
                 )
                 out_json = _build_transform_fallback(raw_text, transform_error)
+
+        # ── Post-tools — enrich/transform agent output after schema coercion ─
+        out_json = execute_post_tools(step_def, out_json, step_inputs)
 
         artifact_uri = save_artifact(run_id, step_id, out_json)
         dao.put_step(

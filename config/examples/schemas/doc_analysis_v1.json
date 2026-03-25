@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DocAnalysisV1",
+  "description": "Analysis produced by the Document Analyzer agent — per-section rewrite instructions aligned to a job description.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "document_title": {
+      "type": "string",
+      "description": "Inferred title or name of the document (e.g. candidate name for a CV)."
+    },
+    "job_title": {
+      "type": "string",
+      "description": "Target job title extracted from the job description."
+    },
+    "overall_strategy": {
+      "type": "string",
+      "description": "High-level strategy for aligning the document to the job description."
+    },
+    "sections": {
+      "type": "array",
+      "description": "Per-section analysis and rewrite instructions.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "type": "integer",
+            "description": "Zero-based section index matching the parsed document order."
+          },
+          "header": {
+            "type": "string",
+            "description": "Section header label."
+          },
+          "needs_rewrite": {
+            "type": "boolean",
+            "description": "Whether this section requires substantive rewriting."
+          },
+          "rewrite_instructions": {
+            "type": "string",
+            "description": "Specific, actionable instructions for rewriting this section."
+          },
+          "keywords_to_add": {
+            "type": "array",
+            "description": "Keywords and phrases from the job description to incorporate.",
+            "items": {"type": "string"}
+          }
+        },
+        "required": ["index", "header", "needs_rewrite", "rewrite_instructions"]
+      }
+    }
+  },
+  "required": ["overall_strategy", "sections"]
+}
