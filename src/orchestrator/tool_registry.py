@@ -31,6 +31,14 @@ output is enriched before artifact persistence.
 from typing import Any, Callable, Dict, List
 
 from .logger import get_logger
+from .tools.content_tools import (
+    analyse_draft_quality,
+    compute_optimal_post_time,
+    extract_topic_keywords,
+    format_approval_decision,
+    format_distribution_checklist,
+    measure_post_quality,
+)
 from .tools.document_tools import parse_document, reconstruct_document
 
 log = get_logger("tool_registry")
@@ -40,8 +48,16 @@ log = get_logger("tool_registry")
 # ---------------------------------------------------------------------------
 
 TOOL_REGISTRY: Dict[str, Callable[..., Any]] = {
+    # Document rewrite tools
     "parse_document": parse_document,
     "reconstruct_document": reconstruct_document,
+    # Visibility team content tools
+    "extract_topic_keywords": extract_topic_keywords,
+    "analyse_draft_quality": analyse_draft_quality,
+    "compute_optimal_post_time": compute_optimal_post_time,
+    "measure_post_quality": measure_post_quality,
+    "format_distribution_checklist": format_distribution_checklist,
+    "format_approval_decision": format_approval_decision,
 }
 
 
@@ -57,38 +73,53 @@ def register_tool(name: str, fn: Callable[..., Any]) -> None:
 
 def _resolve_source_key(source_key: str, step_inputs: Dict[str, Any]) -> Any:
     """
-    Resolve a dotted path like ``"request.document_text"`` against step_inputs.
+    Resolve a dotted path against step_inputs, traversing arbitrarily deep.
 
     Examples:
-      "request.document_text" → step_inputs["request"]["document_text"]
-      "formatter"             → step_inputs["formatter"]
+      "request.document_text"                           → step_inputs["request"]["document_text"]
+      "formatter"                                        → step_inputs["formatter"]
+      "TVT_DEPT-003_PBM-006_writer_linkedin.drafts"    → step_inputs[agent_id]["drafts"]
+      "request.topic"                                    → step_inputs["request"]["topic"]
+
+    Note: step IDs may contain hyphens but never dots, so splitting on "."
+    correctly separates step IDs from field names at any depth.
     """
-    parts = source_key.split(".", 1)
-    root = step_inputs.get(parts[0])
-    if len(parts) == 1:
-        return root
-    if isinstance(root, dict):
-        return root.get(parts[1])
-    return None
+    parts = source_key.split(".")
+    val: Any = step_inputs
+    for part in parts:
+        if isinstance(val, dict):
+            val = val.get(part)
+        else:
+            return None
+    return val
 
 
 def _build_tool_args(tool_cfg: Dict[str, Any], step_inputs: Dict[str, Any]) -> Dict[str, Any]:
     """
     Build the kwargs dict to pass to a tool function.
 
-    If the tool config has a ``source_key``, the referenced value is
-    resolved and passed as the first positional-equivalent kwarg named
-    after the key's leaf segment.  All other keys in ``args`` are passed
-    through unchanged.
+    source_key (dotted path):
+        Resolved against step_inputs; the resulting value is passed under
+        a parameter name derived from the *leaf* segment of the dotted path
+        (e.g. ``"request.topic"`` → ``topic=<value>``).
+
+    output_key (optional override):
+        Overrides the auto-derived parameter name.  Useful when the step ID
+        (last path segment) is too verbose to be a clean function parameter
+        (e.g. ``source_key: "TVT_DEPT-001_PBM-001A_director_approve"`` with
+        ``output_key: "approval"`` → ``approval=<dict>``).
+
+    All other keys in ``args`` are forwarded unchanged.
     """
     raw_args: Dict[str, Any] = dict(tool_cfg.get("args") or {})
     source_key = raw_args.pop("source_key", None)
+    output_key = raw_args.pop("output_key", None)
 
     resolved: Dict[str, Any] = {}
     if source_key:
         value = _resolve_source_key(source_key, step_inputs)
-        # Derive a param name from the leaf of the dotted path
-        param_name = source_key.split(".")[-1]
+        # output_key takes precedence; fall back to last segment of dotted path
+        param_name = output_key or source_key.split(".")[-1]
         resolved[param_name] = value
 
     resolved.update(raw_args)

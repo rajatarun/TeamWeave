@@ -167,6 +167,14 @@
   "workflow": [
     {
       "step": "TVT_DEPT-001_PBM-001_director",
+      "pre_tools": [
+        {
+          "name": "extract_topic_keywords",
+          "args": {
+            "source_key": "request.topic"
+          }
+        }
+      ],
       "inputs": [
         "request",
         "rag_context",
@@ -192,6 +200,22 @@
     },
     {
       "step": "TVT_DEPT-003_PBM-003E_editor",
+      "pre_tools": [
+        {
+          "name": "analyse_draft_quality",
+          "args": {
+            "source_key": "TVT_DEPT-003_PBM-006_writer_linkedin.drafts"
+          }
+        }
+      ],
+      "post_tools": [
+        {
+          "name": "measure_post_quality",
+          "args": {
+            "source_key": "TVT_DEPT-003_PBM-003E_editor.final_post"
+          }
+        }
+      ],
       "inputs": [
         "TVT_DEPT-003_PBM-006_writer_linkedin.output",
         "TVT_DEPT-003_PBM-003_strategist.output",
@@ -200,6 +224,20 @@
     },
     {
       "step": "TVT_DEPT-003_PBM-004_distribution",
+      "pre_tools": [
+        {
+          "name": "compute_optimal_post_time",
+          "args": {}
+        }
+      ],
+      "post_tools": [
+        {
+          "name": "format_distribution_checklist",
+          "args": {
+            "source_key": "TVT_DEPT-003_PBM-004_distribution.checklist"
+          }
+        }
+      ],
       "inputs": [
         "TVT_DEPT-003_PBM-003E_editor.output",
         "TVT_DEPT-001_PBM-001_director.output"
@@ -207,6 +245,15 @@
     },
     {
       "step": "TVT_DEPT-001_PBM-001A_director_approve",
+      "post_tools": [
+        {
+          "name": "format_approval_decision",
+          "args": {
+            "source_key": "TVT_DEPT-001_PBM-001A_director_approve",
+            "output_key": "approval"
+          }
+        }
+      ],
       "inputs": [
         "TVT_DEPT-003_PBM-003E_editor.output",
         "TVT_DEPT-003_PBM-004_distribution.output",
