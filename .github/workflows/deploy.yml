@@ -33,6 +33,11 @@ jobs:
           role-to-assume: ${{ env.ASSUME_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Setup SAM
         uses: aws-actions/setup-sam@v2
 
@@ -48,7 +53,7 @@ jobs:
         run: |
           cd infra
           rm -rf .aws-sam
-          sam build -t template.yaml --use-container
+          sam build -t template.yaml
 
       - name: Validate SAM Template
         run: |
