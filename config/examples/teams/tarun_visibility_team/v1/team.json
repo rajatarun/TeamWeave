@@ -13,8 +13,8 @@
       "Prefer concrete examples from Tarun's work using RAG context."
     ],
     "features": {
-      "gemini_research": false,
-      "explicit_rag": true
+      "gemini_research": true,
+      "explicit_rag": false
     },
     "rag": {
       "mode": "explicit",
