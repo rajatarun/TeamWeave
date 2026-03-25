@@ -8,7 +8,11 @@
 	build-ObservatoryMetricsFunction
 
 package-lambda:
-	python -m pip install -r src/requirements.txt -t "$(ARTIFACTS_DIR)"
+	python -m pip install -r src/requirements.txt -t "$(ARTIFACTS_DIR)" \
+		--python-version 3.12 \
+		--platform manylinux2014_x86_64 \
+		--implementation cp \
+		--only-binary=:all:
 	cp -r src "$(ARTIFACTS_DIR)/"
 	cp -r config "$(ARTIFACTS_DIR)/"
 	mkdir -p "$(ARTIFACTS_DIR)/certs"
