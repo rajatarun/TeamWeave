@@ -91,6 +91,19 @@ jobs:
               "SamDeployerRoleName=${SAM_DEPLOYER_ROLE_NAME}" \
               "SamAssumeRoleName=${ASSUME_ROLE_NAME}" \
               "SiweAuthorizerFunctionArn=${SIWE_AUTHORIZER_FUNCTION_ARN}"
+
+      - name: Sync team configs to S3
+        run: |
+          CONFIG_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='ConfigBucket'].OutputValue" \
+            --output text)
+          echo "Syncing config/examples/teams/ → s3://${CONFIG_BUCKET}/${TEAM_CONFIG_PREFIX}/"
+          aws s3 sync config/examples/teams/ \
+            "s3://${CONFIG_BUCKET}/${TEAM_CONFIG_PREFIX}/" \
+            --exclude "*.md" \
+            --region "${AWS_REGION}"
       - name: Dump CloudFormation events on failure
         if: failure()
         run: |
