@@ -54,7 +54,6 @@ jobs:
         run: |
           cd infra
           sam validate --lint
-          aws cloudformation validate-template --template-body file://template.yaml
 
       - name: Fetch SIWE Authorizer ARN from siwe-infra stack
         run: |
