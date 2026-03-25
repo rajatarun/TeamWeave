@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FinalDocumentV1",
+  "description": "Final formatted document produced by the Document Formatter agent. The reconstruct_document post-tool appends document_text from the sections array.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "sections": {
+      "type": "array",
+      "description": "Ordered list of final document sections.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "type": "integer",
+            "description": "Zero-based section index."
+          },
+          "header": {
+            "type": "string",
+            "description": "Section header label."
+          },
+          "content": {
+            "type": "string",
+            "description": "Final polished section content."
+          }
+        },
+        "required": ["index", "header", "content"]
+      }
+    },
+    "summary_of_changes": {
+      "type": "string",
+      "description": "High-level description of all changes made across the document."
+    },
+    "document_text": {
+      "type": "string",
+      "description": "Full reconstructed document as a single string. Populated by the reconstruct_document post-tool."
+    },
+    "section_count": {
+      "type": "integer",
+      "description": "Number of sections in the reconstructed document. Populated by the reconstruct_document post-tool."
+    }
+  },
+  "required": ["sections"]
+}

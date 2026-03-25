@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RewrittenSectionsV1",
+  "description": "Rewritten document sections produced by the Paragraph Rewriter agent.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "sections": {
+      "type": "array",
+      "description": "All document sections with their rewritten content.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "type": "integer",
+            "description": "Zero-based section index matching the original document order."
+          },
+          "header": {
+            "type": "string",
+            "description": "Section header label."
+          },
+          "original_content": {
+            "type": "string",
+            "description": "The original section content before rewriting."
+          },
+          "rewritten_content": {
+            "type": "string",
+            "description": "The rewritten section content aligned to the job description."
+          },
+          "changes_made": {
+            "type": "string",
+            "description": "Brief description of the changes made and why."
+          }
+        },
+        "required": ["index", "header", "rewritten_content"]
+      }
+    }
+  },
+  "required": ["sections"]
+}
