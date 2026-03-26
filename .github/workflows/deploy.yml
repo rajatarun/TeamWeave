@@ -25,6 +25,7 @@ env:
   VPC_ID: vpc-f3c92a8a
   PRIVATE_ROUTE_TABLE_ID: ""
   EIGW_ID: ""
+  LAMBDA_SUBNET_IDS: ""
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -71,6 +72,7 @@ jobs:
           PARAM_OVERRIDES="VpcId=${VPC_ID}"
           [ -n "${PRIVATE_ROUTE_TABLE_ID}" ] && PARAM_OVERRIDES="${PARAM_OVERRIDES} PrivateRouteTableId=${PRIVATE_ROUTE_TABLE_ID}"
           [ -n "${EIGW_ID}" ]               && PARAM_OVERRIDES="${PARAM_OVERRIDES} EgressOnlyInternetGatewayId=${EIGW_ID}"
+          [ -n "${LAMBDA_SUBNET_IDS}" ]     && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetIds=${LAMBDA_SUBNET_IDS}"
 
           sam deploy \
             --template-file shared.yaml \
@@ -100,6 +102,10 @@ jobs:
           OBSERVATORY_METRICS_TABLE_ARN=$(get_output ObservatoryMetricsTableArn)
           AMP_WORKSPACE_ARN=$(get_output AMPWorkspaceArn)
           AMP_WORKSPACE_ID=$(get_output AMPWorkspaceId)
+          S3_VPCE_ID=$(get_output S3VpcEndpointId)
+          DYNAMODB_VPCE_ID=$(get_output DynamoDbVpcEndpointId)
+          BEDROCK_RUNTIME_VPCE_ID=$(get_output BedrockRuntimeVpcEndpointId)
+          BEDROCK_AGENT_RUNTIME_VPCE_ID=$(get_output BedrockAgentRuntimeVpcEndpointId)
 
           if [ -z "${OBSERVATORY_METRICS_TABLE_NAME}" ] || [ -z "${AMP_WORKSPACE_ID}" ]; then
             echo "ERROR: Required outputs missing from shared stack ${SHARED_STACK_NAME}"
@@ -110,10 +116,18 @@ jobs:
           echo "OBSERVATORY_METRICS_TABLE_ARN=${OBSERVATORY_METRICS_TABLE_ARN}"   >> $GITHUB_ENV
           echo "AMP_WORKSPACE_ARN=${AMP_WORKSPACE_ARN}"                           >> $GITHUB_ENV
           echo "AMP_WORKSPACE_ID=${AMP_WORKSPACE_ID}"                             >> $GITHUB_ENV
+          echo "S3_VPCE_ID=${S3_VPCE_ID}"                                         >> $GITHUB_ENV
+          echo "DYNAMODB_VPCE_ID=${DYNAMODB_VPCE_ID}"                             >> $GITHUB_ENV
+          echo "BEDROCK_RUNTIME_VPCE_ID=${BEDROCK_RUNTIME_VPCE_ID}"               >> $GITHUB_ENV
+          echo "BEDROCK_AGENT_RUNTIME_VPCE_ID=${BEDROCK_AGENT_RUNTIME_VPCE_ID}"   >> $GITHUB_ENV
 
           echo "Shared stack outputs fetched:"
-          echo "  ObservatoryMetricsTableName = ${OBSERVATORY_METRICS_TABLE_NAME}"
-          echo "  AMPWorkspaceId              = ${AMP_WORKSPACE_ID}"
+          echo "  ObservatoryMetricsTableName      = ${OBSERVATORY_METRICS_TABLE_NAME}"
+          echo "  AMPWorkspaceId                   = ${AMP_WORKSPACE_ID}"
+          echo "  S3VpcEndpointId                  = ${S3_VPCE_ID:-<not created>}"
+          echo "  DynamoDbVpcEndpointId            = ${DYNAMODB_VPCE_ID:-<not created>}"
+          echo "  BedrockRuntimeVpcEndpointId      = ${BEDROCK_RUNTIME_VPCE_ID:-<not created>}"
+          echo "  BedrockAgentRuntimeVpcEndpointId = ${BEDROCK_AGENT_RUNTIME_VPCE_ID:-<not created>}"
 
       - name: Fetch SIWE Authorizer ARN from siwe-infra stack
         run: |
@@ -150,7 +164,11 @@ jobs:
               "ObservatoryMetricsTableName=${OBSERVATORY_METRICS_TABLE_NAME}" \
               "ObservatoryMetricsTableArn=${OBSERVATORY_METRICS_TABLE_ARN}" \
               "AMPWorkspaceArn=${AMP_WORKSPACE_ARN}" \
-              "AMPWorkspaceId=${AMP_WORKSPACE_ID}"
+              "AMPWorkspaceId=${AMP_WORKSPACE_ID}" \
+              "S3VpcEndpointId=${S3_VPCE_ID}" \
+              "DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}" \
+              "BedrockRuntimeVpcEndpointId=${BEDROCK_RUNTIME_VPCE_ID}" \
+              "BedrockAgentRuntimeVpcEndpointId=${BEDROCK_AGENT_RUNTIME_VPCE_ID}"
 
       - name: Sync team configs to S3
         run: |
