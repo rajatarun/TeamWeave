@@ -46,8 +46,14 @@ from .logger import get_logger
 log = get_logger("agent_metrics_handler")
 
 _VALID_OPERATIONS = {"invoke_agent", "invoke_model", "all"}
-_VALID_SORT_BY = {"timestamp", "cost_usd", "prompt_tokens", "completion_tokens"}
-_VALID_AGGREGATES = {"none", "by_agent", "by_model", "by_operation", "by_decision", "by_hour", "by_day"}
+_VALID_SORT_BY = {
+    "timestamp", "cost_usd", "prompt_tokens", "completion_tokens",
+    "composite_risk_score", "hallucination_risk_score", "retries", "grounding_score",
+}
+_VALID_AGGREGATES = {
+    "none", "by_agent", "by_model", "by_operation", "by_decision", "by_hour", "by_day",
+    "by_risk_tier", "by_composite_risk_level", "by_hallucination_risk_level", "by_policy_decision",
+}
 _DEFAULT_LIMIT = 100
 _MAX_LIMIT = 1000
 _AGGREGATE_SCAN_LIMIT = 5000  # max items scanned per aggregate request
@@ -114,15 +120,50 @@ def _encode_next_token(last_key: dict) -> str:
     return base64.b64encode(json.dumps(last_key, default=_json_default).encode()).decode()
 
 
-def _build_filter_expression(model_id: Optional[str], decision: Optional[str]):
+def _parse_bool_param(value: Optional[str]) -> Optional[bool]:
+    """Parse a query-string boolean param ('true'/'false') to Python bool or None."""
+    if value is None:
+        return None
+    return value.lower() == "true"
+
+
+def _build_filter_expression(
+    model_id: Optional[str],
+    decision: Optional[str],
+    risk_tier: Optional[str] = None,
+    policy_decision: Optional[str] = None,
+    composite_risk_level: Optional[str] = None,
+    hallucination_risk_level: Optional[str] = None,
+    is_shadow: Optional[bool] = None,
+    gate_blocked: Optional[bool] = None,
+    fallback_used: Optional[bool] = None,
+):
     """Build a FilterExpression for non-key attribute filters."""
     expr = None
+
+    def _and(cond):
+        nonlocal expr
+        expr = cond if expr is None else expr & cond
+
     if model_id:
-        cond = Attr("model_id").eq(model_id)
-        expr = cond if expr is None else expr & cond
+        _and(Attr("model_id").eq(model_id))
     if decision:
-        cond = Attr("decision").eq(decision)
-        expr = cond if expr is None else expr & cond
+        _and(Attr("decision").eq(decision))
+    if risk_tier:
+        _and(Attr("risk_tier").eq(risk_tier))
+    if policy_decision:
+        _and(Attr("policy_decision").eq(policy_decision))
+    if composite_risk_level:
+        _and(Attr("composite_risk_level").eq(composite_risk_level))
+    if hallucination_risk_level:
+        _and(Attr("hallucination_risk_level").eq(hallucination_risk_level))
+    if is_shadow is not None:
+        _and(Attr("is_shadow").eq(is_shadow))
+    if gate_blocked is not None:
+        _and(Attr("gate_blocked").eq(gate_blocked))
+    if fallback_used is not None:
+        _and(Attr("fallback_used").eq(fallback_used))
+
     return expr
 
 
@@ -235,8 +276,16 @@ def _fetch_all_for_aggregate(
 
 def _aggregate_items(items: list[dict], mode: str) -> list[dict]:
     """Group items by the requested dimension and compute aggregates."""
-    _NUMERIC_FIELDS = ["prompt_tokens", "completion_tokens", "cost_usd",
-                       "shadow_disagreement_score", "shadow_numeric_variance"]
+    _NUMERIC_FIELDS = [
+        "prompt_tokens", "completion_tokens", "cost_usd",
+        "shadow_disagreement_score", "shadow_numeric_variance",
+        "retries", "prompt_size_chars", "exec_token_ttl_ms",
+        "confidence", "grounding_score", "verifier_score",
+        "self_consistency_score", "numeric_variance_score",
+        "hallucination_risk_score", "grounding_risk", "self_consistency_risk",
+        "numeric_instability_risk", "tool_mismatch_risk", "drift_risk",
+        "composite_risk_score",
+    ]
 
     def _key_for(item: dict) -> tuple:
         if mode == "by_agent":
@@ -253,6 +302,14 @@ def _aggregate_items(items: list[dict], mode: str) -> list[dict]:
         if mode == "by_day":
             ts = item.get("timestamp", "")
             return (ts[:10],)  # "2024-01-15"
+        if mode == "by_risk_tier":
+            return (item.get("risk_tier", ""),)
+        if mode == "by_composite_risk_level":
+            return (item.get("composite_risk_level", ""),)
+        if mode == "by_hallucination_risk_level":
+            return (item.get("hallucination_risk_level", ""),)
+        if mode == "by_policy_decision":
+            return (item.get("policy_decision", ""),)
         return ("",)
 
     def _key_dict(key_tuple: tuple) -> dict:
@@ -268,6 +325,14 @@ def _aggregate_items(items: list[dict], mode: str) -> list[dict]:
             return {"hour": key_tuple[0]}
         if mode == "by_day":
             return {"day": key_tuple[0]}
+        if mode == "by_risk_tier":
+            return {"risk_tier": key_tuple[0]}
+        if mode == "by_composite_risk_level":
+            return {"composite_risk_level": key_tuple[0]}
+        if mode == "by_hallucination_risk_level":
+            return {"hallucination_risk_level": key_tuple[0]}
+        if mode == "by_policy_decision":
+            return {"policy_decision": key_tuple[0]}
         return {}
 
     buckets: dict[tuple, dict] = defaultdict(lambda: {
@@ -352,6 +417,13 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
     agent_id = params.get("agent_id") or None
     model_id = params.get("model_id") or None
     decision = params.get("decision") or None
+    risk_tier = params.get("risk_tier") or None
+    policy_decision = params.get("policy_decision") or None
+    composite_risk_level = params.get("composite_risk_level") or None
+    hallucination_risk_level = params.get("hallucination_risk_level") or None
+    is_shadow = _parse_bool_param(params.get("is_shadow"))
+    gate_blocked = _parse_bool_param(params.get("gate_blocked"))
+    fallback_used = _parse_bool_param(params.get("fallback_used"))
     next_token_raw = params.get("next_token") or None
 
     start_iso: Optional[str] = None
@@ -367,7 +439,11 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
         except Exception:
             return _resp(400, {"error": "end must be a Unix epoch or ISO 8601 timestamp"})
 
-    filter_expr = _build_filter_expression(model_id, decision)
+    filter_expr = _build_filter_expression(
+        model_id, decision, risk_tier, policy_decision,
+        composite_risk_level, hallucination_risk_level,
+        is_shadow, gate_blocked, fallback_used,
+    )
 
     # --- Aggregate mode: fetch all, group, return ---
     if aggregate != "none":
