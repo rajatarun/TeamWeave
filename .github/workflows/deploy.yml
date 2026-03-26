@@ -12,6 +12,7 @@ permissions:
 env:
   AWS_REGION: us-east-1
   STACK_NAME: tarun-content-team
+  SHARED_STACK_NAME: tarun-teamweave-shared
   BEDROCK_AGENTS_STACK_NAME: tarun-bedrock-agents
   FOUNDATION_MODEL_ID: amazon.nova-micro-v1:0
   AGENT_SERVICE_ROLE_ARN: arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
@@ -20,6 +21,10 @@ env:
   GEMINI_SECRET_ARN: arn:aws:secretsmanager:us-east-1:239571291755:secret:gemini/api_key-SKx2NV
   SAM_DEPLOYER_ROLE_NAME: teamweave-github-actions-sam-deployer
   ASSUME_ROLE_ARN: arn:aws:iam::239571291755:role/teamweave-github-actions-sam-deployer
+  # VPC / networking config consumed by the shared stack
+  VPC_ID: vpc-f3c92a8a
+  PRIVATE_ROUTE_TABLE_ID: ""
+  EIGW_ID: ""
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -60,6 +65,52 @@ jobs:
           cd infra
           sam validate --lint
 
+      - name: Deploy Shared Infrastructure Stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "${SHARED_STACK_NAME}" \
+            --template-file infra/shared.yaml \
+            --region "${AWS_REGION}" \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              "VpcId=${VPC_ID}" \
+              "PrivateRouteTableId=${PRIVATE_ROUTE_TABLE_ID}" \
+              "EgressOnlyInternetGatewayId=${EIGW_ID}"
+          echo "Shared stack deployed: ${SHARED_STACK_NAME}"
+
+      - name: Fetch Shared Stack Outputs
+        run: |
+          SHARED_OUTPUTS=$(aws cloudformation describe-stacks \
+            --stack-name "${SHARED_STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs" \
+            --output json)
+
+          get_output() {
+            echo "${SHARED_OUTPUTS}" | python3 -c \
+              "import json,sys; d={o['OutputKey']:o['OutputValue'] for o in json.load(sys.stdin)}; print(d.get('$1',''))"
+          }
+
+          OBSERVATORY_METRICS_TABLE_NAME=$(get_output ObservatoryMetricsTableName)
+          OBSERVATORY_METRICS_TABLE_ARN=$(get_output ObservatoryMetricsTableArn)
+          AMP_WORKSPACE_ARN=$(get_output AMPWorkspaceArn)
+          AMP_WORKSPACE_ID=$(get_output AMPWorkspaceId)
+
+          if [ -z "${OBSERVATORY_METRICS_TABLE_NAME}" ] || [ -z "${AMP_WORKSPACE_ID}" ]; then
+            echo "ERROR: Required outputs missing from shared stack ${SHARED_STACK_NAME}"
+            exit 1
+          fi
+
+          echo "OBSERVATORY_METRICS_TABLE_NAME=${OBSERVATORY_METRICS_TABLE_NAME}" >> $GITHUB_ENV
+          echo "OBSERVATORY_METRICS_TABLE_ARN=${OBSERVATORY_METRICS_TABLE_ARN}"   >> $GITHUB_ENV
+          echo "AMP_WORKSPACE_ARN=${AMP_WORKSPACE_ARN}"                           >> $GITHUB_ENV
+          echo "AMP_WORKSPACE_ID=${AMP_WORKSPACE_ID}"                             >> $GITHUB_ENV
+
+          echo "Shared stack outputs fetched:"
+          echo "  ObservatoryMetricsTableName = ${OBSERVATORY_METRICS_TABLE_NAME}"
+          echo "  AMPWorkspaceId              = ${AMP_WORKSPACE_ID}"
+
       - name: Fetch SIWE Authorizer ARN from siwe-infra stack
         run: |
           SIWE_AUTHORIZER_FUNCTION_ARN=$(aws cloudformation describe-stacks \
@@ -90,7 +141,12 @@ jobs:
               "GeminiSecretArn=${GEMINI_SECRET_ARN}" \
               "SamDeployerRoleName=${SAM_DEPLOYER_ROLE_NAME}" \
               "SamAssumeRoleName=${ASSUME_ROLE_NAME}" \
-              "SiweAuthorizerFunctionArn=${SIWE_AUTHORIZER_FUNCTION_ARN}"
+              "SiweAuthorizerFunctionArn=${SIWE_AUTHORIZER_FUNCTION_ARN}" \
+              "SharedStackName=${SHARED_STACK_NAME}" \
+              "ObservatoryMetricsTableName=${OBSERVATORY_METRICS_TABLE_NAME}" \
+              "ObservatoryMetricsTableArn=${OBSERVATORY_METRICS_TABLE_ARN}" \
+              "AMPWorkspaceArn=${AMP_WORKSPACE_ARN}" \
+              "AMPWorkspaceId=${AMP_WORKSPACE_ID}"
 
       - name: Sync team configs to S3
         run: |
@@ -128,7 +184,12 @@ jobs:
       - name: Dump CloudFormation events on failure
         if: failure()
         run: |
-          echo "Deployment failed. Fetching recent CloudFormation events for SAM stack..."
+          echo "Deployment failed. Fetching recent CloudFormation events for shared stack..."
+          aws cloudformation describe-stack-events \
+            --stack-name "${SHARED_STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --max-items 30 || true
+          echo "Fetching recent CloudFormation events for SAM stack..."
           aws cloudformation describe-stack-events \
             --stack-name "${STACK_NAME}" \
             --region "${AWS_REGION}" \
