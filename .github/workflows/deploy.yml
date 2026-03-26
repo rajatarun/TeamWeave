@@ -66,21 +66,22 @@ jobs:
           sam validate --lint
 
       - name: Deploy Shared Infrastructure Stack
-        # Idempotent: migrate-to-shared.sh detects the current state and picks
-        # the right path automatically:
-        #   (a) Shared stack already healthy        → exits 0 immediately
-        #   (b) Main stack owns the resources       → patches DeletionPolicy:Retain
-        #                                              on the old resources first,
-        #                                              then creates the shared stack
-        #   (c) Fresh environment / no main stack   → creates shared stack directly
         run: |
-          STACK_NAME="${STACK_NAME}" \
-          SHARED_STACK_NAME="${SHARED_STACK_NAME}" \
-          AWS_REGION="${AWS_REGION}" \
-          VPC_ID="${VPC_ID}" \
-          PRIVATE_ROUTE_TABLE_ID="${PRIVATE_ROUTE_TABLE_ID}" \
-          EIGW_ID="${EIGW_ID}" \
-          bash infra/scripts/migrate-to-shared.sh
+          cd infra
+          PARAM_OVERRIDES="VpcId=${VPC_ID}"
+          [ -n "${PRIVATE_ROUTE_TABLE_ID}" ] && PARAM_OVERRIDES="${PARAM_OVERRIDES} PrivateRouteTableId=${PRIVATE_ROUTE_TABLE_ID}"
+          [ -n "${EIGW_ID}" ]               && PARAM_OVERRIDES="${PARAM_OVERRIDES} EgressOnlyInternetGatewayId=${EIGW_ID}"
+
+          sam deploy \
+            --template-file shared.yaml \
+            --stack-name "${SHARED_STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --resolve-s3 \
+            --s3-prefix "${SHARED_STACK_NAME}" \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides ${PARAM_OVERRIDES}
 
       - name: Fetch Shared Stack Outputs
         run: |
