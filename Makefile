@@ -5,7 +5,8 @@
 	build-GeminiResearchFunction \
 	build-ProvisionTeamFunction \
 	build-OrchestratorFunction \
-	build-ObservatoryMetricsFunction
+	build-ObservatoryMetricsFunction \
+	build-AgentMetricsDashboardFunction
 
 package-lambda:
 	python -m pip install -r src/requirements.txt -t "$(ARTIFACTS_DIR)" \
@@ -32,3 +33,5 @@ build-ProvisionTeamFunction: package-lambda
 build-OrchestratorFunction: package-lambda
 
 build-ObservatoryMetricsFunction: package-lambda
+
+build-AgentMetricsDashboardFunction: package-lambda
