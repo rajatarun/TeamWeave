@@ -152,29 +152,35 @@ jobs:
         run: |
           cd infra
           ASSUME_ROLE_NAME="${ASSUME_ROLE_ARN##*/}"
+
+          # Build parameter overrides — omit optional params when empty so SAM
+          # doesn't receive "Key=" which it rejects as invalid.
+          PARAM_OVERRIDES=(
+            "TeamConfigPrefix=${TEAM_CONFIG_PREFIX}"
+            "VectorDbTable=${VECTOR_DB_TABLE}"
+            "GeminiSecretArn=${GEMINI_SECRET_ARN}"
+            "SamDeployerRoleName=${SAM_DEPLOYER_ROLE_NAME}"
+            "SamAssumeRoleName=${ASSUME_ROLE_NAME}"
+            "SiweAuthorizerFunctionArn=${SIWE_AUTHORIZER_FUNCTION_ARN}"
+            "SharedStackName=${SHARED_STACK_NAME}"
+            "ObservatoryMetricsTableName=${OBSERVATORY_METRICS_TABLE_NAME}"
+            "ObservatoryMetricsTableArn=${OBSERVATORY_METRICS_TABLE_ARN}"
+            "AMPWorkspaceArn=${AMP_WORKSPACE_ARN}"
+            "AMPWorkspaceId=${AMP_WORKSPACE_ID}"
+          )
+          [ -n "${LAMBDA_SUBNET_IDS}" ]            && PARAM_OVERRIDES+=("LambdaSubnetIds=${LAMBDA_SUBNET_IDS}")
+          [ -n "${S3_VPCE_ID}" ]                   && PARAM_OVERRIDES+=("S3VpcEndpointId=${S3_VPCE_ID}")
+          [ -n "${DYNAMODB_VPCE_ID}" ]             && PARAM_OVERRIDES+=("DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}")
+          [ -n "${BEDROCK_RUNTIME_VPCE_ID}" ]      && PARAM_OVERRIDES+=("BedrockRuntimeVpcEndpointId=${BEDROCK_RUNTIME_VPCE_ID}")
+          [ -n "${BEDROCK_AGENT_RUNTIME_VPCE_ID}" ] && PARAM_OVERRIDES+=("BedrockAgentRuntimeVpcEndpointId=${BEDROCK_AGENT_RUNTIME_VPCE_ID}")
+
           sam deploy \
             --stack-name "${STACK_NAME}" \
             --region "${AWS_REGION}" \
             --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
             --resolve-s3 \
             --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              "TeamConfigPrefix=${TEAM_CONFIG_PREFIX}" \
-              "VectorDbTable=${VECTOR_DB_TABLE}" \
-              "GeminiSecretArn=${GEMINI_SECRET_ARN}" \
-              "SamDeployerRoleName=${SAM_DEPLOYER_ROLE_NAME}" \
-              "SamAssumeRoleName=${ASSUME_ROLE_NAME}" \
-              "SiweAuthorizerFunctionArn=${SIWE_AUTHORIZER_FUNCTION_ARN}" \
-              "SharedStackName=${SHARED_STACK_NAME}" \
-              "ObservatoryMetricsTableName=${OBSERVATORY_METRICS_TABLE_NAME}" \
-              "ObservatoryMetricsTableArn=${OBSERVATORY_METRICS_TABLE_ARN}" \
-              "AMPWorkspaceArn=${AMP_WORKSPACE_ARN}" \
-              "AMPWorkspaceId=${AMP_WORKSPACE_ID}" \
-              "LambdaSubnetIds=${LAMBDA_SUBNET_IDS}" \
-              "S3VpcEndpointId=${S3_VPCE_ID}" \
-              "DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}" \
-              "BedrockRuntimeVpcEndpointId=${BEDROCK_RUNTIME_VPCE_ID}" \
-              "BedrockAgentRuntimeVpcEndpointId=${BEDROCK_AGENT_RUNTIME_VPCE_ID}"
+            --parameter-overrides "${PARAM_OVERRIDES[@]}"
 
       - name: Sync team configs to S3
         run: |
