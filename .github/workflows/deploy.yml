@@ -25,6 +25,7 @@ env:
   VPC_ID: vpc-f3c92a8a
   PRIVATE_ROUTE_TABLE_ID: ""
   EIGW_ID: ""
+  LAMBDA_SUBNET_IDS: ""
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -71,6 +72,7 @@ jobs:
           PARAM_OVERRIDES="VpcId=${VPC_ID}"
           [ -n "${PRIVATE_ROUTE_TABLE_ID}" ] && PARAM_OVERRIDES="${PARAM_OVERRIDES} PrivateRouteTableId=${PRIVATE_ROUTE_TABLE_ID}"
           [ -n "${EIGW_ID}" ]               && PARAM_OVERRIDES="${PARAM_OVERRIDES} EgressOnlyInternetGatewayId=${EIGW_ID}"
+          [ -n "${LAMBDA_SUBNET_IDS}" ]     && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetIds=${LAMBDA_SUBNET_IDS}"
 
           sam deploy \
             --template-file shared.yaml \

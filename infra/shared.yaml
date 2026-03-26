@@ -28,6 +28,13 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional alias for the AMP workspace. Defaults to {StackName}-observatory.
+  LambdaSubnetIds:
+    Type: String
+    Default: ""
+    Description: >
+      Comma-separated private subnet IDs used by Lambda. When provided, Interface VPC
+      endpoints for Bedrock Runtime and Bedrock Agent Runtime are created so Bedrock
+      traffic stays within the AWS network and avoids internet egress.
 
 Conditions:
   HasAmpWorkspaceAlias: !Not [!Equals [!Ref AmpWorkspaceAlias, ""]]
@@ -38,6 +45,9 @@ Conditions:
     - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
     - !Not [!Equals [!Ref VpcId, ""]]
     - !Not [!Equals [!Ref EgressOnlyInternetGatewayId, ""]]
+  HasBedrockVpce: !And
+    - !Not [!Equals [!Ref LambdaSubnetIds, ""]]
+    - !Not [!Equals [!Ref VpcId, ""]]
 
 Resources:
 
@@ -121,10 +131,51 @@ Resources:
       RouteTableIds:
         - !Ref PrivateRouteTableId
 
-  # NOTE: Bedrock Interface VPC endpoints removed for cost savings (~$14-21/month).
-  # Bedrock Runtime and Bedrock Agent Runtime traffic routes via IPv6 EIGW (dual-stack
-  # subnets) at no data-processing cost.
-  # Gateway endpoints (S3, DynamoDB) are retained — they are free.
+  # ---------------------------------------------------------------------------
+  # Bedrock Interface VPC endpoints — keep Bedrock traffic off the internet
+  # ---------------------------------------------------------------------------
+  # Only created when LambdaSubnetIds is provided. Cost: ~$7/month per endpoint
+  # per AZ. Use the IPv6 EIGW route instead if cost is a concern.
+
+  BedrockVpceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: HasBedrockVpce
+    Properties:
+      GroupDescription: Allows Lambda functions to reach Bedrock Interface VPC endpoints over HTTPS
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from within the VPC
+      Tags:
+        - Key: Stack
+          Value: !Ref AWS::StackName
+
+  BedrockRuntimeVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasBedrockVpce
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-runtime"
+      VpcEndpointType: Interface
+      SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+      SecurityGroupIds:
+        - !Ref BedrockVpceSecurityGroup
+      PrivateDnsEnabled: true
+
+  BedrockAgentRuntimeVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasBedrockVpce
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-agent-runtime"
+      VpcEndpointType: Interface
+      SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+      SecurityGroupIds:
+        - !Ref BedrockVpceSecurityGroup
+      PrivateDnsEnabled: true
 
   # ---------------------------------------------------------------------------
   # IPv6 egress route — routes ::/0 to EIGW so Lambda reaches AWS APIs without NAT
@@ -183,3 +234,17 @@ Outputs:
     Value: !If [HasPrivateRouteTableAndEigw, "true", "false"]
     Export:
       Name: !Sub "${AWS::StackName}-Ipv6EgressEnabled"
+
+  BedrockRuntimeVpcEndpointId:
+    Condition: HasBedrockVpce
+    Description: Interface VPC endpoint ID for bedrock-runtime
+    Value: !Ref BedrockRuntimeVpcEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-BedrockRuntimeVpcEndpointId"
+
+  BedrockAgentRuntimeVpcEndpointId:
+    Condition: HasBedrockVpce
+    Description: Interface VPC endpoint ID for bedrock-agent-runtime
+    Value: !Ref BedrockAgentRuntimeVpcEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-BedrockAgentRuntimeVpcEndpointId"
