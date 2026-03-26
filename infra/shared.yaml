@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  TeamWeave shared infrastructure — Observatory DynamoDB table, Amazon Managed
+  Prometheus workspace, and VPC Gateway endpoints (S3 + DynamoDB). Deploy this
+  stack once per environment before deploying the main application stack.
+  All outputs are exported so they can be consumed by the main stack or other
+  stacks in the same region/account.
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC ID used by the TeamWeave application. Required for Gateway VPC endpoints.
+  PrivateRouteTableId:
+    Type: String
+    Default: ""
+    Description: >
+      Route table ID for private subnets. When provided, free Gateway VPC endpoints for
+      S3 and DynamoDB are created so Lambda traffic stays within the AWS network.
+  EgressOnlyInternetGatewayId:
+    Type: String
+    Default: ""
+    Description: >
+      Egress-Only Internet Gateway ID attached to the VPC. When provided together with
+      PrivateRouteTableId, a ::/0 IPv6 route is added so Lambda can reach AWS public
+      endpoints (Bedrock, Secrets Manager, AMP) via IPv6 instead of a NAT Gateway,
+      eliminating NAT data-processing charges for those calls.
+  AmpWorkspaceAlias:
+    Type: String
+    Default: ""
+    Description: Optional alias for the AMP workspace. Defaults to {StackName}-observatory.
+
+Conditions:
+  HasAmpWorkspaceAlias: !Not [!Equals [!Ref AmpWorkspaceAlias, ""]]
+  HasPrivateRouteTable: !And
+    - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
+    - !Not [!Equals [!Ref VpcId, ""]]
+  HasPrivateRouteTableAndEigw: !And
+    - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
+    - !Not [!Equals [!Ref VpcId, ""]]
+    - !Not [!Equals [!Ref EgressOnlyInternetGatewayId, ""]]
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Observatory telemetry store
+  # ---------------------------------------------------------------------------
+
+  ObservatoryMetricsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-OBSERVATORY_METRICS"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: agent_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: AgentIdTimestampIndex
+          KeySchema:
+            - AttributeName: agent_id
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Stack
+          Value: !Ref AWS::StackName
+
+  # ---------------------------------------------------------------------------
+  # Amazon Managed Prometheus workspace
+  # ---------------------------------------------------------------------------
+
+  AMPWorkspace:
+    Type: AWS::APS::Workspace
+    Properties:
+      Alias: !If
+        - HasAmpWorkspaceAlias
+        - !Ref AmpWorkspaceAlias
+        - !Sub "${AWS::StackName}-observatory"
+      Tags:
+        - Key: Stack
+          Value: !Ref AWS::StackName
+
+  # ---------------------------------------------------------------------------
+  # VPC Gateway endpoints — free, keep S3/DynamoDB traffic off the public internet
+  # ---------------------------------------------------------------------------
+
+  S3VpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasPrivateRouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTableId
+
+  DynamoDbVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasPrivateRouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.dynamodb"
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTableId
+
+  # NOTE: Bedrock Interface VPC endpoints removed for cost savings (~$14-21/month).
+  # Bedrock Runtime and Bedrock Agent Runtime traffic routes via IPv6 EIGW (dual-stack
+  # subnets) at no data-processing cost.
+  # Gateway endpoints (S3, DynamoDB) are retained — they are free.
+
+  # ---------------------------------------------------------------------------
+  # IPv6 egress route — routes ::/0 to EIGW so Lambda reaches AWS APIs without NAT
+  # ---------------------------------------------------------------------------
+
+  Ipv6RouteToEigw:
+    Type: AWS::EC2::Route
+    Condition: HasPrivateRouteTableAndEigw
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableId
+      DestinationIpv6CidrBlock: "::/0"
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyInternetGatewayId
+
+Outputs:
+
+  ObservatoryMetricsTableName:
+    Description: DynamoDB table name for Observatory telemetry spans
+    Value: !Ref ObservatoryMetricsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-ObservatoryMetricsTableName"
+
+  ObservatoryMetricsTableArn:
+    Description: DynamoDB table ARN for Observatory telemetry spans
+    Value: !GetAtt ObservatoryMetricsTable.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ObservatoryMetricsTableArn"
+
+  AMPWorkspaceArn:
+    Description: Amazon Managed Prometheus workspace ARN
+    Value: !GetAtt AMPWorkspace.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-AMPWorkspaceArn"
+
+  AMPWorkspaceId:
+    Description: Amazon Managed Prometheus workspace ID
+    Value: !GetAtt AMPWorkspace.WorkspaceId
+    Export:
+      Name: !Sub "${AWS::StackName}-AMPWorkspaceId"
+
+  S3VpcEndpointId:
+    Condition: HasPrivateRouteTable
+    Description: S3 Gateway VPC endpoint ID
+    Value: !Ref S3VpcEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-S3VpcEndpointId"
+
+  DynamoDbVpcEndpointId:
+    Condition: HasPrivateRouteTable
+    Description: DynamoDB Gateway VPC endpoint ID
+    Value: !Ref DynamoDbVpcEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-DynamoDbVpcEndpointId"
+
+  Ipv6EgressEnabled:
+    Description: Whether a ::/0 IPv6 route to the Egress-Only Internet Gateway is active
+    Value: !If [HasPrivateRouteTableAndEigw, "true", "false"]
+    Export:
+      Name: !Sub "${AWS::StackName}-Ipv6EgressEnabled"
