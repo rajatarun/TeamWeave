@@ -88,10 +88,6 @@ Parameters:
     Type: String
     Default: "arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun"
     Description: IAM role ARN passed to Bedrock CreateAgent as AgentResourceRoleArn.
-  AmpWorkspaceAlias:
-    Type: String
-    Default: ""
-    Description: Optional alias for the AMP workspace. Defaults to {StackName}-observatory.
   AllowedCorsOrigin:
     Type: String
     Default: "'*'"
@@ -101,25 +97,30 @@ Parameters:
     Default: "false"
     AllowedValues: ["true", "false"]
     Description: Set to 'true' to deploy a WAF WebACL with AWS managed rule sets and attach it to the API Gateway stage.
-  PrivateRouteTableId:
+  SharedStackName:
     Type: String
-    Default: ""
-    Description: Route table ID for private subnets. Required to associate S3 and DynamoDB Gateway VPC endpoints.
-  EgressOnlyInternetGatewayId:
-    Type: String
-    Default: ""
+    Default: "tarun-teamweave-shared"
     Description: >
-      Egress-Only Internet Gateway ID attached to the VPC. When provided together with
-      PrivateRouteTableId, a ::/0 IPv6 route is added so Lambda can reach AWS public
-      endpoints (Bedrock, Secrets Manager, AMP) via IPv6 instead of a NAT Gateway,
-      eliminating NAT data-processing charges for those calls.
+      Name of the shared infrastructure CloudFormation stack (shared.yaml). Its outputs
+      supply the Observatory DynamoDB table, AMP workspace, and VPC endpoints used here.
+  ObservatoryMetricsTableName:
+    Type: String
+    Description: Observatory DynamoDB table name — taken from shared stack ObservatoryMetricsTableName output.
+  ObservatoryMetricsTableArn:
+    Type: String
+    Description: Observatory DynamoDB table ARN — taken from shared stack ObservatoryMetricsTableArn output.
+  AMPWorkspaceArn:
+    Type: String
+    Description: AMP workspace ARN — taken from shared stack AMPWorkspaceArn output.
+  AMPWorkspaceId:
+    Type: String
+    Description: AMP workspace ID — taken from shared stack AMPWorkspaceId output.
   SiweAuthorizerFunctionArn:
     Type: String
     Default: ""
     Description: ARN of the SIWE Lambda authorizer function exported from the siwe-infra CloudFormation stack (AuthorizerFunctionArn output).
 
 Conditions:
-  HasAmpWorkspaceAlias: !Not [!Equals [!Ref AmpWorkspaceAlias, ""]]
   CreateConfigBucket: !Equals [!Ref ConfigBucketName, ""]
   CreateArtifactBucket: !Equals [!Ref ArtifactBucketName, ""]
   CreateDdbTable: !Equals [!Ref DdbTableName, ""]
@@ -131,13 +132,6 @@ Conditions:
   HasSamDeployerRoleName: !Not [!Equals [!Ref SamDeployerRoleName, ""]]
   HasSamAssumeRoleName: !Not [!Equals [!Ref SamAssumeRoleName, ""]]
   DeployWAF: !Equals [!Ref EnableWAF, "true"]
-  HasPrivateRouteTable: !And
-    - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
-    - !Not [!Equals [!Ref VpcId, ""]]
-  HasPrivateRouteTableAndEigw: !And
-    - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
-    - !Not [!Equals [!Ref VpcId, ""]]
-    - !Not [!Equals [!Ref EgressOnlyInternetGatewayId, ""]]
   HasSiweAuthorizer: !Not [!Equals [!Ref SiweAuthorizerFunctionArn, ""]]
 
 Globals:
@@ -218,49 +212,6 @@ Resources:
         - AttributeName: sk
           KeyType: RANGE
 
-  ObservatoryMetricsTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: !Sub "${AWS::StackName}-OBSERVATORY_METRICS"
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: pk
-          AttributeType: S
-        - AttributeName: sk
-          AttributeType: S
-        - AttributeName: agent_id
-          AttributeType: S
-        - AttributeName: timestamp
-          AttributeType: S
-      KeySchema:
-        - AttributeName: pk
-          KeyType: HASH
-        - AttributeName: sk
-          KeyType: RANGE
-      GlobalSecondaryIndexes:
-        - IndexName: AgentIdTimestampIndex
-          KeySchema:
-            - AttributeName: agent_id
-              KeyType: HASH
-            - AttributeName: timestamp
-              KeyType: RANGE
-          Projection:
-            ProjectionType: ALL
-      TimeToLiveSpecification:
-        AttributeName: ttl
-        Enabled: true
-
-  AMPWorkspace:
-    Type: AWS::APS::Workspace
-    Properties:
-      Alias: !If
-        - HasAmpWorkspaceAlias
-        - !Ref AmpWorkspaceAlias
-        - !Sub "${AWS::StackName}-observatory"
-      Tags:
-        - Key: Stack
-          Value: !Ref AWS::StackName
-
   WorkerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -329,8 +280,8 @@ Resources:
                 Resource:
                   - !If [CreateDdbTable, !GetAtt ContentPipelineRunsTable.Arn, !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DdbTableName}"]
                   - !If [CreateDdbTable, !Sub "${ContentPipelineRunsTable.Arn}/index/*", !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DdbTableName}/index/*"]
-                  - !GetAtt ObservatoryMetricsTable.Arn
-                  - !Sub "${ObservatoryMetricsTable.Arn}/index/*"
+                  - !Ref ObservatoryMetricsTableArn
+                  - !Sub "${ObservatoryMetricsTableArn}/index/*"
               - Effect: Allow
                 Action:
                   - lambda:InvokeFunction
@@ -376,7 +327,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - aps:RemoteWrite
-                Resource: !GetAtt AMPWorkspace.Arn
+                Resource: !Ref AMPWorkspaceArn
 
   TriggerRole:
     Type: AWS::IAM::Role
@@ -456,8 +407,8 @@ Resources:
                 Resource:
                   - !If [CreateDdbTable, !GetAtt ContentPipelineRunsTable.Arn, !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DdbTableName}"]
                   - !If [CreateDdbTable, !Sub "${ContentPipelineRunsTable.Arn}/index/*", !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DdbTableName}/index/*"]
-                  - !GetAtt ObservatoryMetricsTable.Arn
-                  - !Sub "${ObservatoryMetricsTable.Arn}/index/*"
+                  - !Ref ObservatoryMetricsTableArn
+                  - !Sub "${ObservatoryMetricsTableArn}/index/*"
               - Effect: Allow
                 Action:
                   - lambda:InvokeFunction
@@ -469,7 +420,7 @@ Resources:
                   - aps:GetLabels
                   - aps:GetSeries
                   - aps:GetMetricMetadata
-                Resource: !GetAtt AMPWorkspace.Arn
+                Resource: !Ref AMPWorkspaceArn
               - Effect: Allow
                 Action: [secretsmanager:GetSecretValue]
                 Resource: !Ref VectorDbSecret
@@ -598,7 +549,7 @@ Resources:
                   - aps:GetLabels
                   - aps:GetSeries
                   - aps:GetMetricMetadata
-                Resource: !GetAtt AMPWorkspace.Arn
+                Resource: !Ref AMPWorkspaceArn
 
   AgentMetricsRole:
     Type: AWS::IAM::Role
@@ -627,8 +578,8 @@ Resources:
                   - dynamodb:Query
                   - dynamodb:Scan
                 Resource:
-                  - !GetAtt ObservatoryMetricsTable.Arn
-                  - !Sub "${ObservatoryMetricsTable.Arn}/index/*"
+                  - !Ref ObservatoryMetricsTableArn
+                  - !Sub "${ObservatoryMetricsTableArn}/index/*"
 
   StepFunctionsRole:
     Type: AWS::IAM::Role
@@ -918,8 +869,8 @@ Resources:
           GEMINI_MODEL: gemini-2.0-flash
           STATE_MACHINE_ARN: !Ref StateMachine
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
-          OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTable
-          AMP_WORKSPACE_ID: !GetAtt AMPWorkspace.WorkspaceId
+          OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTableName
+          AMP_WORKSPACE_ID: !Ref AMPWorkspaceId
           AMP_REGION: !Ref AWS::Region
       VpcConfig: !If
         - HasVpcConfig
@@ -960,8 +911,8 @@ Resources:
           GEMINI_MODEL: gemini-2.0-flash
           GEMINI_LAMBDA_ARN: !GetAtt GeminiResearchFunction.Arn
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
-          OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTable
-          AMP_WORKSPACE_ID: !GetAtt AMPWorkspace.WorkspaceId
+          OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTableName
+          AMP_WORKSPACE_ID: !Ref AMPWorkspaceId
           AMP_REGION: !Ref AWS::Region
       VpcConfig: !If
         - HasVpcConfig
@@ -1039,7 +990,7 @@ Resources:
       Timeout: 30
       Environment:
         Variables:
-          AMP_WORKSPACE_ID: !GetAtt AMPWorkspace.WorkspaceId
+          AMP_WORKSPACE_ID: !Ref AMPWorkspaceId
           AMP_REGION: !Ref AWS::Region
       Events:
         ObservatoryMetricsGet:
@@ -1064,7 +1015,7 @@ Resources:
       Timeout: 30
       Environment:
         Variables:
-          OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTable
+          OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTableName
       Events:
         AgentMetricsGet:
           Type: Api
@@ -1276,17 +1227,6 @@ Resources:
       ToPort: 443
       CidrIpv6: "::/0"
 
-  # Route ::/0 IPv6 traffic to the Egress-Only Internet Gateway so Lambda ENIs
-  # in the dual-stack private subnet can reach AWS public APIs without a NAT Gateway.
-  # EIGW is stateful and blocks all unsolicited inbound connections.
-  Ipv6RouteToEigw:
-    Type: AWS::EC2::Route
-    Condition: HasPrivateRouteTableAndEigw
-    Properties:
-      RouteTableId: !Ref PrivateRouteTableId
-      DestinationIpv6CidrBlock: "::/0"
-      EgressOnlyInternetGatewayId: !Ref EgressOnlyInternetGatewayId
-
   RdsIngressFromOrchestrator5432:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: HasVpcConfig
@@ -1297,32 +1237,9 @@ Resources:
       ToPort: 5432
       SourceSecurityGroupId: !Ref OrchestratorSecurityGroup
 
-  S3VpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasPrivateRouteTable
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
-      VpcEndpointType: Gateway
-      RouteTableIds:
-        - !Ref PrivateRouteTableId
-
-  DynamoDbVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasPrivateRouteTable
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.dynamodb"
-      VpcEndpointType: Gateway
-      RouteTableIds:
-        - !Ref PrivateRouteTableId
-
-  # NOTE: Bedrock Interface VPC endpoints removed for cost savings (~$14-21/month).
-  # Bedrock Runtime and Bedrock Agent Runtime traffic routes via IPv6 EIGW (dual-stack
-  # subnets) at no data-processing cost. The OrchestratorToAwsServicesEgress443 rule
-  # (0.0.0.0/0 IPv4) provides fallback for any non-dual-stack paths.
-  # Gateway endpoints (S3, DynamoDB) are retained — they are free and keep that
-  # traffic within the AWS network.
+  # NOTE: S3 and DynamoDB Gateway VPC endpoints, Bedrock Interface VPC endpoints,
+  # and the IPv6 EIGW route are now managed in the shared infrastructure stack
+  # (infra/shared.yaml). They are shared resources that outlive application deploys.
 
   SiweAuthorizerInvokePermission:
     Type: AWS::Lambda::Permission
@@ -1482,11 +1399,14 @@ Outputs:
   ArtifactBucket:
     Value: !If [CreateArtifactBucket, !Ref TeamArtifactBucket, !Ref ArtifactBucketName]
   ObservatoryMetricsTable:
-    Value: !Ref ObservatoryMetricsTable
+    Value: !Ref ObservatoryMetricsTableName
+    Description: Observatory DynamoDB table name (sourced from shared stack)
   AMPWorkspaceArn:
-    Value: !GetAtt AMPWorkspace.Arn
+    Value: !Ref AMPWorkspaceArn
+    Description: AMP workspace ARN (sourced from shared stack)
   AMPWorkspaceId:
-    Value: !GetAtt AMPWorkspace.WorkspaceId
+    Value: !Ref AMPWorkspaceId
+    Description: AMP workspace ID (sourced from shared stack)
   ObservatoryMetricsFunctionArn:
     Value: !GetAtt ObservatoryMetricsFunction.Arn
   VectorDbSecretArn:
@@ -1498,6 +1418,6 @@ Outputs:
   ApiGatewayAccessLogGroupArn:
     Value: !GetAtt ApiGatewayAccessLogGroup.Arn
     Description: CloudWatch Log Group ARN for API Gateway access logs
-  Ipv6EgressEnabled:
-    Value: !If [HasPrivateRouteTableAndEigw, "true", "false"]
-    Description: Whether a ::/0 IPv6 route to the Egress-Only Internet Gateway is active (dual-stack cost saving mode)
+  SharedStackName:
+    Value: !Ref SharedStackName
+    Description: Name of the shared infrastructure stack supplying Observatory and VPC endpoints
