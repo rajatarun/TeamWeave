@@ -364,5 +364,183 @@ class McpObservatoryTests(unittest.TestCase):
         self.observatory._ddb_table = None
 
 
+class ExtractSpanFieldsTests(unittest.TestCase):
+    """Tests for _extract_span_fields — TraceContext field extraction."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.observatory = importlib.import_module("src.orchestrator.mcp_observatory")
+
+    def _make_span(self, **kwargs):
+        span = MagicMock()
+        # Default: all optional TraceContext fields absent (sentinel)
+        for field in (
+            "confidence", "grounding_score", "verifier_score", "self_consistency_score",
+            "numeric_variance_score", "hallucination_risk_score",
+            "grounding_risk", "self_consistency_risk", "numeric_instability_risk",
+            "tool_mismatch_risk", "drift_risk", "composite_risk_score",
+            "retries", "prompt_size_chars", "exec_token_ttl_ms",
+            "fallback_used", "is_shadow", "gate_blocked", "tool_claim_mismatch", "exec_token_verified",
+            "span_id", "parent_span_id", "risk_tier", "prompt_template_id", "prompt_hash",
+            "normalized_prompt_hash", "answer_hash", "hallucination_risk_level",
+            "shadow_parent_trace_id", "fallback_type", "fallback_reason",
+            "request_id", "method", "tool_name", "tool_args_hash", "tool_criticality",
+            "policy_decision", "policy_id", "policy_version",
+            "composite_risk_level", "exec_token_id", "exec_token_hash",
+            "start_time", "end_time",
+        ):
+            setattr(span, field, None)
+        for k, v in kwargs.items():
+            setattr(span, k, v)
+        return span
+
+    def test_float_field_stored_as_decimal(self):
+        span = self._make_span(composite_risk_score=0.75)
+        result = self.observatory._extract_span_fields(span)
+        from decimal import Decimal
+        self.assertIn("composite_risk_score", result)
+        self.assertAlmostEqual(float(result["composite_risk_score"]), 0.75, places=5)
+        self.assertIsInstance(result["composite_risk_score"], Decimal)
+
+    def test_int_field_stored_as_decimal(self):
+        span = self._make_span(retries=3, prompt_size_chars=512)
+        result = self.observatory._extract_span_fields(span)
+        self.assertIn("retries", result)
+        self.assertEqual(int(result["retries"]), 3)
+        self.assertIn("prompt_size_chars", result)
+        self.assertEqual(int(result["prompt_size_chars"]), 512)
+
+    def test_int_zero_stored(self):
+        span = self._make_span(retries=0)
+        result = self.observatory._extract_span_fields(span)
+        self.assertIn("retries", result)
+        self.assertEqual(int(result["retries"]), 0)
+
+    def test_bool_fields_stored(self):
+        span = self._make_span(fallback_used=True, is_shadow=False, gate_blocked=True)
+        result = self.observatory._extract_span_fields(span)
+        self.assertIs(result["fallback_used"], True)
+        self.assertIs(result["is_shadow"], False)
+        self.assertIs(result["gate_blocked"], True)
+
+    def test_string_fields_stored(self):
+        span = self._make_span(
+            risk_tier="high",
+            policy_decision="block",
+            composite_risk_level="critical",
+            hallucination_risk_level="medium",
+            span_id="span-xyz",
+        )
+        result = self.observatory._extract_span_fields(span)
+        self.assertEqual(result["risk_tier"], "high")
+        self.assertEqual(result["policy_decision"], "block")
+        self.assertEqual(result["composite_risk_level"], "critical")
+        self.assertEqual(result["hallucination_risk_level"], "medium")
+        self.assertEqual(result["span_id"], "span-xyz")
+
+    def test_none_optional_fields_skipped(self):
+        span = self._make_span()  # all optional fields = None
+        result = self.observatory._extract_span_fields(span)
+        self.assertEqual(result, {})
+
+    def test_datetime_field_serialised_to_iso(self):
+        from datetime import datetime, timezone
+        dt = datetime(2024, 6, 15, 10, 30, 0, tzinfo=timezone.utc)
+        span = self._make_span(start_time=dt)
+        result = self.observatory._extract_span_fields(span)
+        self.assertIn("start_time", result)
+        self.assertIn("2024-06-15", result["start_time"])
+
+    def test_push_metric_writes_trace_context_fields(self):
+        """_push_metric persists new TraceContext fields via _extract_span_fields."""
+        mock_table = MagicMock()
+        os.environ["OBSERVATORY_METRICS_TABLE"] = "test-table"
+        observatory = importlib.import_module("src.orchestrator.mcp_observatory")
+        observatory._ddb_table = None
+
+        with patch("boto3.resource") as mock_boto:
+            mock_boto.return_value.Table.return_value = mock_table
+            span = MagicMock(
+                trace_id="t1", prompt_tokens=10, completion_tokens=5, cost_usd=0.001,
+                shadow_disagreement_score=None, shadow_numeric_variance=None,
+                composite_risk_score=0.8, risk_tier="high", retries=2,
+                fallback_used=True, is_shadow=False, gate_blocked=False,
+                policy_decision="block", hallucination_risk_level="high",
+                # set remaining optional fields to None
+                confidence=None, grounding_score=None, verifier_score=None,
+                self_consistency_score=None, numeric_variance_score=None,
+                hallucination_risk_score=None, grounding_risk=None,
+                self_consistency_risk=None, numeric_instability_risk=None,
+                tool_mismatch_risk=None, drift_risk=None,
+                prompt_size_chars=200, exec_token_ttl_ms=None,
+                tool_claim_mismatch=None, exec_token_verified=None,
+                span_id="s1", parent_span_id=None, prompt_template_id=None,
+                prompt_hash=None, normalized_prompt_hash=None, answer_hash=None,
+                shadow_parent_trace_id=None, fallback_type=None, fallback_reason=None,
+                request_id=None, method=None, tool_name=None, tool_args_hash=None,
+                tool_criticality=None, policy_id=None, policy_version=None,
+                composite_risk_level="critical", exec_token_id=None, exec_token_hash=None,
+                start_time=None, end_time=None,
+            )
+            decision = MagicMock(action="block", reason="risk_exceeded")
+            observatory._push_metric("invoke_agent", span, decision, {})
+
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        self.assertAlmostEqual(float(item["composite_risk_score"]), 0.8, places=4)
+        self.assertEqual(item["risk_tier"], "high")
+        self.assertEqual(int(item["retries"]), 2)
+        self.assertIs(item["fallback_used"], True)
+        self.assertEqual(item["policy_decision"], "block")
+        self.assertEqual(item["composite_risk_level"], "critical")
+        self.assertEqual(item["span_id"], "s1")
+        self.assertNotIn("confidence", item)  # None fields skipped
+
+        os.environ.pop("OBSERVATORY_METRICS_TABLE", None)
+        observatory._ddb_table = None
+
+    def test_push_metric_does_not_overwrite_explicit_fields(self):
+        """_extract_span_fields results never overwrite explicitly set fields."""
+        mock_table = MagicMock()
+        os.environ["OBSERVATORY_METRICS_TABLE"] = "test-table"
+        observatory = importlib.import_module("src.orchestrator.mcp_observatory")
+        observatory._ddb_table = None
+
+        with patch("boto3.resource") as mock_boto:
+            mock_boto.return_value.Table.return_value = mock_table
+            # Simulate a span that also exposes trace_id, prompt_tokens etc.
+            span = MagicMock(
+                trace_id="explicit-trace", prompt_tokens=99, completion_tokens=99,
+                cost_usd=99.0, shadow_disagreement_score=None, shadow_numeric_variance=None,
+                retries=0, prompt_size_chars=0, is_shadow=False,
+                fallback_used=False, gate_blocked=False,
+                tool_claim_mismatch=None, exec_token_verified=None,
+                # set all remaining optional fields to None
+                confidence=None, grounding_score=None, verifier_score=None,
+                self_consistency_score=None, numeric_variance_score=None,
+                hallucination_risk_score=None, grounding_risk=None,
+                self_consistency_risk=None, numeric_instability_risk=None,
+                tool_mismatch_risk=None, drift_risk=None, composite_risk_score=None,
+                exec_token_ttl_ms=None, span_id=None, parent_span_id=None, risk_tier=None,
+                prompt_template_id=None, prompt_hash=None, normalized_prompt_hash=None,
+                answer_hash=None, hallucination_risk_level=None, shadow_parent_trace_id=None,
+                fallback_type=None, fallback_reason=None, request_id=None, method=None,
+                tool_name=None, tool_args_hash=None, tool_criticality=None,
+                policy_decision=None, policy_id=None, policy_version=None,
+                composite_risk_level=None, exec_token_id=None, exec_token_hash=None,
+                start_time=None, end_time=None,
+            )
+            decision = MagicMock(action="allow", reason="ok")
+            observatory._push_metric("invoke_agent", span, decision, {})
+
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        # prompt_tokens, completion_tokens, cost_usd are set explicitly from span attrs
+        # They must match the explicit values, not any _extract_span_fields result
+        self.assertEqual(item["trace_id"], "explicit-trace")
+        self.assertEqual(int(item["prompt_tokens"]), 99)
+
+        os.environ.pop("OBSERVATORY_METRICS_TABLE", None)
+        observatory._ddb_table = None
+
+
 if __name__ == "__main__":
     unittest.main()
