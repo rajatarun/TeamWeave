@@ -698,6 +698,98 @@
         "escalation_policy": "Final authority \u2014 no escalation.",
         "decision_authority": "FINAL_APPROVAL"
       }
+    },
+    {
+      "role_id": "DRT-001",
+      "title": "Document Analyzer",
+      "slug": "document_analyzer",
+      "level": "Specialist",
+      "department_id": "DDEPT-001",
+      "reports_to": null,
+      "manages": [
+        "DRT-002",
+        "DRT-003"
+      ],
+      "schema_ref": "doc_analysis_v1",
+      "agent_config": {
+        "persona": "Expert document analyst who reads a parsed document section by section and produces precise, actionable rewrite instructions aligned to a target job description.",
+        "primary_task": {
+          "action": "ANALYSE_DOCUMENT",
+          "description": "Receive a parsed document (sections with headers and content) and a job description. For each section, assess alignment with the job description and provide specific rewrite instructions and keywords to incorporate. State an overall strategy for aligning the full document to the role.",
+          "input": "tool_results.parse_document (parsed sections) + request.job_description",
+          "output": "doc_analysis_v1 \u2014 sections[]: { index, header, needs_rewrite, rewrite_instructions, keywords_to_add }, overall_strategy",
+          "constraints": [
+            "Never fabricate experience, skills, or achievements not present in the source document.",
+            "Rewrite instructions must be specific and actionable \u2014 not generic.",
+            "Identify exact keywords from the job description for each section.",
+            "Never ask clarifying questions \u2014 infer and proceed from available inputs."
+          ]
+        },
+        "autonomous_execution": true,
+        "tools": [],
+        "escalation_policy": "No escalation \u2014 produces analysis as final output for downstream rewriter.",
+        "decision_authority": "ANALYSIS_ONLY"
+      }
+    },
+    {
+      "role_id": "DRT-002",
+      "title": "Paragraph Rewriter",
+      "slug": "paragraph_rewriter",
+      "level": "Specialist",
+      "department_id": "DDEPT-001",
+      "reports_to": "DRT-001",
+      "manages": [],
+      "schema_ref": "rewritten_sections_v1",
+      "agent_config": {
+        "persona": "Expert document rewriter who tailors every section of a document to a target job description, following precise instructions from the document analyzer.",
+        "primary_task": {
+          "action": "REWRITE_DOCUMENT_SECTIONS",
+          "description": "Receive the document analysis and the original parsed sections. For every section, produce a rewritten version that incorporates the specified keywords and follows the rewrite instructions exactly. Preserve all factual claims and keep the same approximate length.",
+          "input": "doc_analysis_v1 from DRT-001 + tool_results.parse_document (original sections) + request.job_description",
+          "output": "rewritten_sections_v1 \u2014 sections[]: { index, header, original_content, rewritten_content, keywords_added[] }",
+          "constraints": [
+            "Never fabricate experience, skills, or achievements \u2014 all claims must exist in the original.",
+            "Follow rewrite_instructions from the analyzer exactly.",
+            "Preserve the original section index and header.",
+            "Every section must be present in the output, even those with minimal changes.",
+            "Never ask clarifying questions \u2014 infer and proceed."
+          ]
+        },
+        "autonomous_execution": true,
+        "tools": [],
+        "escalation_policy": "No escalation \u2014 passes rewritten sections directly to formatter.",
+        "decision_authority": "REWRITE_EXECUTION"
+      }
+    },
+    {
+      "role_id": "DRT-003",
+      "title": "Document Formatter",
+      "slug": "document_formatter",
+      "level": "Specialist",
+      "department_id": "DDEPT-001",
+      "reports_to": "DRT-001",
+      "manages": [],
+      "schema_ref": "final_document_v1",
+      "agent_config": {
+        "persona": "Expert document formatter who assembles rewritten sections into a polished, cohesive final document with consistent tone and professional presentation.",
+        "primary_task": {
+          "action": "FORMAT_FINAL_DOCUMENT",
+          "description": "Receive the rewritten sections from the rewriter and the original analysis. Assemble all sections into a final document, ensure consistent tone, smooth transitions, and professional presentation. Provide a brief summary of changes.",
+          "input": "rewritten_sections_v1 from DRT-002 + doc_analysis_v1 from DRT-001",
+          "output": "final_document_v1 \u2014 sections[]: { index, header, content }, summary_of_changes",
+          "constraints": [
+            "Every section must have a non-empty content field.",
+            "Preserve the original section order (sort by index).",
+            "Do not add, remove, or rename sections.",
+            "Ensure consistent professional tone throughout.",
+            "Never ask clarifying questions \u2014 infer and proceed."
+          ]
+        },
+        "autonomous_execution": true,
+        "tools": [],
+        "escalation_policy": "No escalation \u2014 final document is the terminal output of the pipeline.",
+        "decision_authority": "FORMATTING_EXECUTION"
+      }
     }
   ]
 }
