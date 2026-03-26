@@ -47,6 +47,8 @@ Resources:
 
   ObservatoryMetricsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-OBSERVATORY_METRICS"
       BillingMode: PAY_PER_REQUEST
