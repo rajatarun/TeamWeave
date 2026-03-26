@@ -1051,7 +1051,7 @@ Resources:
       Architectures:
         - arm64
       MemorySize: 512
-      Timeout: 120
+      Timeout: 900
       Environment:
         Variables:
           ARTIFACT_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
