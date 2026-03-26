@@ -159,14 +159,28 @@ print("Patched template written.")
 PYEOF
 
   log "Deploying retention patch to main stack (no-op if resources already retained)..."
-  # Upload the patched template to S3 via CloudFormation (it may be too large
-  # for direct --template-body) by using a temporary SAM-style S3 bucket.
+  # Templates > 51,200 bytes must be uploaded to S3 first.
+  # Reuse the SAM-managed default bucket (created automatically by sam deploy --resolve-s3).
+  SAM_BUCKET=$(aws cloudformation describe-stacks \
+    --stack-name aws-sam-cli-managed-default \
+    --region "${REGION}" \
+    --query "Stacks[0].Outputs[?OutputKey=='SourceBucket'].OutputValue" \
+    --output text 2>/dev/null || echo "")
+
+  DEPLOY_EXTRA_ARGS=""
+  if [ -n "${SAM_BUCKET}" ]; then
+    log "Using SAM managed bucket for template upload: ${SAM_BUCKET}"
+    DEPLOY_EXTRA_ARGS="--s3-bucket ${SAM_BUCKET} --s3-prefix migrate-retain-patch"
+  fi
+
+  # shellcheck disable=SC2086
   aws cloudformation deploy \
     --stack-name "${STACK_NAME}" \
     --template-file "${PATCHED_TEMPLATE}" \
     --region "${REGION}" \
     --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
     --no-fail-on-empty-changeset \
+    ${DEPLOY_EXTRA_ARGS} \
     || die "Failed to apply retention patch to main stack."
 
   log "Retention patch applied. The five resources will survive being removed from the template."
