@@ -104,6 +104,27 @@ jobs:
             "s3://${CONFIG_BUCKET}/${TEAM_CONFIG_PREFIX}/" \
             --exclude "*.md" \
             --region "${AWS_REGION}"
+
+      - name: Provision team agents
+        run: |
+          PROVISION_FUNCTION_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='ProvisionTeamFunctionArn'].OutputValue" \
+            --output text)
+          echo "Invoking ProvisionTeamFunction: ${PROVISION_FUNCTION_ARN}"
+          aws lambda invoke \
+            --function-name "${PROVISION_FUNCTION_ARN}" \
+            --region "${AWS_REGION}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{"httpMethod":"POST","path":"/teams","headers":{},"body":"{}","queryStringParameters":null}' \
+            provision_response.json
+          cat provision_response.json
+          STATUS=$(python3 -c "import json; d=json.load(open('provision_response.json')); print(d.get('statusCode', 200))")
+          if [ "$STATUS" != "200" ]; then
+            echo "Provision failed with HTTP status $STATUS"
+            exit 1
+          fi
       - name: Dump CloudFormation events on failure
         if: failure()
         run: |
