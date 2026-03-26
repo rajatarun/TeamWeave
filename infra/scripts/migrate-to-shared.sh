@@ -114,11 +114,20 @@ if [[ "${NEEDS_RETENTION}" == "true" ]]; then
 
   # Fetch the live template from the main stack (not the local file — local
   # file already has the resources removed).
+  # TemplateBody can be a JSON string or a dict; handle both via Python.
   aws cloudformation get-template \
     --stack-name "${STACK_NAME}" \
     --region "${REGION}" \
-    --query "TemplateBody" \
-    --output text > "${PATCHED_TEMPLATE}"
+    --output json \
+  | python3 -c "
+import json, sys
+response = json.load(sys.stdin)
+tb = response.get('TemplateBody', '')
+if isinstance(tb, dict):
+    print(json.dumps(tb, indent=2))
+else:
+    print(tb)
+" > "${PATCHED_TEMPLATE}"
 
   # Insert DeletionPolicy: Retain after each resource type declaration for
   # the five resources being moved. Python is used for reliable YAML patching.
