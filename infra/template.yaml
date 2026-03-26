@@ -228,11 +228,24 @@ Resources:
           AttributeType: S
         - AttributeName: sk
           AttributeType: S
+        - AttributeName: agent_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
         - AttributeName: sk
           KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: AgentIdTimestampIndex
+          KeySchema:
+            - AttributeName: agent_id
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
@@ -587,6 +600,36 @@ Resources:
                   - aps:GetMetricMetadata
                 Resource: !GetAtt AMPWorkspace.Arn
 
+  AgentMetricsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-agent-metrics-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: agent-metrics-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt ObservatoryMetricsTable.Arn
+                  - !Sub "${ObservatoryMetricsTable.Arn}/index/*"
+
   StepFunctionsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -665,6 +708,12 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-ObservatoryMetricsFunction"
+      RetentionInDays: 30
+
+  AgentMetricsDashboardFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-AgentMetricsDashboardFunction"
       RetentionInDays: 30
 
   GeminiResearchFunctionLogGroup:
@@ -998,6 +1047,30 @@ Resources:
           Properties:
             RestApiId: !Ref TeamWeaveApi
             Path: /observability/metrics
+            Method: get
+
+  AgentMetricsDashboardFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: AgentMetricsDashboardFunctionLogGroup
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../
+      Handler: src/orchestrator/agent_metrics_handler.handler
+      Role: !GetAtt AgentMetricsRole.Arn
+      Architectures:
+        - arm64
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTable
+      Events:
+        AgentMetricsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /observability/agent-metrics
             Method: get
 
   StatusFunction:
