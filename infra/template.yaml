@@ -71,7 +71,9 @@ Parameters:
   LambdaSubnetIds:
     Type: String
     Default: ""
-    Description: Comma-separated private subnet IDs for Lambda ENIs (required for VPC connectivity).
+    Description: >
+      Comma-separated private subnet IDs for Lambda ENIs — taken from shared stack
+      LambdaSubnetIds output. Subnets are created and owned by shared.yaml.
   RdsSecurityGroupId:
     Type: String
     Default: "sg-06e6751625773c1bf"
@@ -1437,6 +1439,9 @@ Outputs:
   SharedStackName:
     Value: !Ref SharedStackName
     Description: Name of the shared infrastructure stack supplying Observatory and VPC endpoints
+  LambdaSubnetIds:
+    Value: !Ref LambdaSubnetIds
+    Description: Lambda private subnet IDs (sourced from shared stack)
   S3VpcEndpointId:
     Value: !Ref S3VpcEndpointId
     Description: S3 Gateway VPC endpoint ID (sourced from shared stack)

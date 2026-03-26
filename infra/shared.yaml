@@ -28,16 +28,22 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional alias for the AMP workspace. Defaults to {StackName}-observatory.
-  LambdaSubnetIds:
+  LambdaSubnetCidrAz1:
     Type: String
-    Default: ""
+    Default: "10.0.10.0/24"
     Description: >
-      Comma-separated private subnet IDs used by Lambda. When provided, Interface VPC
-      endpoints for Bedrock Runtime and Bedrock Agent Runtime are created so Bedrock
-      traffic stays within the AWS network and avoids internet egress.
+      IPv4 CIDR for the first Lambda private subnet (AZ index 0). Must be within the VPC
+      CIDR and must not overlap with existing subnets.
+  LambdaSubnetCidrAz2:
+    Type: String
+    Default: "10.0.11.0/24"
+    Description: >
+      IPv4 CIDR for the second Lambda private subnet (AZ index 1). Must be within the VPC
+      CIDR and must not overlap with existing subnets.
 
 Conditions:
   HasAmpWorkspaceAlias: !Not [!Equals [!Ref AmpWorkspaceAlias, ""]]
+  HasVpc: !Not [!Equals [!Ref VpcId, ""]]
   HasPrivateRouteTable: !And
     - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
     - !Not [!Equals [!Ref VpcId, ""]]
@@ -45,9 +51,7 @@ Conditions:
     - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
     - !Not [!Equals [!Ref VpcId, ""]]
     - !Not [!Equals [!Ref EgressOnlyInternetGatewayId, ""]]
-  HasBedrockVpce: !And
-    - !Not [!Equals [!Ref LambdaSubnetIds, ""]]
-    - !Not [!Equals [!Ref VpcId, ""]]
+  HasBedrockVpce: !Not [!Equals [!Ref VpcId, ""]]
 
 Resources:
 
@@ -132,6 +136,52 @@ Resources:
         - !Ref PrivateRouteTableId
 
   # ---------------------------------------------------------------------------
+  # Lambda private subnets — shared across all Lambda functions in this VPC
+  # ---------------------------------------------------------------------------
+
+  LambdaSubnetAz1:
+    Type: AWS::EC2::Subnet
+    Condition: HasVpc
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: !Ref LambdaSubnetCidrAz1
+      AvailabilityZone: !Select [0, !GetAZs !Ref AWS::Region]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-lambda-az1"
+        - Key: Stack
+          Value: !Ref AWS::StackName
+
+  LambdaSubnetAz2:
+    Type: AWS::EC2::Subnet
+    Condition: HasVpc
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: !Ref LambdaSubnetCidrAz2
+      AvailabilityZone: !Select [1, !GetAZs !Ref AWS::Region]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-lambda-az2"
+        - Key: Stack
+          Value: !Ref AWS::StackName
+
+  LambdaSubnetAz1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: HasPrivateRouteTable
+    Properties:
+      SubnetId: !Ref LambdaSubnetAz1
+      RouteTableId: !Ref PrivateRouteTableId
+
+  LambdaSubnetAz2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: HasPrivateRouteTable
+    Properties:
+      SubnetId: !Ref LambdaSubnetAz2
+      RouteTableId: !Ref PrivateRouteTableId
+
+  # ---------------------------------------------------------------------------
   # Bedrock Interface VPC endpoints — keep Bedrock traffic off the internet
   # ---------------------------------------------------------------------------
   # Only created when LambdaSubnetIds is provided. Cost: ~$7/month per endpoint
@@ -160,7 +210,9 @@ Resources:
       VpcId: !Ref VpcId
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-runtime"
       VpcEndpointType: Interface
-      SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+      SubnetIds:
+        - !Ref LambdaSubnetAz1
+        - !Ref LambdaSubnetAz2
       SecurityGroupIds:
         - !Ref BedrockVpceSecurityGroup
       PrivateDnsEnabled: true
@@ -172,7 +224,9 @@ Resources:
       VpcId: !Ref VpcId
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-agent-runtime"
       VpcEndpointType: Interface
-      SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+      SubnetIds:
+        - !Ref LambdaSubnetAz1
+        - !Ref LambdaSubnetAz2
       SecurityGroupIds:
         - !Ref BedrockVpceSecurityGroup
       PrivateDnsEnabled: true
@@ -214,6 +268,27 @@ Outputs:
     Value: !GetAtt AMPWorkspace.WorkspaceId
     Export:
       Name: !Sub "${AWS::StackName}-AMPWorkspaceId"
+
+  LambdaSubnetIds:
+    Condition: HasVpc
+    Description: Comma-separated subnet IDs for Lambda VPC config (shared across all functions)
+    Value: !Sub "${LambdaSubnetAz1},${LambdaSubnetAz2}"
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaSubnetIds"
+
+  LambdaSubnetAz1Id:
+    Condition: HasVpc
+    Description: Lambda private subnet in AZ index 0
+    Value: !Ref LambdaSubnetAz1
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaSubnetAz1Id"
+
+  LambdaSubnetAz2Id:
+    Condition: HasVpc
+    Description: Lambda private subnet in AZ index 1
+    Value: !Ref LambdaSubnetAz2
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaSubnetAz2Id"
 
   S3VpcEndpointId:
     Condition: HasPrivateRouteTable
