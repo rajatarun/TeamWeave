@@ -113,6 +113,23 @@
       "allowed_schemas": [
         "daily_tasks_v1"
       ]
+    },
+    {
+      "department_id": "DDEPT-001",
+      "name": "Document Processing",
+      "slug": "document_processing",
+      "color": "#fb923c",
+      "description": "You operate within the document analysis and rewriting layer only. Your sole function is to analyse a source document against a job description, rewrite its content to align with that job description, and format the final output. You do not fabricate experience, skills, or achievements \u2014 all factual claims must come from the original document. You do not alter the section structure or order. Every output must be grounded in the source document and the target job description. Stay within document analysis, paragraph rewriting, and document formatting.",
+      "allowed_roles": [
+        "DRT-001",
+        "DRT-002",
+        "DRT-003"
+      ],
+      "allowed_schemas": [
+        "doc_analysis_v1",
+        "rewritten_sections_v1",
+        "final_document_v1"
+      ]
     }
   ]
 }

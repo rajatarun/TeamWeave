@@ -31,7 +31,7 @@
   },
   "agents": [
     {
-      "id": "analyzer",
+      "id": "DRT_DDEPT-001_DRT-001_analyzer",
       "name": "Document Analyzer",
       "role_id": "DRT-001",
       "department_id": "DDEPT-001",
@@ -49,7 +49,7 @@
       "schema_ref": "doc_analysis_v1"
     },
     {
-      "id": "rewriter",
+      "id": "DRT_DDEPT-001_DRT-002_rewriter",
       "name": "Paragraph Rewriter",
       "role_id": "DRT-002",
       "department_id": "DDEPT-001",
@@ -63,11 +63,11 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "You are an expert document rewriter specialising in tailoring documents to job descriptions.\n\nYou will receive under STEP_INPUTS_JSON:\n- analyzer: the document analysis with per-section rewrite instructions\n- tool_results.parse_document: the original parsed sections (header + content)\n- request.job_description: the target job description\n\nYour task:\nFor every section in the original document, produce a rewritten version that:\n- Incorporates the keywords_to_add identified by the analyzer\n- Follows the rewrite_instructions exactly\n- Preserves all factual claims (do not fabricate)\n- Keeps the same approximate length as the original\n\nOutput a rewritten_sections JSON object containing every section, even those that did not need major changes.",
+      "goal_template": "You are an expert document rewriter specialising in tailoring documents to job descriptions.\n\nYou will receive under STEP_INPUTS_JSON:\n- DRT_DDEPT-001_DRT-001_analyzer: the document analysis with per-section rewrite instructions\n- tool_results.parse_document: the original parsed sections (header + content)\n- request.job_description: the target job description\n\nYour task:\nFor every section in the original document, produce a rewritten version that:\n- Incorporates the keywords_to_add identified by the analyzer\n- Follows the rewrite_instructions exactly\n- Preserves all factual claims (do not fabricate)\n- Keeps the same approximate length as the original\n\nOutput a rewritten_sections JSON object containing every section, even those that did not need major changes.",
       "schema_ref": "rewritten_sections_v1"
     },
     {
-      "id": "formatter",
+      "id": "DRT_DDEPT-001_DRT-003_formatter",
       "name": "Document Formatter",
       "role_id": "DRT-003",
       "department_id": "DDEPT-001",
@@ -81,13 +81,13 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "You are an expert document formatter.\n\nYou will receive under STEP_INPUTS_JSON:\n- rewriter: the rewritten sections array\n- analyzer: the original analysis including overall_strategy\n\nYour task:\n1. Take all rewritten sections and assemble them into a final_document.\n2. Ensure consistent tone and smooth transitions between sections.\n3. Apply any last polish — remove redundant phrases, ensure professional presentation.\n4. For each section include: index, header, and final content.\n5. Provide a brief summary_of_changes describing what was changed and why.\n\nThe post-processing pipeline will reconstruct the full document text from your sections array, so make sure every section has a non-empty content field.\n\nOutput a final_document JSON object.",
+      "goal_template": "You are an expert document formatter.\n\nYou will receive under STEP_INPUTS_JSON:\n- DRT_DDEPT-001_DRT-002_rewriter: the rewritten sections array\n- DRT_DDEPT-001_DRT-001_analyzer: the original analysis including overall_strategy\n\nYour task:\n1. Take all rewritten sections and assemble them into a final_document.\n2. Ensure consistent tone and smooth transitions between sections.\n3. Apply any last polish — remove redundant phrases, ensure professional presentation.\n4. For each section include: index, header, and final content.\n5. Provide a brief summary_of_changes describing what was changed and why.\n\nThe post-processing pipeline will reconstruct the full document text from your sections array, so make sure every section has a non-empty content field.\n\nOutput a final_document JSON object.",
       "schema_ref": "final_document_v1"
     }
   ],
   "workflow": [
     {
-      "step": "analyzer",
+      "step": "DRT_DDEPT-001_DRT-001_analyzer",
       "pre_tools": [
         {
           "name": "parse_document",
@@ -99,20 +99,20 @@
       "inputs": ["request"]
     },
     {
-      "step": "rewriter",
-      "inputs": ["analyzer", "request"]
+      "step": "DRT_DDEPT-001_DRT-002_rewriter",
+      "inputs": ["DRT_DDEPT-001_DRT-001_analyzer", "request"]
     },
     {
-      "step": "formatter",
+      "step": "DRT_DDEPT-001_DRT-003_formatter",
       "post_tools": [
         {
           "name": "reconstruct_document",
           "args": {
-            "source_key": "formatter"
+            "source_key": "DRT_DDEPT-001_DRT-003_formatter"
           }
         }
       ],
-      "inputs": ["rewriter", "analyzer"]
+      "inputs": ["DRT_DDEPT-001_DRT-002_rewriter", "DRT_DDEPT-001_DRT-001_analyzer"]
     }
   ],
   "schemas": {
