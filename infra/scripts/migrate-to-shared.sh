@@ -156,7 +156,7 @@ PYEOF
     --stack-name "${STACK_NAME}" \
     --template-file "${PATCHED_TEMPLATE}" \
     --region "${REGION}" \
-    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
     --no-fail-on-empty-changeset \
     || die "Failed to apply retention patch to main stack."
 
