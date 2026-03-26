@@ -424,6 +424,281 @@ class TestAggregateMode(unittest.TestCase):
         self.assertAlmostEqual(groups["A1"]["avg_prompt_tokens"], 150.0)
 
 
+class TestNewFilterParams(unittest.TestCase):
+    """Tests for new filter parameters: risk_tier, policy_decision, etc."""
+
+    def _item(self, op="invoke_agent", ts="2024-01-15T10:30:00.000000", trace="t1"):
+        return {
+            "pk": f"OBSERVATORY#{op}", "sk": f"{ts}#{trace}",
+            "trace_id": trace, "operation": op, "timestamp": ts,
+            "prompt_tokens": Decimal("100"), "completion_tokens": Decimal("50"),
+            "cost_usd": Decimal("0.001"), "decision": "allow",
+            "risk_tier": "high", "policy_decision": "block",
+            "composite_risk_level": "critical", "hallucination_risk_level": "medium",
+            "is_shadow": False, "gate_blocked": True, "fallback_used": False,
+        }
+
+    def test_risk_tier_filter_expression_applied(self):
+        tbl = _mock_table(items=[self._item()])
+        _run({"operation": "invoke_agent", "risk_tier": "high"}, table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        self.assertIn("FilterExpression", call_kwargs)
+        values = _condition_values(call_kwargs["FilterExpression"])
+        self.assertIn("high", values)
+
+    def test_policy_decision_filter_expression_applied(self):
+        tbl = _mock_table(items=[self._item()])
+        _run({"operation": "invoke_agent", "policy_decision": "block"}, table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        values = _condition_values(call_kwargs["FilterExpression"])
+        self.assertIn("block", values)
+
+    def test_composite_risk_level_filter_applied(self):
+        tbl = _mock_table(items=[self._item()])
+        _run({"operation": "invoke_agent", "composite_risk_level": "critical"}, table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        values = _condition_values(call_kwargs["FilterExpression"])
+        self.assertIn("critical", values)
+
+    def test_hallucination_risk_level_filter_applied(self):
+        tbl = _mock_table(items=[self._item()])
+        _run({"operation": "invoke_agent", "hallucination_risk_level": "medium"}, table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        values = _condition_values(call_kwargs["FilterExpression"])
+        self.assertIn("medium", values)
+
+    def test_is_shadow_true_filter_applied(self):
+        tbl = _mock_table(items=[self._item()])
+        _run({"operation": "invoke_agent", "is_shadow": "true"}, table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        values = _condition_values(call_kwargs["FilterExpression"])
+        self.assertIn(True, values)
+
+    def test_is_shadow_false_filter_applied(self):
+        tbl = _mock_table(items=[self._item()])
+        _run({"operation": "invoke_agent", "is_shadow": "false"}, table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        values = _condition_values(call_kwargs["FilterExpression"])
+        self.assertIn(False, values)
+
+    def test_gate_blocked_filter_applied(self):
+        tbl = _mock_table(items=[self._item()])
+        _run({"operation": "invoke_agent", "gate_blocked": "true"}, table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        values = _condition_values(call_kwargs["FilterExpression"])
+        self.assertIn(True, values)
+
+    def test_fallback_used_filter_applied(self):
+        tbl = _mock_table(items=[self._item()])
+        _run({"operation": "invoke_agent", "fallback_used": "false"}, table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        values = _condition_values(call_kwargs["FilterExpression"])
+        self.assertIn(False, values)
+
+    def test_multiple_filters_combined(self):
+        tbl = _mock_table(items=[self._item()])
+        _run({"operation": "invoke_agent", "risk_tier": "high", "policy_decision": "block"},
+             table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        values = _condition_values(call_kwargs["FilterExpression"])
+        self.assertIn("high", values)
+        self.assertIn("block", values)
+
+
+class TestNewAggregationModes(unittest.TestCase):
+    """Tests for by_risk_tier, by_composite_risk_level, by_hallucination_risk_level, by_policy_decision."""
+
+    def _item(self, trace, risk_tier="low", composite_risk_level="low",
+              hallucination_risk_level="low", policy_decision="allow",
+              cost="0.001", ts="2024-01-15T10:30:00.000000"):
+        return {
+            "pk": "OBSERVATORY#invoke_agent", "sk": f"{ts}#{trace}",
+            "trace_id": trace, "operation": "invoke_agent", "timestamp": ts,
+            "prompt_tokens": Decimal("100"), "completion_tokens": Decimal("50"),
+            "cost_usd": Decimal(cost), "decision": "allow",
+            "risk_tier": risk_tier,
+            "composite_risk_level": composite_risk_level,
+            "hallucination_risk_level": hallucination_risk_level,
+            "policy_decision": policy_decision,
+        }
+
+    def test_aggregate_by_risk_tier(self):
+        items = [
+            self._item("t1", risk_tier="high"),
+            self._item("t2", risk_tier="high"),
+            self._item("t3", risk_tier="low"),
+        ]
+        tbl = _mock_table(items=items)
+        resp = _run({"operation": "invoke_agent", "aggregate": "by_risk_tier"}, table=tbl)
+        self.assertEqual(resp["statusCode"], 200)
+        body = json.loads(resp["body"])
+        self.assertEqual(body["aggregate"], "by_risk_tier")
+        groups = {g["key"]["risk_tier"]: g for g in body["groups"]}
+        self.assertEqual(groups["high"]["count"], 2)
+        self.assertEqual(groups["low"]["count"], 1)
+
+    def test_aggregate_by_composite_risk_level(self):
+        items = [
+            self._item("t1", composite_risk_level="critical"),
+            self._item("t2", composite_risk_level="moderate"),
+            self._item("t3", composite_risk_level="critical"),
+        ]
+        tbl = _mock_table(items=items)
+        resp = _run({"operation": "invoke_agent", "aggregate": "by_composite_risk_level"}, table=tbl)
+        body = json.loads(resp["body"])
+        groups = {g["key"]["composite_risk_level"]: g for g in body["groups"]}
+        self.assertEqual(groups["critical"]["count"], 2)
+        self.assertEqual(groups["moderate"]["count"], 1)
+
+    def test_aggregate_by_hallucination_risk_level(self):
+        items = [
+            self._item("t1", hallucination_risk_level="high"),
+            self._item("t2", hallucination_risk_level="low"),
+            self._item("t3", hallucination_risk_level="high"),
+        ]
+        tbl = _mock_table(items=items)
+        resp = _run({"operation": "invoke_agent", "aggregate": "by_hallucination_risk_level"}, table=tbl)
+        body = json.loads(resp["body"])
+        groups = {g["key"]["hallucination_risk_level"]: g for g in body["groups"]}
+        self.assertEqual(groups["high"]["count"], 2)
+        self.assertEqual(groups["low"]["count"], 1)
+
+    def test_aggregate_by_policy_decision(self):
+        items = [
+            self._item("t1", policy_decision="allow"),
+            self._item("t2", policy_decision="block"),
+            self._item("t3", policy_decision="allow"),
+        ]
+        tbl = _mock_table(items=items)
+        resp = _run({"operation": "invoke_agent", "aggregate": "by_policy_decision"}, table=tbl)
+        body = json.loads(resp["body"])
+        groups = {g["key"]["policy_decision"]: g for g in body["groups"]}
+        self.assertEqual(groups["allow"]["count"], 2)
+        self.assertEqual(groups["block"]["count"], 1)
+
+    def test_invalid_aggregate_returns_400(self):
+        resp = _run({"aggregate": "by_something_unknown"})
+        self.assertEqual(resp["statusCode"], 400)
+
+
+class TestNewSortByFields(unittest.TestCase):
+    """Tests for new sort_by options: composite_risk_score, hallucination_risk_score, etc."""
+
+    def _item(self, trace, composite_risk=None, hallucination_risk=None,
+              retries=None, grounding=None):
+        item = {
+            "pk": "OBSERVATORY#invoke_agent", "sk": f"2024-01-15T10:30:00#{trace}",
+            "trace_id": trace, "operation": "invoke_agent",
+            "timestamp": "2024-01-15T10:30:00.000000",
+            "prompt_tokens": Decimal("100"), "completion_tokens": Decimal("50"),
+            "cost_usd": Decimal("0.001"), "decision": "allow",
+        }
+        if composite_risk is not None:
+            item["composite_risk_score"] = Decimal(str(composite_risk))
+        if hallucination_risk is not None:
+            item["hallucination_risk_score"] = Decimal(str(hallucination_risk))
+        if retries is not None:
+            item["retries"] = Decimal(str(retries))
+        if grounding is not None:
+            item["grounding_score"] = Decimal(str(grounding))
+        return item
+
+    def test_sort_by_composite_risk_score_desc(self):
+        items = [
+            self._item("low", composite_risk=0.1),
+            self._item("high", composite_risk=0.9),
+            self._item("mid", composite_risk=0.5),
+        ]
+        tbl = _mock_table(items=items)
+        resp = _run({"sort_by": "composite_risk_score", "sort_order": "desc", "operation": "invoke_agent"},
+                    table=tbl)
+        body = json.loads(resp["body"])
+        scores = [i.get("composite_risk_score") for i in body["items"]]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+    def test_sort_by_hallucination_risk_score_asc(self):
+        items = [
+            self._item("a", hallucination_risk=0.8),
+            self._item("b", hallucination_risk=0.2),
+        ]
+        tbl = _mock_table(items=items)
+        resp = _run({"sort_by": "hallucination_risk_score", "sort_order": "asc", "operation": "invoke_agent"},
+                    table=tbl)
+        body = json.loads(resp["body"])
+        scores = [i.get("hallucination_risk_score") for i in body["items"]]
+        self.assertEqual(scores, sorted(scores))
+
+    def test_sort_by_retries_desc(self):
+        items = [
+            self._item("a", retries=0),
+            self._item("b", retries=3),
+            self._item("c", retries=1),
+        ]
+        tbl = _mock_table(items=items)
+        resp = _run({"sort_by": "retries", "sort_order": "desc", "operation": "invoke_agent"},
+                    table=tbl)
+        body = json.loads(resp["body"])
+        retries_vals = [i.get("retries") for i in body["items"]]
+        self.assertEqual(retries_vals, sorted(retries_vals, reverse=True))
+
+    def test_invalid_sort_by_returns_400(self):
+        resp = _run({"sort_by": "unknown_field"})
+        self.assertEqual(resp["statusCode"], 400)
+
+
+class TestNewNumericFieldsInAggregation(unittest.TestCase):
+    """New TraceContext numeric fields are included in aggregation sums/avgs."""
+
+    def _item(self, trace, composite_risk=0.5, retries=1, grounding=0.8):
+        return {
+            "pk": "OBSERVATORY#invoke_agent", "sk": f"2024-01-15T10:30:00#{trace}",
+            "trace_id": trace, "operation": "invoke_agent",
+            "timestamp": "2024-01-15T10:30:00.000000",
+            "prompt_tokens": Decimal("100"), "completion_tokens": Decimal("50"),
+            "cost_usd": Decimal("0.001"), "decision": "allow",
+            "agent_id": "A1",
+            "composite_risk_score": Decimal(str(composite_risk)),
+            "retries": Decimal(str(retries)),
+            "grounding_score": Decimal(str(grounding)),
+        }
+
+    def test_aggregate_includes_composite_risk_score(self):
+        items = [
+            self._item("t1", composite_risk=0.4),
+            self._item("t2", composite_risk=0.6),
+        ]
+        tbl = _mock_table(items=items)
+        resp = _run({"operation": "invoke_agent", "aggregate": "by_agent"}, table=tbl)
+        body = json.loads(resp["body"])
+        groups = {g["key"]["agent_id"]: g for g in body["groups"]}
+        self.assertAlmostEqual(groups["A1"]["sum_composite_risk_score"], 1.0, places=5)
+        self.assertAlmostEqual(groups["A1"]["avg_composite_risk_score"], 0.5, places=5)
+
+    def test_aggregate_includes_retries(self):
+        items = [
+            self._item("t1", retries=2),
+            self._item("t2", retries=4),
+        ]
+        tbl = _mock_table(items=items)
+        resp = _run({"operation": "invoke_agent", "aggregate": "by_agent"}, table=tbl)
+        body = json.loads(resp["body"])
+        groups = {g["key"]["agent_id"]: g for g in body["groups"]}
+        self.assertAlmostEqual(groups["A1"]["sum_retries"], 6.0, places=5)
+        self.assertAlmostEqual(groups["A1"]["avg_retries"], 3.0, places=5)
+
+    def test_aggregate_includes_grounding_score(self):
+        items = [
+            self._item("t1", grounding=0.9),
+            self._item("t2", grounding=0.7),
+        ]
+        tbl = _mock_table(items=items)
+        resp = _run({"operation": "invoke_agent", "aggregate": "by_agent"}, table=tbl)
+        body = json.loads(resp["body"])
+        groups = {g["key"]["agent_id"]: g for g in body["groups"]}
+        self.assertIn("sum_grounding_score", groups["A1"])
+        self.assertAlmostEqual(groups["A1"]["sum_grounding_score"], 1.6, places=5)
+
+
 class TestTimestampParsing(unittest.TestCase):
     def test_iso_timestamp_passed_through(self):
         m = _load()

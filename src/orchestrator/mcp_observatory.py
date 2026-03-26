@@ -40,6 +40,31 @@ _ddb_table = None
 
 _TTL_SECONDS = 90 * 24 * 60 * 60  # 90 days
 
+# Sentinel for distinguishing "attribute absent" from "attribute is None"
+_MISSING = object()
+
+# TraceContext field groups used by _extract_span_fields
+_SPAN_FLOAT_FIELDS = (
+    "confidence", "grounding_score", "verifier_score", "self_consistency_score",
+    "numeric_variance_score", "hallucination_risk_score",
+    "grounding_risk", "self_consistency_risk", "numeric_instability_risk",
+    "tool_mismatch_risk", "drift_risk", "composite_risk_score",
+)
+_SPAN_INT_FIELDS = ("retries", "prompt_size_chars", "exec_token_ttl_ms")
+_SPAN_BOOL_FIELDS = (
+    "fallback_used", "is_shadow", "gate_blocked",
+    "tool_claim_mismatch", "exec_token_verified",
+)
+_SPAN_STR_FIELDS = (
+    "span_id", "parent_span_id", "risk_tier", "prompt_template_id", "prompt_hash",
+    "normalized_prompt_hash", "answer_hash", "hallucination_risk_level",
+    "shadow_parent_trace_id", "fallback_type", "fallback_reason",
+    "request_id", "method", "tool_name", "tool_args_hash", "tool_criticality",
+    "policy_decision", "policy_id", "policy_version",
+    "composite_risk_level", "exec_token_id", "exec_token_hash",
+)
+_SPAN_DATETIME_FIELDS = ("start_time", "end_time")
+
 
 def _get_ddb_table():
     """Return the DynamoDB Table resource, creating it once per process."""
@@ -58,6 +83,48 @@ def _to_decimal(value: float) -> Decimal:
         return Decimal(str(round(value, 8)))
     except InvalidOperation:
         return Decimal("0")
+
+
+def _extract_span_fields(span) -> dict:
+    """Extract all TraceContext fields from an mcp-observatory span into a DynamoDB-ready dict.
+
+    Only fields present on the span object and not None are included.  Fields
+    already written explicitly by ``_push_metric`` (trace_id, prompt_tokens,
+    completion_tokens, cost_usd, shadow_disagreement_score,
+    shadow_numeric_variance) are intentionally excluded here to avoid
+    duplication.
+    """
+    result: dict = {}
+
+    for field in _SPAN_FLOAT_FIELDS:
+        val = getattr(span, field, _MISSING)
+        if val is not _MISSING and val is not None:
+            result[field] = _to_decimal(val)
+
+    for field in _SPAN_INT_FIELDS:
+        val = getattr(span, field, _MISSING)
+        if val is not _MISSING and val is not None:
+            result[field] = Decimal(int(val))
+
+    for field in _SPAN_BOOL_FIELDS:
+        val = getattr(span, field, _MISSING)
+        if val is not _MISSING and val is not None:
+            result[field] = bool(val)
+
+    for field in _SPAN_STR_FIELDS:
+        val = getattr(span, field, _MISSING)
+        if val is not _MISSING and val is not None:
+            result[field] = str(val)
+
+    for field in _SPAN_DATETIME_FIELDS:
+        val = getattr(span, field, _MISSING)
+        if val is not _MISSING and val is not None:
+            try:
+                result[field] = val.isoformat() if hasattr(val, "isoformat") else str(val)
+            except Exception:  # noqa: BLE001
+                pass
+
+    return result
 
 
 def _push_metric(operation: str, span, decision, extra: dict) -> None:
@@ -95,6 +162,11 @@ def _push_metric(operation: str, span, decision, extra: dict) -> None:
                 item["shadow_disagreement_score"] = _to_decimal(span.shadow_disagreement_score)
             if span.shadow_numeric_variance is not None:
                 item["shadow_numeric_variance"] = _to_decimal(span.shadow_numeric_variance)
+
+            # Merge remaining TraceContext fields (don't overwrite already-set keys)
+            for k, v in _extract_span_fields(span).items():
+                if k not in item:
+                    item[k] = v
 
             item.update({k: str(v) if isinstance(v, float) else v for k, v in extra.items()})
 
