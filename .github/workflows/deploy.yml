@@ -25,11 +25,6 @@ env:
   VPC_ID: vpc-f3c92a8a
   LAMBDA_SUBNET_CIDR_AZ1: "172.31.96.0/24"
   LAMBDA_SUBNET_CIDR_AZ2: "172.31.97.0/24"
-  # Set after first deploy associates the IPv6 /56 to the VPC. Run:
-  #   aws ec2 describe-vpcs --vpc-ids vpc-f3c92a8a \
-  #     --query 'Vpcs[0].Ipv6CidrBlockAssociationSet[0].Ipv6CidrBlock'
-  # then paste the /56 here and redeploy to activate dual-stack on Lambda subnets.
-  VPC_IPV6_BLOCK: "2600:1618:62b:5900::/56"
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -73,10 +68,24 @@ jobs:
       - name: Deploy Shared Infrastructure Stack
         run: |
           cd infra
+
+          # Discover the VPC's actual associated IPv6 CIDR from AWS — source of truth.
+          # This avoids hardcoding a CIDR that may differ from what VpcIpv6CidrBlock assigned.
+          _discover_ipv6() {
+            aws ec2 describe-vpcs \
+              --vpc-ids "${VPC_ID}" \
+              --region "${AWS_REGION}" \
+              --query 'Vpcs[0].Ipv6CidrBlockAssociationSet[?State==`associated`] | [0].Ipv6CidrBlock' \
+              --output text 2>/dev/null || echo ""
+          }
+          EFFECTIVE_IPV6=$(_discover_ipv6)
+          [ "${EFFECTIVE_IPV6}" = "None" ] && EFFECTIVE_IPV6=""
+          echo "VPC IPv6 CIDR: ${EFFECTIVE_IPV6:-<none yet — VpcIpv6CidrBlock will request one>}"
+
           PARAM_OVERRIDES="VpcId=${VPC_ID}"
-          [ -n "${LAMBDA_SUBNET_CIDR_AZ1}" ]    && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz1=${LAMBDA_SUBNET_CIDR_AZ1}"
-          [ -n "${LAMBDA_SUBNET_CIDR_AZ2}" ]    && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz2=${LAMBDA_SUBNET_CIDR_AZ2}"
-          [ -n "${VPC_IPV6_BLOCK}" ]            && PARAM_OVERRIDES="${PARAM_OVERRIDES} VpcIpv6Block=${VPC_IPV6_BLOCK}"
+          [ -n "${LAMBDA_SUBNET_CIDR_AZ1}" ] && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz1=${LAMBDA_SUBNET_CIDR_AZ1}"
+          [ -n "${LAMBDA_SUBNET_CIDR_AZ2}" ] && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz2=${LAMBDA_SUBNET_CIDR_AZ2}"
+          [ -n "${EFFECTIVE_IPV6}" ]         && PARAM_OVERRIDES="${PARAM_OVERRIDES} VpcIpv6Block=${EFFECTIVE_IPV6}"
 
           sam deploy \
             --template-file shared.yaml \
@@ -88,6 +97,27 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides ${PARAM_OVERRIDES}
+
+          # Two-pass: if the VPC had no IPv6 CIDR before this deploy, VpcIpv6CidrBlock
+          # just created one. Re-deploy immediately with the newly assigned CIDR so
+          # Lambda subnets get their /64 CIDRs in the same CI run.
+          if [ -z "${EFFECTIVE_IPV6}" ]; then
+            NEWLY_ASSIGNED=$(_discover_ipv6)
+            [ "${NEWLY_ASSIGNED}" = "None" ] && NEWLY_ASSIGNED=""
+            if [ -n "${NEWLY_ASSIGNED}" ]; then
+              echo "IPv6 CIDR newly assigned: ${NEWLY_ASSIGNED} — re-deploying to activate dual-stack subnets."
+              sam deploy \
+                --template-file shared.yaml \
+                --stack-name "${SHARED_STACK_NAME}" \
+                --region "${AWS_REGION}" \
+                --capabilities CAPABILITY_NAMED_IAM \
+                --resolve-s3 \
+                --s3-prefix "${SHARED_STACK_NAME}" \
+                --no-confirm-changeset \
+                --no-fail-on-empty-changeset \
+                --parameter-overrides "${PARAM_OVERRIDES} VpcIpv6Block=${NEWLY_ASSIGNED}"
+            fi
+          fi
 
       - name: Fetch Shared Stack Outputs
         run: |
