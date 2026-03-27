@@ -60,7 +60,6 @@ Conditions:
     - !Not [!Equals [!Ref PrivateRouteTableId, ""]]
     - !Not [!Equals [!Ref VpcId, ""]]
     - !Not [!Equals [!Ref EgressOnlyInternetGatewayId, ""]]
-  HasBedrockVpce: !Not [!Equals [!Ref VpcId, ""]]
   HasVpcIpv6Block: !And
     - !Not [!Equals [!Ref VpcId, ""]]
     - !Not [!Equals [!Ref VpcIpv6Block, ""]]
@@ -226,103 +225,6 @@ Resources:
       RouteTableId: !Ref LambdaRouteTable
 
   # ---------------------------------------------------------------------------
-  # Bedrock Interface VPC endpoints — keep Bedrock traffic off the internet
-  # ---------------------------------------------------------------------------
-  # Only created when LambdaSubnetIds is provided. Cost: ~$7/month per endpoint
-  # per AZ. Use the IPv6 EIGW route instead if cost is a concern.
-
-  BedrockVpceSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Condition: HasBedrockVpce
-    Properties:
-      GroupDescription: Allows Lambda functions to reach Bedrock Interface VPC endpoints over HTTPS
-      VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: HTTPS from within the VPC (IPv4)
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIpv6: "::/0"
-          Description: HTTPS from within the VPC (IPv6)
-      Tags:
-        - Key: Stack
-          Value: !Ref AWS::StackName
-
-  BedrockRuntimeVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasBedrockVpce
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-runtime"
-      VpcEndpointType: Interface
-      SubnetIds:
-        - !Ref LambdaSubnetAz1
-        - !Ref LambdaSubnetAz2
-      SecurityGroupIds:
-        - !Ref BedrockVpceSecurityGroup
-      PrivateDnsEnabled: true
-
-  BedrockAgentRuntimeVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasBedrockVpce
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-agent-runtime"
-      VpcEndpointType: Interface
-      SubnetIds:
-        - !Ref LambdaSubnetAz1
-        - !Ref LambdaSubnetAz2
-      SecurityGroupIds:
-        - !Ref BedrockVpceSecurityGroup
-      PrivateDnsEnabled: true
-
-  StepFunctionsVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasBedrockVpce
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.states"
-      VpcEndpointType: Interface
-      SubnetIds:
-        - !Ref LambdaSubnetAz1
-        - !Ref LambdaSubnetAz2
-      SecurityGroupIds:
-        - !Ref BedrockVpceSecurityGroup
-      PrivateDnsEnabled: true
-
-  LambdaServiceVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasBedrockVpce
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.lambda"
-      VpcEndpointType: Interface
-      SubnetIds:
-        - !Ref LambdaSubnetAz1
-        - !Ref LambdaSubnetAz2
-      SecurityGroupIds:
-        - !Ref BedrockVpceSecurityGroup
-      PrivateDnsEnabled: true
-
-  SecretsManagerVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasBedrockVpce
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
-      VpcEndpointType: Interface
-      SubnetIds:
-        - !Ref LambdaSubnetAz1
-        - !Ref LambdaSubnetAz2
-      SecurityGroupIds:
-        - !Ref BedrockVpceSecurityGroup
-      PrivateDnsEnabled: true
-
-  # ---------------------------------------------------------------------------
   # Lambda route table + Egress-Only Internet Gateway (owned by this stack)
   # ---------------------------------------------------------------------------
   # The stack creates its own private route table and EIGW so no external
@@ -451,16 +353,3 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-VpcIpv6Block"
 
-  BedrockRuntimeVpcEndpointId:
-    Condition: HasBedrockVpce
-    Description: Interface VPC endpoint ID for bedrock-runtime
-    Value: !Ref BedrockRuntimeVpcEndpoint
-    Export:
-      Name: !Sub "${AWS::StackName}-BedrockRuntimeVpcEndpointId"
-
-  BedrockAgentRuntimeVpcEndpointId:
-    Condition: HasBedrockVpce
-    Description: Interface VPC endpoint ID for bedrock-agent-runtime
-    Value: !Ref BedrockAgentRuntimeVpcEndpoint
-    Export:
-      Name: !Sub "${AWS::StackName}-BedrockAgentRuntimeVpcEndpointId"
