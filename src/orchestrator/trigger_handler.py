@@ -10,7 +10,7 @@ from botocore.exceptions import ClientError
 from .config_loader import load_team_config
 from .db import DbDao
 
-sfn = boto3.client("stepfunctions")
+sfn = boto3.client("stepfunctions", endpoint_url=os.environ.get("STEPFUNCTIONS_ENDPOINT_URL"))
 lambda_client = boto3.client("lambda")
 
 
