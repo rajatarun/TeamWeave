@@ -2,9 +2,11 @@ import json
 import time
 from typing import Optional
 
+import os
+
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ConnectTimeoutError, ReadTimeoutError
 
 from .logger import get_logger
 from .mcp_observatory import observe_agent_request
@@ -77,7 +79,27 @@ def invoke_agent(agent_id: str, alias_id: str, session_id: str, input_text: str,
                     )
             return "".join(out_chunks).strip()
         except Exception as e:
-            if isinstance(e, ClientError):
+            if isinstance(e, ConnectTimeoutError):
+                log.error(
+                    "InvokeAgent connect timeout — possible VPC endpoint routing issue",
+                    extra={
+                        "agent_id": agent_id,
+                        "alias_id": alias_id,
+                        "endpoint_url": os.environ.get("AWS_ENDPOINT_URL_BEDROCK_AGENT_RUNTIME", "<sdk-default>"),
+                        "err": str(e)[:400],
+                    },
+                )
+            elif isinstance(e, ReadTimeoutError):
+                log.error(
+                    "InvokeAgent read timeout",
+                    extra={
+                        "agent_id": agent_id,
+                        "alias_id": alias_id,
+                        "attempt": attempt,
+                        "err": str(e)[:400],
+                    },
+                )
+            elif isinstance(e, ClientError):
                 error_code = ((e.response or {}).get("Error") or {}).get("Code", "")
                 if error_code in {"AccessDeniedException", "UnrecognizedClientException", "ExpiredTokenException"}:
                     message = (
