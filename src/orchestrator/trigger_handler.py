@@ -9,9 +9,11 @@ from botocore.exceptions import ClientError
 
 from .config_loader import load_team_config
 from .db import DbDao
+from .logger import get_logger
 
 sfn = boto3.client("stepfunctions")
 lambda_client = boto3.client("lambda")
+log = get_logger("trigger_handler")
 
 
 # ASSUMPTION: Existing non-/team/task routes remain on this Lambda to avoid breaking current API consumers.
@@ -53,9 +55,29 @@ def _json_body(event: Dict[str, Any]) -> Dict[str, Any]:
 def _start_async_execution(state_machine_arn: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     run_id = str(uuid.uuid4())
     payload_with_run_id = {**payload, "run_id": run_id}
+    log.info(
+        "stepfunctions_start_execution_requested",
+        extra={
+            "run_id": run_id,
+            "state_machine_arn": state_machine_arn,
+            "operation": payload_with_run_id.get("operation", "team_task"),
+            "method": payload_with_run_id.get("method"),
+            "path": payload_with_run_id.get("path"),
+            "team": payload_with_run_id.get("team"),
+            "version": payload_with_run_id.get("version"),
+        },
+    )
     execution = sfn.start_execution(stateMachineArn=state_machine_arn, input=json.dumps(payload_with_run_id))
     execution_arn = execution.get("executionArn")
     execution_id = execution_arn.rsplit(":", 1)[-1] if isinstance(execution_arn, str) and execution_arn else None
+    log.info(
+        "stepfunctions_start_execution_succeeded",
+        extra={
+            "run_id": run_id,
+            "execution_arn": execution_arn,
+            "execution_id": execution_id,
+        },
+    )
     return _resp(
         202,
         {
