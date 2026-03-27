@@ -336,7 +336,12 @@ def _bump_version(v: str) -> str:
 
 
 def _bedrock(cfg):
-    return boto3.client("bedrock-agent", region_name=cfg["region"])
+    from botocore.config import Config
+    return boto3.client(
+        "bedrock-agent",
+        region_name=cfg["region"],
+        config=Config(connect_timeout=10, read_timeout=60),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

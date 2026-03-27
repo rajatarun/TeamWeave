@@ -18,6 +18,8 @@ Environment variables:
 import json
 import os
 import boto3
+from botocore.config import Config
+from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
 from .json_utils import extract_json_payload
 from .logger import get_logger
 
@@ -118,6 +120,7 @@ def _client():
         _bedrock_runtime = boto3.client(
             "bedrock-runtime",
             region_name=os.environ.get("AWS_REGION", "us-east-1"),
+            config=Config(connect_timeout=10, read_timeout=120),
         )
     return _bedrock_runtime
 
@@ -149,16 +152,30 @@ def _has_placeholder(obj, depth=0) -> bool:
 
 
 def _invoke_claude(prompt: str) -> str:
-    response = _client().invoke_model(
-        modelId=ENRICH_MODEL,
-        contentType="application/json",
-        accept="application/json",
-        body=json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 8192,
-            "messages": [{"role": "user", "content": prompt}],
-        }),
-    )
+    try:
+        response = _client().invoke_model(
+            modelId=ENRICH_MODEL,
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 8192,
+                "messages": [{"role": "user", "content": prompt}],
+            }),
+        )
+    except ConnectTimeoutError as e:
+        log.error(
+            "enrich_connect_timeout — possible VPC endpoint routing issue",
+            extra={
+                "model_id": ENRICH_MODEL,
+                "endpoint_url": os.environ.get("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "<sdk-default>"),
+                "err": str(e)[:400],
+            },
+        )
+        raise
+    except ReadTimeoutError as e:
+        log.error("enrich_read_timeout", extra={"model_id": ENRICH_MODEL, "err": str(e)[:400]})
+        raise
     body = json.loads(response["body"].read())
     text = body["content"][0]["text"].strip()
     if text.startswith("```"):
