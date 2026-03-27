@@ -23,8 +23,6 @@ env:
   ASSUME_ROLE_ARN: arn:aws:iam::239571291755:role/teamweave-github-actions-sam-deployer
   # VPC / networking config consumed by the shared stack
   VPC_ID: vpc-f3c92a8a
-  PRIVATE_ROUTE_TABLE_ID: ""
-  EIGW_ID: ""
   LAMBDA_SUBNET_CIDR_AZ1: "172.31.96.0/24"
   LAMBDA_SUBNET_CIDR_AZ2: "172.31.97.0/24"
 jobs:
@@ -71,8 +69,6 @@ jobs:
         run: |
           cd infra
           PARAM_OVERRIDES="VpcId=${VPC_ID}"
-          [ -n "${PRIVATE_ROUTE_TABLE_ID}" ]    && PARAM_OVERRIDES="${PARAM_OVERRIDES} PrivateRouteTableId=${PRIVATE_ROUTE_TABLE_ID}"
-          [ -n "${EIGW_ID}" ]                   && PARAM_OVERRIDES="${PARAM_OVERRIDES} EgressOnlyInternetGatewayId=${EIGW_ID}"
           [ -n "${LAMBDA_SUBNET_CIDR_AZ1}" ]    && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz1=${LAMBDA_SUBNET_CIDR_AZ1}"
           [ -n "${LAMBDA_SUBNET_CIDR_AZ2}" ]    && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz2=${LAMBDA_SUBNET_CIDR_AZ2}"
 
@@ -109,6 +105,9 @@ jobs:
           DYNAMODB_VPCE_ID=$(get_output DynamoDbVpcEndpointId)
           BEDROCK_RUNTIME_VPCE_ID=$(get_output BedrockRuntimeVpcEndpointId)
           BEDROCK_AGENT_RUNTIME_VPCE_ID=$(get_output BedrockAgentRuntimeVpcEndpointId)
+          EIGW_ID=$(get_output EgressOnlyInternetGatewayId)
+          IPV6_EGRESS_ENABLED=$(get_output Ipv6EgressEnabled)
+          DUAL_STACK_ENABLED=$(get_output DualStackEnabled)
 
           if [ -z "${OBSERVATORY_METRICS_TABLE_NAME}" ] || [ -z "${AMP_WORKSPACE_ID}" ]; then
             echo "ERROR: Required outputs missing from shared stack ${SHARED_STACK_NAME}"
@@ -124,6 +123,9 @@ jobs:
           echo "DYNAMODB_VPCE_ID=${DYNAMODB_VPCE_ID}"                             >> $GITHUB_ENV
           echo "BEDROCK_RUNTIME_VPCE_ID=${BEDROCK_RUNTIME_VPCE_ID}"               >> $GITHUB_ENV
           echo "BEDROCK_AGENT_RUNTIME_VPCE_ID=${BEDROCK_AGENT_RUNTIME_VPCE_ID}"   >> $GITHUB_ENV
+          echo "EIGW_ID=${EIGW_ID}"                                               >> $GITHUB_ENV
+          echo "IPV6_EGRESS_ENABLED=${IPV6_EGRESS_ENABLED}"                       >> $GITHUB_ENV
+          echo "DUAL_STACK_ENABLED=${DUAL_STACK_ENABLED}"                         >> $GITHUB_ENV
 
           echo "Shared stack outputs fetched:"
           echo "  ObservatoryMetricsTableName      = ${OBSERVATORY_METRICS_TABLE_NAME}"
@@ -133,6 +135,9 @@ jobs:
           echo "  DynamoDbVpcEndpointId            = ${DYNAMODB_VPCE_ID:-<not created>}"
           echo "  BedrockRuntimeVpcEndpointId      = ${BEDROCK_RUNTIME_VPCE_ID:-<not created>}"
           echo "  BedrockAgentRuntimeVpcEndpointId = ${BEDROCK_AGENT_RUNTIME_VPCE_ID:-<not created>}"
+          echo "  EgressOnlyInternetGatewayId      = ${EIGW_ID:-<not created>}"
+          echo "  Ipv6EgressEnabled                = ${IPV6_EGRESS_ENABLED}"
+          echo "  DualStackEnabled                 = ${DUAL_STACK_ENABLED}"
 
       - name: Fetch SIWE Authorizer ARN from siwe-infra stack
         run: |
@@ -173,6 +178,7 @@ jobs:
           [ -n "${DYNAMODB_VPCE_ID}" ]             && PARAM_OVERRIDES+=("DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}")
           [ -n "${BEDROCK_RUNTIME_VPCE_ID}" ]      && PARAM_OVERRIDES+=("BedrockRuntimeVpcEndpointId=${BEDROCK_RUNTIME_VPCE_ID}")
           [ -n "${BEDROCK_AGENT_RUNTIME_VPCE_ID}" ] && PARAM_OVERRIDES+=("BedrockAgentRuntimeVpcEndpointId=${BEDROCK_AGENT_RUNTIME_VPCE_ID}")
+          [ -n "${DUAL_STACK_ENABLED}" ]           && PARAM_OVERRIDES+=("DualStackEnabled=${DUAL_STACK_ENABLED}")
 
           sam deploy \
             --stack-name "${STACK_NAME}" \
