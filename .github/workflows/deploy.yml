@@ -25,8 +25,8 @@ env:
   VPC_ID: vpc-f3c92a8a
   PRIVATE_ROUTE_TABLE_ID: ""
   EIGW_ID: ""
-  LAMBDA_SUBNET_CIDR_AZ1: "10.0.10.0/24"
-  LAMBDA_SUBNET_CIDR_AZ2: "10.0.11.0/24"
+  LAMBDA_SUBNET_CIDR_AZ1: "172.31.96.0/24"
+  LAMBDA_SUBNET_CIDR_AZ2: "172.31.97.0/24"
 jobs:
   deploy:
     runs-on: ubuntu-latest
