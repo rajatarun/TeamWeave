@@ -29,7 +29,7 @@ env:
   #   aws ec2 describe-vpcs --vpc-ids vpc-f3c92a8a \
   #     --query 'Vpcs[0].Ipv6CidrBlockAssociationSet[0].Ipv6CidrBlock'
   # then paste the /56 here and redeploy to activate dual-stack on Lambda subnets.
-  VPC_IPV6_BLOCK: ""
+  VPC_IPV6_BLOCK: "2600:1618:62b:5900::/56"
 jobs:
   deploy:
     runs-on: ubuntu-latest
