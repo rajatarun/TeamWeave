@@ -125,14 +125,6 @@ Parameters:
     Type: String
     Default: ""
     Description: DynamoDB Gateway VPC endpoint ID — taken from shared stack DynamoDbVpcEndpointId output (optional).
-  BedrockRuntimeVpcEndpointId:
-    Type: String
-    Default: ""
-    Description: Bedrock Runtime Interface VPC endpoint ID — taken from shared stack BedrockRuntimeVpcEndpointId output (optional).
-  BedrockAgentRuntimeVpcEndpointId:
-    Type: String
-    Default: ""
-    Description: Bedrock Agent Runtime Interface VPC endpoint ID — taken from shared stack BedrockAgentRuntimeVpcEndpointId output (optional).
   DualStackEnabled:
     Type: String
     Default: "false"
@@ -1466,12 +1458,6 @@ Outputs:
   DynamoDbVpcEndpointId:
     Value: !Ref DynamoDbVpcEndpointId
     Description: DynamoDB Gateway VPC endpoint ID (sourced from shared stack)
-  BedrockRuntimeVpcEndpointId:
-    Value: !Ref BedrockRuntimeVpcEndpointId
-    Description: Bedrock Runtime Interface VPC endpoint ID (sourced from shared stack)
-  BedrockAgentRuntimeVpcEndpointId:
-    Value: !Ref BedrockAgentRuntimeVpcEndpointId
-    Description: Bedrock Agent Runtime Interface VPC endpoint ID (sourced from shared stack)
   DualStackEnabled:
     Value: !Ref DualStackEnabled
     Description: Whether Lambda subnets are dual-stack (IPv4 + IPv6) — sourced from shared stack
