@@ -40,6 +40,20 @@ Parameters:
     Description: >
       IPv4 CIDR for the second Lambda private subnet (AZ index 1). Must be within the VPC
       CIDR and must not overlap with existing subnets.
+  LambdaSubnetIpv6CidrAz1:
+    Type: String
+    Default: ""
+    Description: >
+      IPv6 /64 CIDR for the first Lambda private subnet (AZ index 0). When provided
+      together with LambdaSubnetIpv6CidrAz2 the subnets become dual-stack (IPv4 + IPv6).
+      Must be a /64 carved from the VPC's allocated IPv6 CIDR block.
+  LambdaSubnetIpv6CidrAz2:
+    Type: String
+    Default: ""
+    Description: >
+      IPv6 /64 CIDR for the second Lambda private subnet (AZ index 1). When provided
+      together with LambdaSubnetIpv6CidrAz1 the subnets become dual-stack (IPv4 + IPv6).
+      Must be a /64 carved from the VPC's allocated IPv6 CIDR block.
 
 Conditions:
   HasAmpWorkspaceAlias: !Not [!Equals [!Ref AmpWorkspaceAlias, ""]]
@@ -52,6 +66,10 @@ Conditions:
     - !Not [!Equals [!Ref VpcId, ""]]
     - !Not [!Equals [!Ref EgressOnlyInternetGatewayId, ""]]
   HasBedrockVpce: !Not [!Equals [!Ref VpcId, ""]]
+  HasIpv6Subnets: !And
+    - !Not [!Equals [!Ref VpcId, ""]]
+    - !Not [!Equals [!Ref LambdaSubnetIpv6CidrAz1, ""]]
+    - !Not [!Equals [!Ref LambdaSubnetIpv6CidrAz2, ""]]
 
 Resources:
 
@@ -145,6 +163,8 @@ Resources:
     Properties:
       VpcId: !Ref VpcId
       CidrBlock: !Ref LambdaSubnetCidrAz1
+      Ipv6CidrBlock: !If [HasIpv6Subnets, !Ref LambdaSubnetIpv6CidrAz1, !Ref "AWS::NoValue"]
+      AssignIpv6AddressOnCreation: !If [HasIpv6Subnets, true, !Ref "AWS::NoValue"]
       AvailabilityZone: !Select
         - 0
         - !GetAZs ""
@@ -161,6 +181,8 @@ Resources:
     Properties:
       VpcId: !Ref VpcId
       CidrBlock: !Ref LambdaSubnetCidrAz2
+      Ipv6CidrBlock: !If [HasIpv6Subnets, !Ref LambdaSubnetIpv6CidrAz2, !Ref "AWS::NoValue"]
+      AssignIpv6AddressOnCreation: !If [HasIpv6Subnets, true, !Ref "AWS::NoValue"]
       AvailabilityZone: !Select
         - 1
         - !GetAZs ""
@@ -202,7 +224,12 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
-          Description: HTTPS from within the VPC
+          Description: HTTPS from within the VPC (IPv4)
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIpv6: "::/0"
+          Description: HTTPS from within the VPC (IPv6)
       Tags:
         - Key: Stack
           Value: !Ref AWS::StackName
@@ -313,6 +340,26 @@ Outputs:
     Value: !If [HasPrivateRouteTableAndEigw, "true", "false"]
     Export:
       Name: !Sub "${AWS::StackName}-Ipv6EgressEnabled"
+
+  DualStackEnabled:
+    Description: Whether Lambda subnets are configured for dual-stack (IPv4 + IPv6)
+    Value: !If [HasIpv6Subnets, "true", "false"]
+    Export:
+      Name: !Sub "${AWS::StackName}-DualStackEnabled"
+
+  LambdaSubnetIpv6CidrAz1:
+    Condition: HasIpv6Subnets
+    Description: IPv6 /64 CIDR of the first dual-stack Lambda subnet (AZ index 0)
+    Value: !Ref LambdaSubnetIpv6CidrAz1
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaSubnetIpv6CidrAz1"
+
+  LambdaSubnetIpv6CidrAz2:
+    Condition: HasIpv6Subnets
+    Description: IPv6 /64 CIDR of the second dual-stack Lambda subnet (AZ index 1)
+    Value: !Ref LambdaSubnetIpv6CidrAz2
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaSubnetIpv6CidrAz2"
 
   BedrockRuntimeVpcEndpointId:
     Condition: HasBedrockVpce
