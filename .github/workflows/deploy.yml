@@ -139,9 +139,9 @@ jobs:
           LAMBDA_SUBNET_IDS=$(get_output LambdaSubnetIds)
           S3_VPCE_ID=$(get_output S3VpcEndpointId)
           DYNAMODB_VPCE_ID=$(get_output DynamoDbVpcEndpointId)
+          EIGW_ID=$(get_output EgressOnlyInternetGatewayId)
           BEDROCK_RUNTIME_VPCE_ID=$(get_output BedrockRuntimeVpcEndpointId)
           BEDROCK_AGENT_RUNTIME_VPCE_ID=$(get_output BedrockAgentRuntimeVpcEndpointId)
-          EIGW_ID=$(get_output EgressOnlyInternetGatewayId)
           IPV6_EGRESS_ENABLED=$(get_output Ipv6EgressEnabled)
           DUAL_STACK_ENABLED=$(get_output DualStackEnabled)
           VPC_IPV6_BLOCK_OUT=$(get_output VpcIpv6Block)
@@ -158,9 +158,9 @@ jobs:
           echo "LAMBDA_SUBNET_IDS=${LAMBDA_SUBNET_IDS}"                           >> $GITHUB_ENV
           echo "S3_VPCE_ID=${S3_VPCE_ID}"                                         >> $GITHUB_ENV
           echo "DYNAMODB_VPCE_ID=${DYNAMODB_VPCE_ID}"                             >> $GITHUB_ENV
+          echo "EIGW_ID=${EIGW_ID}"                                               >> $GITHUB_ENV
           echo "BEDROCK_RUNTIME_VPCE_ID=${BEDROCK_RUNTIME_VPCE_ID}"               >> $GITHUB_ENV
           echo "BEDROCK_AGENT_RUNTIME_VPCE_ID=${BEDROCK_AGENT_RUNTIME_VPCE_ID}"   >> $GITHUB_ENV
-          echo "EIGW_ID=${EIGW_ID}"                                               >> $GITHUB_ENV
           echo "IPV6_EGRESS_ENABLED=${IPV6_EGRESS_ENABLED}"                       >> $GITHUB_ENV
           echo "DUAL_STACK_ENABLED=${DUAL_STACK_ENABLED}"                         >> $GITHUB_ENV
           echo "VPC_IPV6_BLOCK_OUT=${VPC_IPV6_BLOCK_OUT}"                         >> $GITHUB_ENV
@@ -171,9 +171,9 @@ jobs:
           echo "  LambdaSubnetIds                  = ${LAMBDA_SUBNET_IDS:-<not created>}"
           echo "  S3VpcEndpointId                  = ${S3_VPCE_ID:-<not created>}"
           echo "  DynamoDbVpcEndpointId            = ${DYNAMODB_VPCE_ID:-<not created>}"
+          echo "  EgressOnlyInternetGatewayId      = ${EIGW_ID:-<not created>}"
           echo "  BedrockRuntimeVpcEndpointId      = ${BEDROCK_RUNTIME_VPCE_ID:-<not created>}"
           echo "  BedrockAgentRuntimeVpcEndpointId = ${BEDROCK_AGENT_RUNTIME_VPCE_ID:-<not created>}"
-          echo "  EgressOnlyInternetGatewayId      = ${EIGW_ID:-<not created>}"
           echo "  Ipv6EgressEnabled                = ${IPV6_EGRESS_ENABLED}"
           echo "  DualStackEnabled                 = ${DUAL_STACK_ENABLED}"
           echo "  VpcIpv6Block                     = ${VPC_IPV6_BLOCK_OUT:-<not yet assigned — set VPC_IPV6_BLOCK after first deploy>}"
@@ -215,7 +215,7 @@ jobs:
           [ -n "${LAMBDA_SUBNET_IDS}" ]            && PARAM_OVERRIDES+=("LambdaSubnetIds=${LAMBDA_SUBNET_IDS}")
           [ -n "${S3_VPCE_ID}" ]                   && PARAM_OVERRIDES+=("S3VpcEndpointId=${S3_VPCE_ID}")
           [ -n "${DYNAMODB_VPCE_ID}" ]              && PARAM_OVERRIDES+=("DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}")
-          [ -n "${BEDROCK_RUNTIME_VPCE_ID}" ]      && PARAM_OVERRIDES+=("BedrockRuntimeVpcEndpointId=${BEDROCK_RUNTIME_VPCE_ID}")
+          [ -n "${BEDROCK_RUNTIME_VPCE_ID}" ]       && PARAM_OVERRIDES+=("BedrockRuntimeVpcEndpointId=${BEDROCK_RUNTIME_VPCE_ID}")
           [ -n "${BEDROCK_AGENT_RUNTIME_VPCE_ID}" ] && PARAM_OVERRIDES+=("BedrockAgentRuntimeVpcEndpointId=${BEDROCK_AGENT_RUNTIME_VPCE_ID}")
           [ -n "${DUAL_STACK_ENABLED}" ]            && PARAM_OVERRIDES+=("DualStackEnabled=${DUAL_STACK_ENABLED}")
 
