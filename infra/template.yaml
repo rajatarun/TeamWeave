@@ -488,6 +488,16 @@ Resources:
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
               - Effect: Allow
                 Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                  - ec2:AssignIpv6Addresses
+                  - ec2:UnassignIpv6Addresses
+                Resource: "*"
+              - Effect: Allow
+                Action:
                   - states:DescribeExecution
                   - sfn:DescribeExecution
                 Resource:
@@ -515,6 +525,16 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                  - ec2:AssignIpv6Addresses
+                  - ec2:UnassignIpv6Addresses
+                Resource: "*"
               - Effect: Allow
                 Action: [s3:ListBucket]
                 Resource:
@@ -584,6 +604,16 @@ Resources:
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
               - Effect: Allow
                 Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                  - ec2:AssignIpv6Addresses
+                  - ec2:UnassignIpv6Addresses
+                Resource: "*"
+              - Effect: Allow
+                Action:
                   - aps:QueryMetrics
                   - aps:GetLabels
                   - aps:GetSeries
@@ -612,6 +642,16 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                  - ec2:AssignIpv6Addresses
+                  - ec2:UnassignIpv6Addresses
+                Resource: "*"
               - Effect: Allow
                 Action:
                   - dynamodb:Query
@@ -984,6 +1024,16 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                  - ec2:AssignIpv6Addresses
+                  - ec2:UnassignIpv6Addresses
+                Resource: "*"
               - Effect: Allow
                 Action:
                   - secretsmanager:GetSecretValue
