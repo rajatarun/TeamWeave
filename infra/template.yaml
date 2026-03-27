@@ -174,6 +174,15 @@ Globals:
         # Explicit dual-stack endpoint for Step Functions so boto3 resolves
         # AAAA records and connects via the Egress-Only Internet Gateway.
         STEPFUNCTIONS_ENDPOINT_URL: !Sub "https://states.${AWS::Region}.api.aws"
+        # Bedrock does not return AAAA records, so it cannot use the dual-stack
+        # api.aws hostname. Pin all Bedrock clients to the standard amazonaws.com
+        # hostnames so the Interface VPC Endpoint private DNS intercepts them.
+        # These env vars are auto-read by botocore (>= 1.29) and take precedence
+        # over AWS_USE_DUALSTACK_ENDPOINT.
+        AWS_ENDPOINT_URL_BEDROCK: !Sub "https://bedrock.${AWS::Region}.amazonaws.com"
+        AWS_ENDPOINT_URL_BEDROCK_RUNTIME: !Sub "https://bedrock-runtime.${AWS::Region}.amazonaws.com"
+        AWS_ENDPOINT_URL_BEDROCK_AGENT: !Sub "https://bedrock-agent.${AWS::Region}.amazonaws.com"
+        AWS_ENDPOINT_URL_BEDROCK_AGENT_RUNTIME: !Sub "https://bedrock-agent-runtime.${AWS::Region}.amazonaws.com"
 
 Resources:
   VectorDbSecret:
