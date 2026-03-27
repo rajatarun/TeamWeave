@@ -119,6 +119,67 @@ jobs:
             fi
           fi
 
+      - name: Configure Lambda subnets for IPv6
+        run: |
+          # Discover the VPC's associated IPv6 /56 CIDR block.
+          IPV6_CIDR=$(aws ec2 describe-vpcs \
+            --vpc-ids "${VPC_ID}" \
+            --region "${AWS_REGION}" \
+            --query 'Vpcs[0].Ipv6CidrBlockAssociationSet[?State==`associated`] | [0].Ipv6CidrBlock' \
+            --output text)
+          [ "${IPV6_CIDR}" = "None" ] && IPV6_CIDR=""
+          if [ -z "${IPV6_CIDR}" ]; then
+            echo "VPC has no associated IPv6 CIDR — skipping subnet IPv6 configuration"
+            exit 0
+          fi
+
+          # Get the Lambda subnet IDs created by the shared stack.
+          SUBNET_AZ1=$(aws cloudformation describe-stacks \
+            --stack-name "${SHARED_STACK_NAME}" --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaSubnetAz1Id'].OutputValue" \
+            --output text)
+          SUBNET_AZ2=$(aws cloudformation describe-stacks \
+            --stack-name "${SHARED_STACK_NAME}" --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaSubnetAz2Id'].OutputValue" \
+            --output text)
+
+          # Compute /64 CIDRs at index 8 and 9 of the /56 — mirrors
+          # !Select [8/9, !Cidr [VpcIpv6Block, 256, 64]] in shared.yaml.
+          IPV6_CIDR="${IPV6_CIDR}" python3 - <<'PYEOF' > /tmp/ipv6_cidrs.txt
+import ipaddress, os
+subnets = list(ipaddress.IPv6Network(os.environ['IPV6_CIDR']).subnets(new_prefix=64))
+print(subnets[8])
+print(subnets[9])
+PYEOF
+          IPV6_AZ1=$(sed -n '1p' /tmp/ipv6_cidrs.txt)
+          IPV6_AZ2=$(sed -n '2p' /tmp/ipv6_cidrs.txt)
+
+          echo "Lambda subnets IPv6 target:"
+          echo "  ${SUBNET_AZ1} → ${IPV6_AZ1}"
+          echo "  ${SUBNET_AZ2} → ${IPV6_AZ2}"
+
+          # Associate /64 IPv6 CIDRs — idempotent, ok if already associated.
+          aws ec2 associate-subnet-cidr-block \
+            --subnet-id "${SUBNET_AZ1}" --ipv6-cidr-block "${IPV6_AZ1}" \
+            --region "${AWS_REGION}" 2>/dev/null \
+            && echo "  AZ1: IPv6 CIDR associated" \
+            || echo "  AZ1: IPv6 CIDR already present (ok)"
+          aws ec2 associate-subnet-cidr-block \
+            --subnet-id "${SUBNET_AZ2}" --ipv6-cidr-block "${IPV6_AZ2}" \
+            --region "${AWS_REGION}" 2>/dev/null \
+            && echo "  AZ2: IPv6 CIDR associated" \
+            || echo "  AZ2: IPv6 CIDR already present (ok)"
+
+          # Enable auto-assign IPv6 on all ENIs created in these subnets.
+          aws ec2 modify-subnet-attribute \
+            --subnet-id "${SUBNET_AZ1}" --assign-ipv6-address-on-creation \
+            --region "${AWS_REGION}"
+          aws ec2 modify-subnet-attribute \
+            --subnet-id "${SUBNET_AZ2}" --assign-ipv6-address-on-creation \
+            --region "${AWS_REGION}"
+
+          echo "Lambda subnets are now dual-stack (IPv4 + IPv6)"
+
       - name: Fetch Shared Stack Outputs
         run: |
           SHARED_OUTPUTS=$(aws cloudformation describe-stacks \
