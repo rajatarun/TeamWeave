@@ -133,6 +133,14 @@ Parameters:
     Type: String
     Default: ""
     Description: Bedrock Agent Runtime Interface VPC endpoint ID — taken from shared stack BedrockAgentRuntimeVpcEndpointId output (optional).
+  DualStackEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Whether Lambda subnets are configured for dual-stack (IPv4 + IPv6) — taken from
+      shared stack DualStackEnabled output. When 'true', Lambda ENIs receive IPv6 addresses
+      and outbound IPv6 traffic is permitted via the Egress-Only Internet Gateway.
   SiweAuthorizerFunctionArn:
     Type: String
     Default: ""
@@ -259,6 +267,8 @@ Resources:
                   - ec2:DeleteNetworkInterface
                   - ec2:AssignPrivateIpAddresses
                   - ec2:UnassignPrivateIpAddresses
+                  - ec2:AssignIpv6Addresses
+                  - ec2:UnassignIpv6Addresses
                 Resource: "*"
               - Effect: Allow
                 Action: [s3:ListBucket]
@@ -376,6 +386,8 @@ Resources:
                   - ec2:DeleteNetworkInterface
                   - ec2:AssignPrivateIpAddresses
                   - ec2:UnassignPrivateIpAddresses
+                  - ec2:AssignIpv6Addresses
+                  - ec2:UnassignIpv6Addresses
                 Resource: "*"
               - Effect: Allow
                 Action:
@@ -391,6 +403,8 @@ Resources:
                     - ec2:DeleteNetworkInterface
                     - ec2:AssignPrivateIpAddresses
                     - ec2:UnassignPrivateIpAddresses
+                    - ec2:AssignIpv6Addresses
+                    - ec2:UnassignIpv6Addresses
                   Resource: "*"
                 - !Ref AWS::NoValue
               - Effect: Allow
@@ -1454,3 +1468,6 @@ Outputs:
   BedrockAgentRuntimeVpcEndpointId:
     Value: !Ref BedrockAgentRuntimeVpcEndpointId
     Description: Bedrock Agent Runtime Interface VPC endpoint ID (sourced from shared stack)
+  DualStackEnabled:
+    Value: !Ref DualStackEnabled
+    Description: Whether Lambda subnets are dual-stack (IPv4 + IPv6) — sourced from shared stack

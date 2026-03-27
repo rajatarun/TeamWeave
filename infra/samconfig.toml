@@ -15,5 +15,6 @@ parameter_overrides = [
   "VpcId=vpc-f3c92a8a",
   "RdsSecurityGroupId=sg-06e6751625773c1bf",
   "LambdaSubnetIds=",
-  "GeminiSecretArn="
+  "GeminiSecretArn=",
+  "DualStackEnabled=false"
 ]
