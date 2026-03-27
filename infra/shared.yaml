@@ -407,3 +407,17 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-VpcIpv6Block"
 
+  BedrockRuntimeVpcEndpointId:
+    Condition: HasVpc
+    Description: Interface VPC endpoint ID for bedrock-runtime (single AZ)
+    Value: !Ref BedrockRuntimeVpcEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-BedrockRuntimeVpcEndpointId"
+
+  BedrockAgentRuntimeVpcEndpointId:
+    Condition: HasVpc
+    Description: Interface VPC endpoint ID for bedrock-agent-runtime (single AZ)
+    Value: !Ref BedrockAgentRuntimeVpcEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-BedrockAgentRuntimeVpcEndpointId"
+
