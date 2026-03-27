@@ -176,7 +176,7 @@ Resources:
       CidrBlock: !Ref LambdaSubnetCidrAz1
       Ipv6CidrBlock: !If
         - HasVpcIpv6Block
-        - !Select [0, !Cidr [!Ref VpcIpv6Block, 256, 64]]
+        - !Select [8, !Cidr [!Ref VpcIpv6Block, 256, 64]]
         - !Ref "AWS::NoValue"
       AssignIpv6AddressOnCreation: !If [HasVpcIpv6Block, true, !Ref "AWS::NoValue"]
       AvailabilityZone: !Select
@@ -198,7 +198,7 @@ Resources:
       CidrBlock: !Ref LambdaSubnetCidrAz2
       Ipv6CidrBlock: !If
         - HasVpcIpv6Block
-        - !Select [1, !Cidr [!Ref VpcIpv6Block, 256, 64]]
+        - !Select [9, !Cidr [!Ref VpcIpv6Block, 256, 64]]
         - !Ref "AWS::NoValue"
       AssignIpv6AddressOnCreation: !If [HasVpcIpv6Block, true, !Ref "AWS::NoValue"]
       AvailabilityZone: !Select
