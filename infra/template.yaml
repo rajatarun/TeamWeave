@@ -916,8 +916,8 @@ Resources:
         - SecurityGroupIds:
             - !Ref OrchestratorSecurityGroup
           SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
         - !Ref AWS::NoValue
-      Ipv6AllowedForDualStack: true
 
   WorkerFunction:
     Type: AWS::Serverless::Function
@@ -959,8 +959,8 @@ Resources:
         - SecurityGroupIds:
             - !Ref OrchestratorSecurityGroup
           SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
         - !Ref AWS::NoValue
-      Ipv6AllowedForDualStack: true
 
   GeminiResearchRole:
     Type: AWS::IAM::Role
@@ -1007,7 +1007,13 @@ Resources:
         Variables:
           GEMINI_MODEL: gemini-2.0-flash
           MAX_TOKENS: "1024"
-      Ipv6AllowedForDualStack: true
+      VpcConfig: !If
+        - HasVpcConfig
+        - SecurityGroupIds:
+            - !Ref OrchestratorSecurityGroup
+          SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
+        - !Ref AWS::NoValue
 
   GeminiResearchFunctionInvokePermissionForBedrock:
     Type: AWS::Lambda::Permission
@@ -1041,7 +1047,13 @@ Resources:
             RestApiId: !Ref TeamWeaveApi
             Path: /observability/metrics
             Method: get
-      Ipv6AllowedForDualStack: true
+      VpcConfig: !If
+        - HasVpcConfig
+        - SecurityGroupIds:
+            - !Ref OrchestratorSecurityGroup
+          SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
+        - !Ref AWS::NoValue
 
   AgentMetricsDashboardFunction:
     Type: AWS::Serverless::Function
@@ -1066,7 +1078,13 @@ Resources:
             RestApiId: !Ref TeamWeaveApi
             Path: /observability/agent-metrics
             Method: get
-      Ipv6AllowedForDualStack: true
+      VpcConfig: !If
+        - HasVpcConfig
+        - SecurityGroupIds:
+            - !Ref OrchestratorSecurityGroup
+          SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
+        - !Ref AWS::NoValue
 
   StatusFunction:
     Type: AWS::Serverless::Function
@@ -1105,7 +1123,13 @@ Resources:
               - method.request.path.run_id:
                   Required: true
                   Caching: false
-      Ipv6AllowedForDualStack: true
+      VpcConfig: !If
+        - HasVpcConfig
+        - SecurityGroupIds:
+            - !Ref OrchestratorSecurityGroup
+          SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
+        - !Ref AWS::NoValue
 
 
   ProvisionTeamFunction:
@@ -1130,7 +1154,13 @@ Resources:
           DEPTS_PATH: /var/task/config/examples/departments.json
           OUTPUT_PREFIX: teams
           FOUNDATION_MODEL: amazon.nova-micro-v1:0
-      Ipv6AllowedForDualStack: true
+      VpcConfig: !If
+        - HasVpcConfig
+        - SecurityGroupIds:
+            - !Ref OrchestratorSecurityGroup
+          SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
+        - !Ref AWS::NoValue
 
   SamDeployerStateMachinePermissions:
     Type: AWS::IAM::RolePolicy
