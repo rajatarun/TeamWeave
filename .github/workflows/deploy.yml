@@ -204,10 +204,10 @@ jobs:
             --output text)
           echo "Uploading roles.json and departments.json → s3://${CONFIG_BUCKET}/teams/"
           aws s3 cp config/examples/roles.json \
-            "s3://${CONFIG_BUCKET}/teams/roles.json" \
+            "s3://${CONFIG_BUCKET}/roles.json" \
             --region "${AWS_REGION}"
           aws s3 cp config/examples/departments.json \
-            "s3://${CONFIG_BUCKET}/teams/departments.json" \
+            "s3://${CONFIG_BUCKET}/departments.json" \
             --region "${AWS_REGION}"
 
       - name: Provision team agents
