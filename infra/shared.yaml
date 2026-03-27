@@ -278,6 +278,19 @@ Resources:
         - !Ref BedrockVpceSecurityGroup
       PrivateDnsEnabled: true
 
+  StepFunctionsVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasVpc
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.states"
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref LambdaSubnetAz1
+      SecurityGroupIds:
+        - !Ref BedrockVpceSecurityGroup
+      PrivateDnsEnabled: true
+
   # ---------------------------------------------------------------------------
   # Lambda route table + Egress-Only Internet Gateway (owned by this stack)
   # ---------------------------------------------------------------------------
@@ -420,4 +433,11 @@ Outputs:
     Value: !Ref BedrockAgentRuntimeVpcEndpoint
     Export:
       Name: !Sub "${AWS::StackName}-BedrockAgentRuntimeVpcEndpointId"
+
+  StepFunctionsVpcEndpointId:
+    Condition: HasVpc
+    Description: Interface VPC endpoint ID for Step Functions (single AZ)
+    Value: !Ref StepFunctionsVpcEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-StepFunctionsVpcEndpointId"
 
