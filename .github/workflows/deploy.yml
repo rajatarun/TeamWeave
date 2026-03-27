@@ -195,6 +195,21 @@ jobs:
             --exclude "*.md" \
             --region "${AWS_REGION}"
 
+      - name: Sync roles and departments to S3
+        run: |
+          CONFIG_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='ConfigBucket'].OutputValue" \
+            --output text)
+          echo "Uploading roles.json and departments.json → s3://${CONFIG_BUCKET}/teams/"
+          aws s3 cp config/examples/roles.json \
+            "s3://${CONFIG_BUCKET}/teams/roles.json" \
+            --region "${AWS_REGION}"
+          aws s3 cp config/examples/departments.json \
+            "s3://${CONFIG_BUCKET}/teams/departments.json" \
+            --region "${AWS_REGION}"
+
       - name: Provision team agents
         run: |
           PROVISION_FUNCTION_ARN=$(aws cloudformation describe-stacks \

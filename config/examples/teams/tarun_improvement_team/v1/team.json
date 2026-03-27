@@ -27,12 +27,12 @@
     },
     "revision": {
       "enabled": false,
-      "default_jump_to_step": "coach"
+      "default_jump_to_step": "TIT_TDEPT-001_TIT-001_coach"
     }
   },
   "agents": [
     {
-      "id": "coach",
+      "id": "TIT_TDEPT-001_TIT-001_coach",
       "name": "Technical Coach",
       "bedrock": {
         "agentId": "",
@@ -54,7 +54,7 @@
       "department_id": "TDEPT-001"
     },
     {
-      "id": "strategist",
+      "id": "TIT_TDEPT-001_TIT-002_strategist",
       "name": "Learning Strategist",
       "bedrock": {
         "agentId": "",
@@ -76,7 +76,7 @@
       "department_id": "TDEPT-001"
     },
     {
-      "id": "advisor",
+      "id": "TIT_TDEPT-002_TIT-003_advisor",
       "name": "Daily Advisor",
       "bedrock": {
         "agentId": "",
@@ -100,24 +100,24 @@
   ],
   "workflow": [
     {
-      "step": "coach",
+      "step": "TIT_TDEPT-001_TIT-001_coach",
       "inputs": [
         "request",
         "rag_context"
       ]
     },
     {
-      "step": "strategist",
+      "step": "TIT_TDEPT-001_TIT-002_strategist",
       "inputs": [
-        "coach.output",
+        "TIT_TDEPT-001_TIT-001_coach",
         "rag_context"
       ]
     },
     {
-      "step": "advisor",
+      "step": "TIT_TDEPT-002_TIT-003_advisor",
       "inputs": [
-        "strategist.output",
-        "coach.output",
+        "TIT_TDEPT-001_TIT-002_strategist",
+        "TIT_TDEPT-001_TIT-001_coach",
         "rag_context"
       ]
     }
