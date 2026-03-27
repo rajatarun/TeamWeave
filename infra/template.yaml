@@ -916,6 +916,7 @@ Resources:
         - SecurityGroupIds:
             - !Ref OrchestratorSecurityGroup
           SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
         - !Ref AWS::NoValue
 
   WorkerFunction:
@@ -958,6 +959,7 @@ Resources:
         - SecurityGroupIds:
             - !Ref OrchestratorSecurityGroup
           SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
         - !Ref AWS::NoValue
 
   GeminiResearchRole:
