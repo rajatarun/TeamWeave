@@ -23,6 +23,8 @@ env:
   ASSUME_ROLE_ARN: arn:aws:iam::239571291755:role/teamweave-github-actions-sam-deployer
   # VPC / networking config consumed by the shared stack
   VPC_ID: vpc-f3c92a8a
+  PRIVATE_ROUTE_TABLE_ID: ""
+  EIGW_ID: ""
   LAMBDA_SUBNET_CIDR_AZ1: "172.31.96.0/24"
   LAMBDA_SUBNET_CIDR_AZ2: "172.31.97.0/24"
 jobs:
@@ -68,24 +70,11 @@ jobs:
       - name: Deploy Shared Infrastructure Stack
         run: |
           cd infra
-
-          # Discover the VPC's actual associated IPv6 CIDR from AWS — source of truth.
-          # This avoids hardcoding a CIDR that may differ from what VpcIpv6CidrBlock assigned.
-          _discover_ipv6() {
-            aws ec2 describe-vpcs \
-              --vpc-ids "${VPC_ID}" \
-              --region "${AWS_REGION}" \
-              --query 'Vpcs[0].Ipv6CidrBlockAssociationSet[?State==`associated`] | [0].Ipv6CidrBlock' \
-              --output text 2>/dev/null || echo ""
-          }
-          EFFECTIVE_IPV6=$(_discover_ipv6)
-          [ "${EFFECTIVE_IPV6}" = "None" ] && EFFECTIVE_IPV6=""
-          echo "VPC IPv6 CIDR: ${EFFECTIVE_IPV6:-<none yet — VpcIpv6CidrBlock will request one>}"
-
           PARAM_OVERRIDES="VpcId=${VPC_ID}"
-          [ -n "${LAMBDA_SUBNET_CIDR_AZ1}" ] && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz1=${LAMBDA_SUBNET_CIDR_AZ1}"
-          [ -n "${LAMBDA_SUBNET_CIDR_AZ2}" ] && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz2=${LAMBDA_SUBNET_CIDR_AZ2}"
-          [ -n "${EFFECTIVE_IPV6}" ]         && PARAM_OVERRIDES="${PARAM_OVERRIDES} VpcIpv6Block=${EFFECTIVE_IPV6}"
+          [ -n "${PRIVATE_ROUTE_TABLE_ID}" ]    && PARAM_OVERRIDES="${PARAM_OVERRIDES} PrivateRouteTableId=${PRIVATE_ROUTE_TABLE_ID}"
+          [ -n "${EIGW_ID}" ]                   && PARAM_OVERRIDES="${PARAM_OVERRIDES} EgressOnlyInternetGatewayId=${EIGW_ID}"
+          [ -n "${LAMBDA_SUBNET_CIDR_AZ1}" ]    && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz1=${LAMBDA_SUBNET_CIDR_AZ1}"
+          [ -n "${LAMBDA_SUBNET_CIDR_AZ2}" ]    && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz2=${LAMBDA_SUBNET_CIDR_AZ2}"
 
           sam deploy \
             --template-file shared.yaml \
@@ -97,88 +86,6 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides ${PARAM_OVERRIDES}
-
-          # Two-pass: if the VPC had no IPv6 CIDR before this deploy, VpcIpv6CidrBlock
-          # just created one. Re-deploy immediately with the newly assigned CIDR so
-          # Lambda subnets get their /64 CIDRs in the same CI run.
-          if [ -z "${EFFECTIVE_IPV6}" ]; then
-            NEWLY_ASSIGNED=$(_discover_ipv6)
-            [ "${NEWLY_ASSIGNED}" = "None" ] && NEWLY_ASSIGNED=""
-            if [ -n "${NEWLY_ASSIGNED}" ]; then
-              echo "IPv6 CIDR newly assigned: ${NEWLY_ASSIGNED} — re-deploying to activate dual-stack subnets."
-              sam deploy \
-                --template-file shared.yaml \
-                --stack-name "${SHARED_STACK_NAME}" \
-                --region "${AWS_REGION}" \
-                --capabilities CAPABILITY_NAMED_IAM \
-                --resolve-s3 \
-                --s3-prefix "${SHARED_STACK_NAME}" \
-                --no-confirm-changeset \
-                --no-fail-on-empty-changeset \
-                --parameter-overrides "${PARAM_OVERRIDES} VpcIpv6Block=${NEWLY_ASSIGNED}"
-            fi
-          fi
-
-      - name: Configure Lambda subnets for IPv6
-        run: |
-          # Discover the VPC's associated IPv6 /56 CIDR block.
-          IPV6_CIDR=$(aws ec2 describe-vpcs \
-            --vpc-ids "${VPC_ID}" \
-            --region "${AWS_REGION}" \
-            --query 'Vpcs[0].Ipv6CidrBlockAssociationSet[?State==`associated`] | [0].Ipv6CidrBlock' \
-            --output text)
-          [ "${IPV6_CIDR}" = "None" ] && IPV6_CIDR=""
-          if [ -z "${IPV6_CIDR}" ]; then
-            echo "VPC has no associated IPv6 CIDR — skipping subnet IPv6 configuration"
-            exit 0
-          fi
-
-          # Get the Lambda subnet IDs created by the shared stack.
-          SUBNET_AZ1=$(aws cloudformation describe-stacks \
-            --stack-name "${SHARED_STACK_NAME}" --region "${AWS_REGION}" \
-            --query "Stacks[0].Outputs[?OutputKey=='LambdaSubnetAz1Id'].OutputValue" \
-            --output text)
-          SUBNET_AZ2=$(aws cloudformation describe-stacks \
-            --stack-name "${SHARED_STACK_NAME}" --region "${AWS_REGION}" \
-            --query "Stacks[0].Outputs[?OutputKey=='LambdaSubnetAz2Id'].OutputValue" \
-            --output text)
-
-          # Compute /64 CIDRs at index 8 and 9 of the /56 — mirrors
-          # !Select [8/9, !Cidr [VpcIpv6Block, 256, 64]] in shared.yaml.
-          IPV6_CIDR="${IPV6_CIDR}" python3 - <<'PYEOF' > /tmp/ipv6_cidrs.txt
-import ipaddress, os
-subnets = list(ipaddress.IPv6Network(os.environ['IPV6_CIDR']).subnets(new_prefix=64))
-print(subnets[8])
-print(subnets[9])
-PYEOF
-          IPV6_AZ1=$(sed -n '1p' /tmp/ipv6_cidrs.txt)
-          IPV6_AZ2=$(sed -n '2p' /tmp/ipv6_cidrs.txt)
-
-          echo "Lambda subnets IPv6 target:"
-          echo "  ${SUBNET_AZ1} → ${IPV6_AZ1}"
-          echo "  ${SUBNET_AZ2} → ${IPV6_AZ2}"
-
-          # Associate /64 IPv6 CIDRs — idempotent, ok if already associated.
-          aws ec2 associate-subnet-cidr-block \
-            --subnet-id "${SUBNET_AZ1}" --ipv6-cidr-block "${IPV6_AZ1}" \
-            --region "${AWS_REGION}" 2>/dev/null \
-            && echo "  AZ1: IPv6 CIDR associated" \
-            || echo "  AZ1: IPv6 CIDR already present (ok)"
-          aws ec2 associate-subnet-cidr-block \
-            --subnet-id "${SUBNET_AZ2}" --ipv6-cidr-block "${IPV6_AZ2}" \
-            --region "${AWS_REGION}" 2>/dev/null \
-            && echo "  AZ2: IPv6 CIDR associated" \
-            || echo "  AZ2: IPv6 CIDR already present (ok)"
-
-          # Enable auto-assign IPv6 on all ENIs created in these subnets.
-          aws ec2 modify-subnet-attribute \
-            --subnet-id "${SUBNET_AZ1}" --assign-ipv6-address-on-creation \
-            --region "${AWS_REGION}"
-          aws ec2 modify-subnet-attribute \
-            --subnet-id "${SUBNET_AZ2}" --assign-ipv6-address-on-creation \
-            --region "${AWS_REGION}"
-
-          echo "Lambda subnets are now dual-stack (IPv4 + IPv6)"
 
       - name: Fetch Shared Stack Outputs
         run: |
@@ -200,12 +107,8 @@ PYEOF
           LAMBDA_SUBNET_IDS=$(get_output LambdaSubnetIds)
           S3_VPCE_ID=$(get_output S3VpcEndpointId)
           DYNAMODB_VPCE_ID=$(get_output DynamoDbVpcEndpointId)
-          EIGW_ID=$(get_output EgressOnlyInternetGatewayId)
           BEDROCK_RUNTIME_VPCE_ID=$(get_output BedrockRuntimeVpcEndpointId)
           BEDROCK_AGENT_RUNTIME_VPCE_ID=$(get_output BedrockAgentRuntimeVpcEndpointId)
-          IPV6_EGRESS_ENABLED=$(get_output Ipv6EgressEnabled)
-          DUAL_STACK_ENABLED=$(get_output DualStackEnabled)
-          VPC_IPV6_BLOCK_OUT=$(get_output VpcIpv6Block)
 
           if [ -z "${OBSERVATORY_METRICS_TABLE_NAME}" ] || [ -z "${AMP_WORKSPACE_ID}" ]; then
             echo "ERROR: Required outputs missing from shared stack ${SHARED_STACK_NAME}"
@@ -219,12 +122,8 @@ PYEOF
           echo "LAMBDA_SUBNET_IDS=${LAMBDA_SUBNET_IDS}"                           >> $GITHUB_ENV
           echo "S3_VPCE_ID=${S3_VPCE_ID}"                                         >> $GITHUB_ENV
           echo "DYNAMODB_VPCE_ID=${DYNAMODB_VPCE_ID}"                             >> $GITHUB_ENV
-          echo "EIGW_ID=${EIGW_ID}"                                               >> $GITHUB_ENV
           echo "BEDROCK_RUNTIME_VPCE_ID=${BEDROCK_RUNTIME_VPCE_ID}"               >> $GITHUB_ENV
           echo "BEDROCK_AGENT_RUNTIME_VPCE_ID=${BEDROCK_AGENT_RUNTIME_VPCE_ID}"   >> $GITHUB_ENV
-          echo "IPV6_EGRESS_ENABLED=${IPV6_EGRESS_ENABLED}"                       >> $GITHUB_ENV
-          echo "DUAL_STACK_ENABLED=${DUAL_STACK_ENABLED}"                         >> $GITHUB_ENV
-          echo "VPC_IPV6_BLOCK_OUT=${VPC_IPV6_BLOCK_OUT}"                         >> $GITHUB_ENV
 
           echo "Shared stack outputs fetched:"
           echo "  ObservatoryMetricsTableName      = ${OBSERVATORY_METRICS_TABLE_NAME}"
@@ -232,12 +131,8 @@ PYEOF
           echo "  LambdaSubnetIds                  = ${LAMBDA_SUBNET_IDS:-<not created>}"
           echo "  S3VpcEndpointId                  = ${S3_VPCE_ID:-<not created>}"
           echo "  DynamoDbVpcEndpointId            = ${DYNAMODB_VPCE_ID:-<not created>}"
-          echo "  EgressOnlyInternetGatewayId      = ${EIGW_ID:-<not created>}"
           echo "  BedrockRuntimeVpcEndpointId      = ${BEDROCK_RUNTIME_VPCE_ID:-<not created>}"
           echo "  BedrockAgentRuntimeVpcEndpointId = ${BEDROCK_AGENT_RUNTIME_VPCE_ID:-<not created>}"
-          echo "  Ipv6EgressEnabled                = ${IPV6_EGRESS_ENABLED}"
-          echo "  DualStackEnabled                 = ${DUAL_STACK_ENABLED}"
-          echo "  VpcIpv6Block                     = ${VPC_IPV6_BLOCK_OUT:-<not yet assigned — set VPC_IPV6_BLOCK after first deploy>}"
 
       - name: Fetch SIWE Authorizer ARN from siwe-infra stack
         run: |
@@ -275,10 +170,9 @@ PYEOF
           )
           [ -n "${LAMBDA_SUBNET_IDS}" ]            && PARAM_OVERRIDES+=("LambdaSubnetIds=${LAMBDA_SUBNET_IDS}")
           [ -n "${S3_VPCE_ID}" ]                   && PARAM_OVERRIDES+=("S3VpcEndpointId=${S3_VPCE_ID}")
-          [ -n "${DYNAMODB_VPCE_ID}" ]              && PARAM_OVERRIDES+=("DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}")
-          [ -n "${BEDROCK_RUNTIME_VPCE_ID}" ]       && PARAM_OVERRIDES+=("BedrockRuntimeVpcEndpointId=${BEDROCK_RUNTIME_VPCE_ID}")
+          [ -n "${DYNAMODB_VPCE_ID}" ]             && PARAM_OVERRIDES+=("DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}")
+          [ -n "${BEDROCK_RUNTIME_VPCE_ID}" ]      && PARAM_OVERRIDES+=("BedrockRuntimeVpcEndpointId=${BEDROCK_RUNTIME_VPCE_ID}")
           [ -n "${BEDROCK_AGENT_RUNTIME_VPCE_ID}" ] && PARAM_OVERRIDES+=("BedrockAgentRuntimeVpcEndpointId=${BEDROCK_AGENT_RUNTIME_VPCE_ID}")
-          [ -n "${DUAL_STACK_ENABLED}" ]            && PARAM_OVERRIDES+=("DualStackEnabled=${DUAL_STACK_ENABLED}")
 
           sam deploy \
             --stack-name "${STACK_NAME}" \
