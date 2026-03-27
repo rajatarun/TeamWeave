@@ -214,10 +214,10 @@ jobs:
           )
           [ -n "${LAMBDA_SUBNET_IDS}" ]            && PARAM_OVERRIDES+=("LambdaSubnetIds=${LAMBDA_SUBNET_IDS}")
           [ -n "${S3_VPCE_ID}" ]                   && PARAM_OVERRIDES+=("S3VpcEndpointId=${S3_VPCE_ID}")
-          [ -n "${DYNAMODB_VPCE_ID}" ]             && PARAM_OVERRIDES+=("DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}")
+          [ -n "${DYNAMODB_VPCE_ID}" ]              && PARAM_OVERRIDES+=("DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}")
           [ -n "${BEDROCK_RUNTIME_VPCE_ID}" ]      && PARAM_OVERRIDES+=("BedrockRuntimeVpcEndpointId=${BEDROCK_RUNTIME_VPCE_ID}")
           [ -n "${BEDROCK_AGENT_RUNTIME_VPCE_ID}" ] && PARAM_OVERRIDES+=("BedrockAgentRuntimeVpcEndpointId=${BEDROCK_AGENT_RUNTIME_VPCE_ID}")
-          [ -n "${DUAL_STACK_ENABLED}" ]           && PARAM_OVERRIDES+=("DualStackEnabled=${DUAL_STACK_ENABLED}")
+          [ -n "${DUAL_STACK_ENABLED}" ]            && PARAM_OVERRIDES+=("DualStackEnabled=${DUAL_STACK_ENABLED}")
 
           sam deploy \
             --stack-name "${STACK_NAME}" \
