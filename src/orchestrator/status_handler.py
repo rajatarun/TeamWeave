@@ -6,7 +6,7 @@ from typing import Any, Dict
 import boto3
 from botocore.exceptions import ClientError
 
-sfn = boto3.client("stepfunctions")
+sfn = boto3.client("stepfunctions", endpoint_url=os.environ.get("STEPFUNCTIONS_ENDPOINT_URL"))
 
 
 def _cors() -> Dict[str, str]:

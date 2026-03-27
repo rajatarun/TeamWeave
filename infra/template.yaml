@@ -171,6 +171,9 @@ Globals:
         # {service}.{region}.api.aws (returns AAAA records). Lambda ENIs with IPv6
         # addresses send this traffic via the Egress-Only Internet Gateway.
         AWS_USE_DUALSTACK_ENDPOINT: "true"
+        # Explicit dual-stack endpoint for Step Functions so boto3 resolves
+        # AAAA records and connects via the Egress-Only Internet Gateway.
+        STEPFUNCTIONS_ENDPOINT_URL: !Sub "https://states.${AWS::Region}.api.aws"
 
 Resources:
   VectorDbSecret:
