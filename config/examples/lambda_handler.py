@@ -492,6 +492,16 @@ def _provision_team(team_data: dict, team_name: str, version: str,
     gemini_lambda_arn = cfg.get("gemini_lambda_arn", "")
     gemini_enabled    = bool(gemini_lambda_arn)
 
+    # Build a name→summary map once so we don't do a full paginator scan per agent.
+    _pager = bedrock.get_paginator("list_agents")
+    existing_agents_map: dict[str, dict] = {
+        s["agentName"]: s
+        for page in _pager.paginate()
+        for s in page.get("agentSummaries", [])
+    }
+
+    s3_key = f"{cfg['teams_prefix']}/{team_name}/{version}/team.json"
+
     for i, agent in enumerate(output_team["agents"]):
         role_obj         = role_index[agent["role_id"]]
         agent_fm         = (agent.get("bedrock", {}).get("model_id") or
@@ -533,8 +543,8 @@ def _provision_team(team_data: dict, team_name: str, version: str,
                 output_team["agents"][i].setdefault("bedrock", {})["model_aliases"] = updated_aliases
             continue
 
-        # Not yet provisioned — create or recover
-        existing = find_existing_agent(bedrock, agent["name"])
+        # Not yet provisioned — create or recover (use cached map for O(1) lookup)
+        existing = existing_agents_map.get(sanitise_agent_name(agent["name"]))
         if existing:
             aid = existing["agentId"]
             try:
@@ -580,10 +590,11 @@ def _provision_team(team_data: dict, team_name: str, version: str,
 
         output_team["agents"][i]["bedrock"] = bdrock
         log.info(f"  ✓ {agent['name']} → agentId={aid} aliasId={alid}")
+        # Save progress after each new agent so IDs are persisted even on timeout
+        _s3_put(cfg, s3_key, output_team)
 
-    # Push back to S3 under teams_prefix
-    key    = f"{cfg['teams_prefix']}/{team_name}/{version}/team.json"
-    s3_uri = _s3_put(cfg, key, output_team)
+    # Final save — ensures all in-loop changes (model_aliases from SYNC path) are persisted
+    s3_uri = _s3_put(cfg, s3_key, output_team)
     return {"success": True, "s3_uri": s3_uri, "errors": [], "team": output_team}
 
 
