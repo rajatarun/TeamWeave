@@ -20,10 +20,9 @@ Parameters:
     Type: String
     Default: ""
     Description: >
-      Egress-Only Internet Gateway ID attached to the VPC. When provided together with
-      PrivateRouteTableId, a ::/0 IPv6 route is added so Lambda can reach AWS public
-      endpoints (Bedrock, Secrets Manager, AMP) via IPv6 instead of a NAT Gateway,
-      eliminating NAT data-processing charges for those calls.
+      Deprecated — the stack now creates and owns its Egress-Only Internet Gateway
+      automatically whenever VpcId is set. This parameter is retained for backward
+      compatibility only and is no longer used.
   AmpWorkspaceAlias:
     Type: String
     Default: ""
@@ -135,23 +134,25 @@ Resources:
 
   S3VpcEndpoint:
     Type: AWS::EC2::VPCEndpoint
-    Condition: HasPrivateRouteTable
+    Condition: HasVpc
     Properties:
       VpcId: !Ref VpcId
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
       VpcEndpointType: Gateway
       RouteTableIds:
-        - !Ref PrivateRouteTableId
+        - !Ref LambdaRouteTable
+        - !If [HasPrivateRouteTable, !Ref PrivateRouteTableId, !Ref "AWS::NoValue"]
 
   DynamoDbVpcEndpoint:
     Type: AWS::EC2::VPCEndpoint
-    Condition: HasPrivateRouteTable
+    Condition: HasVpc
     Properties:
       VpcId: !Ref VpcId
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.dynamodb"
       VpcEndpointType: Gateway
       RouteTableIds:
-        - !Ref PrivateRouteTableId
+        - !Ref LambdaRouteTable
+        - !If [HasPrivateRouteTable, !Ref PrivateRouteTableId, !Ref "AWS::NoValue"]
 
   # ---------------------------------------------------------------------------
   # Lambda private subnets — shared across all Lambda functions in this VPC
@@ -195,17 +196,17 @@ Resources:
 
   LambdaSubnetAz1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Condition: HasPrivateRouteTable
+    Condition: HasVpc
     Properties:
       SubnetId: !Ref LambdaSubnetAz1
-      RouteTableId: !Ref PrivateRouteTableId
+      RouteTableId: !Ref LambdaRouteTable
 
   LambdaSubnetAz2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Condition: HasPrivateRouteTable
+    Condition: HasVpc
     Properties:
       SubnetId: !Ref LambdaSubnetAz2
-      RouteTableId: !Ref PrivateRouteTableId
+      RouteTableId: !Ref LambdaRouteTable
 
   # ---------------------------------------------------------------------------
   # Bedrock Interface VPC endpoints — keep Bedrock traffic off the internet
@@ -263,16 +264,39 @@ Resources:
       PrivateDnsEnabled: true
 
   # ---------------------------------------------------------------------------
-  # IPv6 egress route — routes ::/0 to EIGW so Lambda reaches AWS APIs without NAT
+  # Lambda route table + Egress-Only Internet Gateway (owned by this stack)
   # ---------------------------------------------------------------------------
+  # The stack creates its own private route table and EIGW so no external
+  # PrivateRouteTableId or EgressOnlyInternetGatewayId inputs are required.
+  # S3 and DynamoDB Gateway endpoints are attached to this route table, and
+  # a ::/0 IPv6 route to the EIGW lets Lambda reach AWS public endpoints
+  # (Bedrock, Secrets Manager, AMP) over IPv6 without a NAT Gateway.
 
-  Ipv6RouteToEigw:
-    Type: AWS::EC2::Route
-    Condition: HasPrivateRouteTableAndEigw
+  LambdaRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: HasVpc
     Properties:
-      RouteTableId: !Ref PrivateRouteTableId
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-lambda-rt"
+        - Key: Stack
+          Value: !Ref AWS::StackName
+
+  LambdaEgressOnlyInternetGateway:
+    Type: AWS::EC2::EgressOnlyInternetGateway
+    Condition: HasVpc
+    Properties:
+      VpcId: !Ref VpcId
+
+  LambdaIpv6EgressRoute:
+    Type: AWS::EC2::Route
+    Condition: HasVpc
+    DependsOn: LambdaEgressOnlyInternetGateway
+    Properties:
+      RouteTableId: !Ref LambdaRouteTable
       DestinationIpv6CidrBlock: "::/0"
-      EgressOnlyInternetGatewayId: !Ref EgressOnlyInternetGatewayId
+      EgressOnlyInternetGatewayId: !Ref LambdaEgressOnlyInternetGateway
 
 Outputs:
 
@@ -322,22 +346,36 @@ Outputs:
       Name: !Sub "${AWS::StackName}-LambdaSubnetAz2Id"
 
   S3VpcEndpointId:
-    Condition: HasPrivateRouteTable
+    Condition: HasVpc
     Description: S3 Gateway VPC endpoint ID
     Value: !Ref S3VpcEndpoint
     Export:
       Name: !Sub "${AWS::StackName}-S3VpcEndpointId"
 
   DynamoDbVpcEndpointId:
-    Condition: HasPrivateRouteTable
+    Condition: HasVpc
     Description: DynamoDB Gateway VPC endpoint ID
     Value: !Ref DynamoDbVpcEndpoint
     Export:
       Name: !Sub "${AWS::StackName}-DynamoDbVpcEndpointId"
 
+  LambdaRouteTableId:
+    Condition: HasVpc
+    Description: Route table ID for Lambda private subnets (owned by this stack)
+    Value: !Ref LambdaRouteTable
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaRouteTableId"
+
+  EgressOnlyInternetGatewayId:
+    Condition: HasVpc
+    Description: Egress-Only Internet Gateway ID created by this stack for Lambda IPv6 egress
+    Value: !Ref LambdaEgressOnlyInternetGateway
+    Export:
+      Name: !Sub "${AWS::StackName}-EgressOnlyInternetGatewayId"
+
   Ipv6EgressEnabled:
     Description: Whether a ::/0 IPv6 route to the Egress-Only Internet Gateway is active
-    Value: !If [HasPrivateRouteTableAndEigw, "true", "false"]
+    Value: !If [HasVpc, "true", "false"]
     Export:
       Name: !Sub "${AWS::StackName}-Ipv6EgressEnabled"
 
