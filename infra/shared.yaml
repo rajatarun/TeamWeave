@@ -280,6 +280,48 @@ Resources:
         - !Ref BedrockVpceSecurityGroup
       PrivateDnsEnabled: true
 
+  StepFunctionsVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasBedrockVpce
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.states"
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref LambdaSubnetAz1
+        - !Ref LambdaSubnetAz2
+      SecurityGroupIds:
+        - !Ref BedrockVpceSecurityGroup
+      PrivateDnsEnabled: true
+
+  LambdaServiceVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasBedrockVpce
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.lambda"
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref LambdaSubnetAz1
+        - !Ref LambdaSubnetAz2
+      SecurityGroupIds:
+        - !Ref BedrockVpceSecurityGroup
+      PrivateDnsEnabled: true
+
+  SecretsManagerVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasBedrockVpce
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref LambdaSubnetAz1
+        - !Ref LambdaSubnetAz2
+      SecurityGroupIds:
+        - !Ref BedrockVpceSecurityGroup
+      PrivateDnsEnabled: true
+
   # ---------------------------------------------------------------------------
   # Lambda route table + Egress-Only Internet Gateway (owned by this stack)
   # ---------------------------------------------------------------------------
