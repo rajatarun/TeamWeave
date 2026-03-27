@@ -285,7 +285,7 @@ def run_team_pipeline(
                 list(supervisor_brief.keys()),
             )
 
-        if step_id == "advisor" and isinstance(out_json.get("daily_tasks"), list):
+        if step_id == "TIT_TDEPT-002_TIT-003_advisor" and isinstance(out_json.get("daily_tasks"), list):
             dao.put_tasks(owner=owner, tasks=out_json["daily_tasks"], source_run_id=run_id)
 
     dao.put_run_meta(
