@@ -166,7 +166,7 @@ Globals:
     Tracing: Active
     Environment:
       Variables:
-        LOG_LEVEL: INFO
+        LOG_LEVEL: DEBUG
         # Route all AWS SDK calls through dual-stack endpoints so boto3 resolves
         # {service}.{region}.api.aws (returns AAAA records). Lambda ENIs with IPv6
         # addresses send this traffic via the Egress-Only Internet Gateway.
