@@ -13,6 +13,7 @@
 #   STACK_NAME=tarun-content-team \
 #   SHARED_STACK_NAME=tarun-teamweave-shared \
 #   VPC_ID=vpc-f3c92a8a \
+#   INTERNET_GATEWAY_ID=igw-1234567890abcdef0 \
 #   PRIVATE_ROUTE_TABLE_ID="" \
 #   EIGW_ID="" \
 #   bash infra/scripts/migrate-to-shared.sh
@@ -28,6 +29,7 @@ SHARED_STACK_NAME="${SHARED_STACK_NAME:?SHARED_STACK_NAME must be set}"
 VPC_ID="${VPC_ID:?VPC_ID must be set}"
 PRIVATE_ROUTE_TABLE_ID="${PRIVATE_ROUTE_TABLE_ID:-}"
 EIGW_ID="${EIGW_ID:-}"
+INTERNET_GATEWAY_ID="${INTERNET_GATEWAY_ID:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -197,6 +199,7 @@ log "Step 4: Deploying shared infrastructure stack '${SHARED_STACK_NAME}'..."
 PARAM_OVERRIDES="VpcId=${VPC_ID}"
 [[ -n "${PRIVATE_ROUTE_TABLE_ID}" ]] && PARAM_OVERRIDES="${PARAM_OVERRIDES} PrivateRouteTableId=${PRIVATE_ROUTE_TABLE_ID}"
 [[ -n "${EIGW_ID}" ]]               && PARAM_OVERRIDES="${PARAM_OVERRIDES} EgressOnlyInternetGatewayId=${EIGW_ID}"
+[[ -n "${INTERNET_GATEWAY_ID}" ]]   && PARAM_OVERRIDES="${PARAM_OVERRIDES} InternetGatewayId=${INTERNET_GATEWAY_ID}"
 
 aws cloudformation deploy \
   --stack-name "${SHARED_STACK_NAME}" \
