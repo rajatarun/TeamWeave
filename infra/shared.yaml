@@ -29,6 +29,10 @@ Parameters:
     Description: >
       Internet Gateway ID attached to this VPC. Required to create the NAT instance
       public subnet route for IPv4 egress from Lambda to Bedrock public endpoints.
+  NatInstanceType:
+    Type: String
+    Default: "t4g.nano"
+    Description: EC2 instance type for the NAT instance. Keep the size at nano for lowest baseline cost.
   AmpWorkspaceAlias:
     Type: String
     Default: ""
@@ -307,7 +311,7 @@ Resources:
     Type: AWS::EC2::Instance
     Condition: HasVpcAndInternetGateway
     Properties:
-      InstanceType: t4g.nano
+      InstanceType: !Ref NatInstanceType
       ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}"
       SourceDestCheck: false
       SubnetId: !Ref NatSubnetAz1
