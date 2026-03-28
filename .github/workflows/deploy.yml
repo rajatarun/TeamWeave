@@ -142,6 +142,7 @@ jobs:
           EIGW_ID=$(get_output EgressOnlyInternetGatewayId)
           BEDROCK_RUNTIME_VPCE_ID=$(get_output BedrockRuntimeVpcEndpointId)
           BEDROCK_AGENT_RUNTIME_VPCE_ID=$(get_output BedrockAgentRuntimeVpcEndpointId)
+          BEDROCK_AGENT_VPCE_ID=$(get_output BedrockAgentVpcEndpointId)
           IPV6_EGRESS_ENABLED=$(get_output Ipv6EgressEnabled)
           DUAL_STACK_ENABLED=$(get_output DualStackEnabled)
           VPC_IPV6_BLOCK_OUT=$(get_output VpcIpv6Block)
@@ -161,6 +162,7 @@ jobs:
           echo "EIGW_ID=${EIGW_ID}"                                               >> $GITHUB_ENV
           echo "BEDROCK_RUNTIME_VPCE_ID=${BEDROCK_RUNTIME_VPCE_ID}"               >> $GITHUB_ENV
           echo "BEDROCK_AGENT_RUNTIME_VPCE_ID=${BEDROCK_AGENT_RUNTIME_VPCE_ID}"   >> $GITHUB_ENV
+          echo "BEDROCK_AGENT_VPCE_ID=${BEDROCK_AGENT_VPCE_ID}"                   >> $GITHUB_ENV
           echo "IPV6_EGRESS_ENABLED=${IPV6_EGRESS_ENABLED}"                       >> $GITHUB_ENV
           echo "DUAL_STACK_ENABLED=${DUAL_STACK_ENABLED}"                         >> $GITHUB_ENV
           echo "VPC_IPV6_BLOCK_OUT=${VPC_IPV6_BLOCK_OUT}"                         >> $GITHUB_ENV
@@ -174,6 +176,7 @@ jobs:
           echo "  EgressOnlyInternetGatewayId      = ${EIGW_ID:-<not created>}"
           echo "  BedrockRuntimeVpcEndpointId      = ${BEDROCK_RUNTIME_VPCE_ID:-<not created>}"
           echo "  BedrockAgentRuntimeVpcEndpointId = ${BEDROCK_AGENT_RUNTIME_VPCE_ID:-<not created>}"
+          echo "  BedrockAgentVpcEndpointId        = ${BEDROCK_AGENT_VPCE_ID:-<not created>}"
           echo "  Ipv6EgressEnabled                = ${IPV6_EGRESS_ENABLED}"
           echo "  DualStackEnabled                 = ${DUAL_STACK_ENABLED}"
           echo "  VpcIpv6Block                     = ${VPC_IPV6_BLOCK_OUT:-<not yet assigned — set VPC_IPV6_BLOCK after first deploy>}"
@@ -217,6 +220,7 @@ jobs:
           [ -n "${DYNAMODB_VPCE_ID}" ]              && PARAM_OVERRIDES+=("DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}")
           [ -n "${BEDROCK_RUNTIME_VPCE_ID}" ]       && PARAM_OVERRIDES+=("BedrockRuntimeVpcEndpointId=${BEDROCK_RUNTIME_VPCE_ID}")
           [ -n "${BEDROCK_AGENT_RUNTIME_VPCE_ID}" ] && PARAM_OVERRIDES+=("BedrockAgentRuntimeVpcEndpointId=${BEDROCK_AGENT_RUNTIME_VPCE_ID}")
+          [ -n "${BEDROCK_AGENT_VPCE_ID}" ]          && PARAM_OVERRIDES+=("BedrockAgentVpcEndpointId=${BEDROCK_AGENT_VPCE_ID}")
           [ -n "${DUAL_STACK_ENABLED}" ]            && PARAM_OVERRIDES+=("DualStackEnabled=${DUAL_STACK_ENABLED}")
 
           sam deploy \

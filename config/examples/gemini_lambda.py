@@ -24,7 +24,7 @@ import urllib.error
 import boto3
 
 log = logging.getLogger()
-log.setLevel(logging.INFO)
+log.setLevel(getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO))
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
 MAX_TOKENS   = int(os.environ.get("MAX_TOKENS", "1024"))
