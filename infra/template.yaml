@@ -133,6 +133,10 @@ Parameters:
     Type: String
     Default: ""
     Description: Bedrock Agent Runtime Interface VPC endpoint ID — taken from shared stack BedrockAgentRuntimeVpcEndpointId output (optional).
+  BedrockAgentVpcEndpointId:
+    Type: String
+    Default: ""
+    Description: Bedrock Agent (control-plane) Interface VPC endpoint ID — taken from shared stack BedrockAgentVpcEndpointId output (optional).
   DualStackEnabled:
     Type: String
     Default: "false"
@@ -1571,6 +1575,9 @@ Outputs:
   BedrockAgentRuntimeVpcEndpointId:
     Value: !Ref BedrockAgentRuntimeVpcEndpointId
     Description: Bedrock Agent Runtime Interface VPC endpoint ID (sourced from shared stack)
+  BedrockAgentVpcEndpointId:
+    Value: !Ref BedrockAgentVpcEndpointId
+    Description: Bedrock Agent (control-plane) Interface VPC endpoint ID (sourced from shared stack)
   DualStackEnabled:
     Value: !Ref DualStackEnabled
     Description: Whether Lambda subnets are dual-stack (IPv4 + IPv6) — sourced from shared stack

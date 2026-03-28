@@ -72,7 +72,7 @@ from .provision_team import (
 )
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.INFO)
+log.setLevel(getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
