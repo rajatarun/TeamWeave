@@ -21,8 +21,13 @@ def transform_json_to_schema(
     runtime = client
     if runtime is None:
         import boto3
+        from botocore.config import Config
 
-        runtime = boto3.client("bedrock-runtime", region_name=region_name)
+        runtime = boto3.client(
+            "bedrock-runtime",
+            region_name=region_name,
+            config=Config(connect_timeout=10, read_timeout=60),
+        )
 
     normalized_target_schema = normalize_target_schema(target_schema)
     prompt = f"""Transform the input JSON into the target schema.

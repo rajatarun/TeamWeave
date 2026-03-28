@@ -3,6 +3,8 @@ import json
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
 import boto3
+from botocore.config import Config
+from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
 import psycopg
 from psycopg import sql
 from .bedrock_wrappers import invoke_model_request
@@ -10,7 +12,10 @@ from .logger import get_logger
 from .db import DbDao
 
 log = get_logger("rag")
-bedrock_runtime = boto3.client("bedrock-runtime")
+bedrock_runtime = boto3.client(
+    "bedrock-runtime",
+    config=Config(connect_timeout=10, read_timeout=60),
+)
 _secretsmanager = boto3.client("secretsmanager")
 _db_secret_cache: dict = {}
 
@@ -53,6 +58,17 @@ def _embed_text(text: str) -> Optional[List[float]]:
         emb = payload.get("embedding")
         if isinstance(emb, list) and emb:
             return [float(v) for v in emb]
+    except ConnectTimeoutError as e:
+        log.error(
+            "vector_embedding_connect_timeout — possible VPC endpoint routing issue",
+            extra={
+                "model_id": model_id,
+                "endpoint_url": os.environ.get("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "<sdk-default>"),
+                "err": str(e)[:400],
+            },
+        )
+    except ReadTimeoutError as e:
+        log.error("vector_embedding_read_timeout", extra={"model_id": model_id, "err": str(e)[:400]})
     except Exception:
         log.exception("vector_embedding_failed", extra={"model_id": model_id})
     return None
