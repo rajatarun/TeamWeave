@@ -321,7 +321,7 @@ Resources:
           IFACE="$(ip route show default | awk '/default/ {print $5; exit}')"
           sysctl -w net.ipv4.ip_forward=1
           echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-nat.conf
-          iptables -t nat -A POSTROUTING -o "${IFACE}" -j MASQUERADE
+          iptables -t nat -A POSTROUTING -o "${!IFACE}" -j MASQUERADE
           iptables -A FORWARD -s ${LambdaSubnetCidrAz1} -j ACCEPT
           iptables -A FORWARD -s ${LambdaSubnetCidrAz2} -j ACCEPT
           iptables -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
