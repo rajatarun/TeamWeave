@@ -272,6 +272,19 @@ Resources:
         - !Ref BedrockVpceSecurityGroup
       PrivateDnsEnabled: true
 
+  BedrockAgentVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: HasVpc
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-agent"
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref LambdaSubnetAz1
+      SecurityGroupIds:
+        - !Ref BedrockVpceSecurityGroup
+      PrivateDnsEnabled: true
+
   # ---------------------------------------------------------------------------
   # Lambda route table + Egress-Only Internet Gateway (owned by this stack)
   # ---------------------------------------------------------------------------
@@ -414,5 +427,12 @@ Outputs:
     Value: !Ref BedrockAgentRuntimeVpcEndpoint
     Export:
       Name: !Sub "${AWS::StackName}-BedrockAgentRuntimeVpcEndpointId"
+
+  BedrockAgentVpcEndpointId:
+    Condition: HasVpc
+    Description: Interface VPC endpoint ID for bedrock-agent (control-plane)
+    Value: !Ref BedrockAgentVpcEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-BedrockAgentVpcEndpointId"
 
 
