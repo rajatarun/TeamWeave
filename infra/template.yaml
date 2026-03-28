@@ -104,7 +104,7 @@ Parameters:
     Default: "tarun-teamweave-shared"
     Description: >
       Name of the shared infrastructure CloudFormation stack (shared.yaml). Its outputs
-      supply the Observatory DynamoDB table, AMP workspace, and VPC endpoints used here.
+      supply the Observatory DynamoDB table, AMP workspace, and shared networking outputs used here.
   ObservatoryMetricsTableName:
     Type: String
     Description: Observatory DynamoDB table name — taken from shared stack ObservatoryMetricsTableName output.
@@ -125,18 +125,10 @@ Parameters:
     Type: String
     Default: ""
     Description: DynamoDB Gateway VPC endpoint ID — taken from shared stack DynamoDbVpcEndpointId output (optional).
-  BedrockRuntimeVpcEndpointId:
+  NatInstanceId:
     Type: String
     Default: ""
-    Description: Bedrock Runtime Interface VPC endpoint ID — taken from shared stack BedrockRuntimeVpcEndpointId output (optional).
-  BedrockAgentRuntimeVpcEndpointId:
-    Type: String
-    Default: ""
-    Description: Bedrock Agent Runtime Interface VPC endpoint ID — taken from shared stack BedrockAgentRuntimeVpcEndpointId output (optional).
-  BedrockAgentVpcEndpointId:
-    Type: String
-    Default: ""
-    Description: Bedrock Agent (control-plane) Interface VPC endpoint ID — taken from shared stack BedrockAgentVpcEndpointId output (optional).
+    Description: NAT instance ID used by Lambda subnets for Bedrock IPv4 egress — taken from shared stack NatInstanceId output (optional).
   DualStackEnabled:
     Type: String
     Default: "false"
@@ -1559,7 +1551,7 @@ Outputs:
     Description: CloudWatch Log Group ARN for API Gateway access logs
   SharedStackName:
     Value: !Ref SharedStackName
-    Description: Name of the shared infrastructure stack supplying Observatory and VPC endpoints
+    Description: Name of the shared infrastructure stack supplying Observatory and shared networking resources
   LambdaSubnetIds:
     Value: !Ref LambdaSubnetIds
     Description: Lambda private subnet IDs (sourced from shared stack)
@@ -1569,15 +1561,9 @@ Outputs:
   DynamoDbVpcEndpointId:
     Value: !Ref DynamoDbVpcEndpointId
     Description: DynamoDB Gateway VPC endpoint ID (sourced from shared stack)
-  BedrockRuntimeVpcEndpointId:
-    Value: !Ref BedrockRuntimeVpcEndpointId
-    Description: Bedrock Runtime Interface VPC endpoint ID (sourced from shared stack)
-  BedrockAgentRuntimeVpcEndpointId:
-    Value: !Ref BedrockAgentRuntimeVpcEndpointId
-    Description: Bedrock Agent Runtime Interface VPC endpoint ID (sourced from shared stack)
-  BedrockAgentVpcEndpointId:
-    Value: !Ref BedrockAgentVpcEndpointId
-    Description: Bedrock Agent (control-plane) Interface VPC endpoint ID (sourced from shared stack)
+  NatInstanceId:
+    Value: !Ref NatInstanceId
+    Description: NAT instance ID for Bedrock IPv4 egress from Lambda subnets (sourced from shared stack)
   DualStackEnabled:
     Value: !Ref DualStackEnabled
     Description: Whether Lambda subnets are dual-stack (IPv4 + IPv6) — sourced from shared stack

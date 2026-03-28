@@ -23,6 +23,12 @@ Parameters:
       Deprecated — the stack now creates and owns its Egress-Only Internet Gateway
       automatically whenever VpcId is set. This parameter is retained for backward
       compatibility only and is no longer used.
+  InternetGatewayId:
+    Type: String
+    Default: ""
+    Description: >
+      Internet Gateway ID attached to this VPC. Required to create the NAT instance
+      public subnet route for IPv4 egress from Lambda to Bedrock public endpoints.
   AmpWorkspaceAlias:
     Type: String
     Default: ""
@@ -63,6 +69,9 @@ Conditions:
   HasVpcIpv6Block: !And
     - !Not [!Equals [!Ref VpcId, ""]]
     - !Not [!Equals [!Ref VpcIpv6Block, ""]]
+  HasVpcAndInternetGateway: !And
+    - !Not [!Equals [!Ref VpcId, ""]]
+    - !Not [!Equals [!Ref InternetGatewayId, ""]]
 
 Resources:
 
@@ -225,71 +234,110 @@ Resources:
       RouteTableId: !Ref LambdaRouteTable
 
   # ---------------------------------------------------------------------------
-  # Bedrock Interface VPC endpoints — single AZ, private DNS
+  # NAT instance path for Bedrock IPv4 egress from Lambda subnets
   # ---------------------------------------------------------------------------
-  # Bedrock service endpoints do not return AAAA records so they cannot be
-  # reached via the IPv6 EIGW. All other AWS services use EIGW IPv6.
+  # Bedrock service endpoints do not return AAAA records, so dual-stack Lambda
+  # still needs an IPv4 egress path. A lightweight NAT instance in a dedicated
+  # public subnet provides that path without Bedrock Interface VPC endpoints.
 
-  BedrockVpceSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Condition: HasVpc
+  NatSubnetAz1:
+    Type: AWS::EC2::Subnet
+    Condition: HasVpcAndInternetGateway
     Properties:
-      GroupDescription: HTTPS from Lambda to Bedrock Interface VPC endpoints
+      VpcId: !Ref VpcId
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ""
+      CidrBlock: "172.31.98.0/24"
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-nat-az1"
+        - Key: Stack
+          Value: !Ref AWS::StackName
+
+  NatRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: HasVpcAndInternetGateway
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-nat-public-rt"
+        - Key: Stack
+          Value: !Ref AWS::StackName
+
+  NatSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: HasVpcAndInternetGateway
+    Properties:
+      SubnetId: !Ref NatSubnetAz1
+      RouteTableId: !Ref NatRouteTable
+
+  NatDefaultRoute:
+    Type: AWS::EC2::Route
+    Condition: HasVpcAndInternetGateway
+    Properties:
+      RouteTableId: !Ref NatRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGatewayId
+
+  NatInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: HasVpcAndInternetGateway
+    Properties:
+      GroupDescription: NAT instance security group for Lambda subnet IPv4 egress
       VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: HTTPS from within the VPC (IPv4)
+        - IpProtocol: -1
+          CidrIp: !Ref LambdaSubnetCidrAz1
+          Description: Traffic from Lambda subnet AZ1
+        - IpProtocol: -1
+          CidrIp: !Ref LambdaSubnetCidrAz2
+          Description: Traffic from Lambda subnet AZ2
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: "0.0.0.0/0"
+          Description: Outbound internet access
       Tags:
         - Key: Stack
           Value: !Ref AWS::StackName
 
-  BedrockRuntimeVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasVpc
+  NatInstance:
+    Type: AWS::EC2::Instance
+    Condition: HasVpcAndInternetGateway
     Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-runtime"
-      VpcEndpointType: Interface
-      SubnetIds:
-        - !Ref LambdaSubnetAz1
+      InstanceType: t4g.nano
+      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}"
+      SourceDestCheck: false
+      SubnetId: !Ref NatSubnetAz1
       SecurityGroupIds:
-        - !Ref BedrockVpceSecurityGroup
-      PrivateDnsEnabled: true
-
-  BedrockAgentRuntimeVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasVpc
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-agent-runtime"
-      VpcEndpointType: Interface
-      SubnetIds:
-        - !Ref LambdaSubnetAz1
-      SecurityGroupIds:
-        - !Ref BedrockVpceSecurityGroup
-      PrivateDnsEnabled: true
-
-  BedrockAgentVpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: HasVpc
-    Properties:
-      VpcId: !Ref VpcId
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.bedrock-agent"
-      VpcEndpointType: Interface
-      SubnetIds:
-        - !Ref LambdaSubnetAz1
-      SecurityGroupIds:
-        - !Ref BedrockVpceSecurityGroup
-      PrivateDnsEnabled: true
+        - !Ref NatInstanceSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          dnf install -y iptables-services
+          IFACE="$(ip route show default | awk '/default/ {print $5; exit}')"
+          sysctl -w net.ipv4.ip_forward=1
+          echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-nat.conf
+          iptables -t nat -A POSTROUTING -o "${IFACE}" -j MASQUERADE
+          iptables -A FORWARD -s ${LambdaSubnetCidrAz1} -j ACCEPT
+          iptables -A FORWARD -s ${LambdaSubnetCidrAz2} -j ACCEPT
+          iptables -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
+          systemctl enable iptables
+          service iptables save
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-bedrock-nat-instance"
+        - Key: Stack
+          Value: !Ref AWS::StackName
 
   # ---------------------------------------------------------------------------
   # Lambda route table + Egress-Only Internet Gateway (owned by this stack)
   # ---------------------------------------------------------------------------
-  # The stack creates its own private route table and EIGW so no external
-  # PrivateRouteTableId or EgressOnlyInternetGatewayId inputs are required.
+  # The stack creates its own private route table and EIGW. If InternetGatewayId
+  # is provided, it also creates a NAT instance path for IPv4 Bedrock egress.
   # S3 and DynamoDB Gateway endpoints are attached to this route table, and
   # a ::/0 IPv6 route to the EIGW lets Lambda reach AWS public endpoints
   # (Bedrock, Secrets Manager, AMP) over IPv6 without a NAT Gateway.
@@ -319,6 +367,15 @@ Resources:
       RouteTableId: !Ref LambdaRouteTable
       DestinationIpv6CidrBlock: "::/0"
       EgressOnlyInternetGatewayId: !Ref LambdaEgressOnlyInternetGateway
+
+  LambdaIpv4EgressRouteToNat:
+    Type: AWS::EC2::Route
+    Condition: HasVpcAndInternetGateway
+    DependsOn: NatInstance
+    Properties:
+      RouteTableId: !Ref LambdaRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      InstanceId: !Ref NatInstance
 
 Outputs:
 
@@ -414,25 +471,9 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-VpcIpv6Block"
 
-  BedrockRuntimeVpcEndpointId:
-    Condition: HasVpc
-    Description: Interface VPC endpoint ID for bedrock-runtime (single AZ)
-    Value: !Ref BedrockRuntimeVpcEndpoint
+  NatInstanceId:
+    Condition: HasVpcAndInternetGateway
+    Description: NAT instance ID used by Lambda subnets for IPv4 egress (including Bedrock)
+    Value: !Ref NatInstance
     Export:
-      Name: !Sub "${AWS::StackName}-BedrockRuntimeVpcEndpointId"
-
-  BedrockAgentRuntimeVpcEndpointId:
-    Condition: HasVpc
-    Description: Interface VPC endpoint ID for bedrock-agent-runtime (single AZ)
-    Value: !Ref BedrockAgentRuntimeVpcEndpoint
-    Export:
-      Name: !Sub "${AWS::StackName}-BedrockAgentRuntimeVpcEndpointId"
-
-  BedrockAgentVpcEndpointId:
-    Condition: HasVpc
-    Description: Interface VPC endpoint ID for bedrock-agent (control-plane)
-    Value: !Ref BedrockAgentVpcEndpoint
-    Export:
-      Name: !Sub "${AWS::StackName}-BedrockAgentVpcEndpointId"
-
-
+      Name: !Sub "${AWS::StackName}-NatInstanceId"
