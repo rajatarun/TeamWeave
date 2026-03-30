@@ -307,17 +307,26 @@ Resources:
         - Key: Stack
           Value: !Ref AWS::StackName
 
+  NatInstanceLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Condition: HasVpcAndInternetGateway
+    Properties:
+      LaunchTemplateData:
+        InstanceMarketOptions:
+          MarketType: spot
+          SpotOptions:
+            SpotInstanceType: persistent
+            InstanceInterruptionBehavior: stop
+
   NatInstance:
     Type: AWS::EC2::Instance
     Condition: HasVpcAndInternetGateway
     Properties:
       InstanceType: !Ref NatInstanceType
       ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}"
-      InstanceMarketOptions:
-        MarketType: spot
-        SpotOptions:
-          SpotInstanceType: persistent
-          InstanceInterruptionBehavior: stop
+      LaunchTemplate:
+        LaunchTemplateId: !Ref NatInstanceLaunchTemplate
+        Version: !GetAtt NatInstanceLaunchTemplate.LatestVersionNumber
       SourceDestCheck: false
       SubnetId: !Ref NatSubnetAz1
       SecurityGroupIds:
