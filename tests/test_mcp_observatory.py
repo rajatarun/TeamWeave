@@ -542,5 +542,209 @@ class ExtractSpanFieldsTests(unittest.TestCase):
         observatory._ddb_table = None
 
 
+class EnrichRiskFieldsTests(unittest.TestCase):
+    """Tests for _enrich_risk_fields — gate, hallucination, and composite risk."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.obs = importlib.import_module("src.orchestrator.mcp_observatory")
+
+    def _decision(self, action="allow", reason="within_budget"):
+        d = MagicMock()
+        d.action = action
+        d.reason = reason
+        return d
+
+    # ── gate_blocked ─────────────────────────────────────────────────────────
+
+    def test_gate_blocked_set_true_for_block_decision(self):
+        item = {"gate_blocked": False}
+        self.obs._enrich_risk_fields(item, self._decision(action="block"))
+        self.assertTrue(item["gate_blocked"])
+
+    def test_gate_blocked_not_changed_for_allow_decision(self):
+        item = {"gate_blocked": False}
+        self.obs._enrich_risk_fields(item, self._decision(action="allow"))
+        self.assertFalse(item["gate_blocked"])
+
+    def test_gate_blocked_not_overwritten_if_already_true(self):
+        item = {"gate_blocked": True}
+        self.obs._enrich_risk_fields(item, self._decision(action="allow"))
+        self.assertTrue(item["gate_blocked"])
+
+    # ── no shadow data → no risk scores ──────────────────────────────────────
+
+    def test_no_shadow_data_leaves_risk_fields_absent(self):
+        item = {}
+        self.obs._enrich_risk_fields(item, self._decision())
+        self.assertNotIn("hallucination_risk_score", item)
+        self.assertNotIn("composite_risk_score", item)
+        self.assertNotIn("risk_tier", item)
+
+    # ── hallucination risk ────────────────────────────────────────────────────
+
+    def test_hallucination_risk_score_computed_from_shadow_disagreement(self):
+        from decimal import Decimal
+        item = {"shadow_disagreement_score": Decimal("0.4")}
+        self.obs._enrich_risk_fields(item, self._decision())
+        self.assertIn("hallucination_risk_score", item)
+        score = float(item["hallucination_risk_score"])
+        self.assertGreater(score, 0.0)
+        self.assertLessEqual(score, 1.0)
+
+    def test_hallucination_risk_level_set_alongside_score(self):
+        from decimal import Decimal
+        item = {"shadow_disagreement_score": Decimal("0.5")}
+        self.obs._enrich_risk_fields(item, self._decision())
+        self.assertIn("hallucination_risk_level", item)
+        self.assertIn(item["hallucination_risk_level"], ("low", "medium", "high"))
+
+    def test_hallucination_risk_score_not_overwritten_if_already_present(self):
+        from decimal import Decimal
+        item = {
+            "shadow_disagreement_score": Decimal("0.8"),
+            "hallucination_risk_score": Decimal("0.1"),
+        }
+        self.obs._enrich_risk_fields(item, self._decision())
+        self.assertAlmostEqual(float(item["hallucination_risk_score"]), 0.1, places=4)
+
+    def test_zero_disagreement_produces_low_hallucination_risk(self):
+        from decimal import Decimal
+        item = {"shadow_disagreement_score": Decimal("0.0")}
+        self.obs._enrich_risk_fields(item, self._decision())
+        # self_consistency = 1.0 → very low risk
+        self.assertLess(float(item["hallucination_risk_score"]), 0.25)
+
+    # ── composite risk ────────────────────────────────────────────────────────
+
+    def test_composite_risk_score_computed_from_shadow_disagreement(self):
+        from decimal import Decimal
+        item = {"shadow_disagreement_score": Decimal("0.6")}
+        self.obs._enrich_risk_fields(item, self._decision())
+        self.assertIn("composite_risk_score", item)
+        score = float(item["composite_risk_score"])
+        self.assertGreaterEqual(score, 0.0)
+        self.assertLessEqual(score, 1.0)
+
+    def test_composite_risk_includes_numeric_variance_when_present(self):
+        from decimal import Decimal
+        item = {
+            "shadow_disagreement_score": Decimal("0.5"),
+            "shadow_numeric_variance": Decimal("0.3"),
+        }
+        self.obs._enrich_risk_fields(item, self._decision())
+        self.assertIn("composite_risk_score", item)
+        self.assertIn("composite_risk_level", item)
+
+    def test_composite_risk_not_overwritten_if_already_present(self):
+        from decimal import Decimal
+        item = {
+            "shadow_disagreement_score": Decimal("0.9"),
+            "composite_risk_score": Decimal("0.05"),
+        }
+        self.obs._enrich_risk_fields(item, self._decision())
+        self.assertAlmostEqual(float(item["composite_risk_score"]), 0.05, places=4)
+
+    # ── risk_tier ─────────────────────────────────────────────────────────────
+
+    def test_risk_tier_set_from_composite_risk_level(self):
+        from decimal import Decimal
+        item = {"shadow_disagreement_score": Decimal("0.7")}
+        self.obs._enrich_risk_fields(item, self._decision())
+        self.assertIn("risk_tier", item)
+        self.assertEqual(item["risk_tier"], item["composite_risk_level"])
+
+    def test_risk_tier_not_overwritten_if_already_present(self):
+        from decimal import Decimal
+        item = {
+            "shadow_disagreement_score": Decimal("0.7"),
+            "risk_tier": "critical",
+        }
+        self.obs._enrich_risk_fields(item, self._decision())
+        self.assertEqual(item["risk_tier"], "critical")
+
+    # ── push_metric integration ───────────────────────────────────────────────
+
+    def test_push_metric_sets_gate_blocked_on_block_decision(self):
+        mock_table = MagicMock()
+        os.environ["OBSERVATORY_METRICS_TABLE"] = "test-table"
+        obs = importlib.import_module("src.orchestrator.mcp_observatory")
+        obs._ddb_table = None
+
+        with patch("boto3.resource") as mock_boto:
+            mock_boto.return_value.Table.return_value = mock_table
+            span = MagicMock(
+                trace_id="t1", prompt_tokens=5, completion_tokens=5, cost_usd=0.0,
+                shadow_disagreement_score=None, shadow_numeric_variance=None,
+                **{f: None for f in (
+                    "confidence", "grounding_score", "verifier_score",
+                    "self_consistency_score", "numeric_variance_score",
+                    "hallucination_risk_score", "grounding_risk", "self_consistency_risk",
+                    "numeric_instability_risk", "tool_mismatch_risk", "drift_risk",
+                    "composite_risk_score", "retries", "prompt_size_chars",
+                    "exec_token_ttl_ms", "fallback_used", "is_shadow", "gate_blocked",
+                    "tool_claim_mismatch", "exec_token_verified", "span_id",
+                    "parent_span_id", "risk_tier", "prompt_template_id", "prompt_hash",
+                    "normalized_prompt_hash", "answer_hash", "hallucination_risk_level",
+                    "shadow_parent_trace_id", "fallback_type", "fallback_reason",
+                    "request_id", "method", "tool_name", "tool_args_hash",
+                    "tool_criticality", "policy_decision", "policy_id", "policy_version",
+                    "composite_risk_level", "exec_token_id", "exec_token_hash",
+                    "start_time", "end_time",
+                )},
+            )
+            decision = MagicMock(action="block", reason="empty_output")
+            obs._push_metric("invoke_agent", span, decision, {})
+
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        self.assertTrue(item.get("gate_blocked"))
+
+        os.environ.pop("OBSERVATORY_METRICS_TABLE", None)
+        obs._ddb_table = None
+
+    def test_push_metric_writes_hallucination_and_composite_risk_from_shadow(self):
+        from decimal import Decimal
+        mock_table = MagicMock()
+        os.environ["OBSERVATORY_METRICS_TABLE"] = "test-table"
+        obs = importlib.import_module("src.orchestrator.mcp_observatory")
+        obs._ddb_table = None
+
+        with patch("boto3.resource") as mock_boto:
+            mock_boto.return_value.Table.return_value = mock_table
+            span = MagicMock(
+                trace_id="t1", prompt_tokens=5, completion_tokens=5, cost_usd=0.001,
+                shadow_disagreement_score=0.45,
+                shadow_numeric_variance=None,
+                **{f: None for f in (
+                    "confidence", "grounding_score", "verifier_score",
+                    "self_consistency_score", "numeric_variance_score",
+                    "hallucination_risk_score", "grounding_risk", "self_consistency_risk",
+                    "numeric_instability_risk", "tool_mismatch_risk", "drift_risk",
+                    "composite_risk_score", "retries", "prompt_size_chars",
+                    "exec_token_ttl_ms", "fallback_used", "is_shadow", "gate_blocked",
+                    "tool_claim_mismatch", "exec_token_verified", "span_id",
+                    "parent_span_id", "risk_tier", "prompt_template_id", "prompt_hash",
+                    "normalized_prompt_hash", "answer_hash", "hallucination_risk_level",
+                    "shadow_parent_trace_id", "fallback_type", "fallback_reason",
+                    "request_id", "method", "tool_name", "tool_args_hash",
+                    "tool_criticality", "policy_decision", "policy_id", "policy_version",
+                    "composite_risk_level", "exec_token_id", "exec_token_hash",
+                    "start_time", "end_time",
+                )},
+            )
+            decision = MagicMock(action="allow", reason="within_budget")
+            obs._push_metric("invoke_agent", span, decision, {})
+
+        item = mock_table.put_item.call_args.kwargs["Item"]
+        self.assertIn("hallucination_risk_score", item)
+        self.assertIn("hallucination_risk_level", item)
+        self.assertIn("composite_risk_score", item)
+        self.assertIn("composite_risk_level", item)
+        self.assertIn("risk_tier", item)
+
+        os.environ.pop("OBSERVATORY_METRICS_TABLE", None)
+        obs._ddb_table = None
+
+
 if __name__ == "__main__":
     unittest.main()
