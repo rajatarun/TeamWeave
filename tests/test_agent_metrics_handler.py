@@ -601,6 +601,41 @@ class TestNewAggregationModes(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 400)
 
 
+class TestAggregateLowLevelDynamoShape(unittest.TestCase):
+    def test_by_operation_handles_attributevalue_items(self):
+        items = [
+            {
+                "pk": {"S": "OBSERVATORY#invoke_agent"},
+                "sk": {"S": "2026-03-30T19:52:24.997872#c79d1034-cb6c-45a7-af79-41996a73aad9"},
+                "operation": {"S": "invoke_agent"},
+                "agent_id": {"S": "04PEAR5QXH"},
+                "prompt_tokens": {"N": "3698"},
+                "completion_tokens": {"N": "155"},
+                "cost_usd": {"N": "0.008016"},
+                "decision": {"S": "allow"},
+                "timestamp": {"S": "2026-03-30T19:52:24.997872"},
+            },
+            {
+                "pk": {"S": "OBSERVATORY#invoke_model"},
+                "sk": {"S": "2026-03-30T19:39:30.005896#15be86c9-dccc-4bbd-9a8c-e5c8cbf90d99"},
+                "operation": {"S": "invoke_model"},
+                "model_id": {"S": "amazon.nova-micro-v1:0"},
+                "prompt_tokens": {"N": "23"},
+                "completion_tokens": {"N": "125"},
+                "cost_usd": {"N": "0.000546"},
+                "decision": {"S": "allow"},
+                "timestamp": {"S": "2026-03-30T19:39:30.005896"},
+            },
+        ]
+        tbl = _mock_table(items=items)
+        resp = _run({"aggregate": "by_operation"}, table=tbl)
+        self.assertEqual(resp["statusCode"], 200)
+        body = json.loads(resp["body"])
+        groups = {g["key"]["operation"]: g for g in body["groups"]}
+        self.assertIn("invoke_agent", groups)
+        self.assertEqual(groups["invoke_agent"]["count"], 1)
+
+
 class TestNewSortByFields(unittest.TestCase):
     """Tests for new sort_by options: composite_risk_score, hallucination_risk_score, etc."""
 
