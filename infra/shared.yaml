@@ -313,6 +313,11 @@ Resources:
     Properties:
       InstanceType: !Ref NatInstanceType
       ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}"
+      InstanceMarketOptions:
+        MarketType: spot
+        SpotOptions:
+          SpotInstanceType: persistent
+          InstanceInterruptionBehavior: stop
       SourceDestCheck: false
       SubnetId: !Ref NatSubnetAz1
       SecurityGroupIds:
