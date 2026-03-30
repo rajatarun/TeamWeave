@@ -26,6 +26,12 @@ from typing import Optional
 import boto3
 from mcp_observatory.instrument import instrument_wrapper_api
 
+from mcp_observatory.hallucination.scoring import (
+    compute_hallucination_risk_score,
+    risk_level_for_score,
+)
+from mcp_observatory.risk.scoring import composite_risk_score as _composite_risk_score
+
 from . import amp_metrics as _amp
 from .bedrock_wrappers import invoke_agent_request, invoke_model_request
 from .logger import get_logger
@@ -127,6 +133,71 @@ def _extract_span_fields(span) -> dict:
     return result
 
 
+def _enrich_risk_fields(item: dict, decision) -> None:
+    """Populate gate, hallucination, and composite risk fields on a DynamoDB item.
+
+    gate_blocked
+        Set to True whenever the policy engine returns action="block".
+        The TraceContext default is False; the wrapper API never flips it,
+        so we derive the correct value from the decision here.
+
+    hallucination_risk_score / hallucination_risk_level
+        Computed from shadow disagreement when dual_invoke data is present.
+        shadow_disagreement_score is inverted (1 - disagreement) to obtain a
+        self-consistency goodness score that feeds the library's weighted formula.
+
+    composite_risk_score / composite_risk_level
+        Computed from the shadow-derived risk components (self_consistency_risk
+        and, when available, numeric_instability_risk).
+
+    risk_tier
+        Mirrored from composite_risk_level when computed.
+
+    All fields are written with item.setdefault — they never overwrite values
+    already set by _extract_span_fields (e.g. when the span carries richer data).
+    """
+    # ── Policy gate ─────────────────────────────────────────────────────────
+    if decision.action == "block":
+        item["gate_blocked"] = True
+
+    # ── Shadow-signal risk scoring ───────────────────────────────────────────
+    raw_sdis = item.get("shadow_disagreement_score")
+    if raw_sdis is None:
+        return  # no shadow signals → can't compute risk scores
+
+    sdis = float(raw_sdis)
+    raw_svar = item.get("shadow_numeric_variance")
+    svar = float(raw_svar) if raw_svar is not None else None
+
+    # Hallucination risk ── shadow disagreement as self-consistency proxy
+    if "hallucination_risk_score" not in item:
+        self_consistency = max(0.0, 1.0 - sdis)
+        numeric_var_score = min(1.0, svar) if svar is not None else None
+        h_score = compute_hallucination_risk_score(
+            grounding_score=None,
+            self_consistency_score=self_consistency,
+            verifier_score=None,
+            numeric_variance_score=numeric_var_score,
+            tool_claim_mismatch=None,
+        )
+        if h_score is not None:
+            item["hallucination_risk_score"] = _to_decimal(h_score)
+            item.setdefault("hallucination_risk_level", risk_level_for_score(h_score))
+
+    # Composite risk ── from disagreement-derived risk components
+    if "composite_risk_score" not in item:
+        components: dict = {"self_consistency_risk": sdis}
+        if svar is not None:
+            components["numeric_instability_risk"] = min(1.0, svar)
+        c_score, c_level = _composite_risk_score(components)
+        item["composite_risk_score"] = _to_decimal(c_score)
+        item.setdefault("composite_risk_level", c_level)
+
+    # risk_tier mirrors composite_risk_level
+    if "composite_risk_level" in item:
+        item.setdefault("risk_tier", item["composite_risk_level"])
+
+
 def _push_metric(operation: str, span, decision, extra: dict) -> None:
     """Best-effort write of a telemetry span to ObservatoryMetricsTable and AMP.
 
@@ -167,6 +238,9 @@ def _push_metric(operation: str, span, decision, extra: dict) -> None:
             for k, v in _extract_span_fields(span).items():
                 if k not in item:
                     item[k] = v
+
+            # Derive gate_blocked and compute risk scores from available signals
+            _enrich_risk_fields(item, decision)
 
             item.update({k: str(v) if isinstance(v, float) else v for k, v in extra.items()})
 
