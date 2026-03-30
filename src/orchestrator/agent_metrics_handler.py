@@ -292,13 +292,22 @@ def _aggregate_items(items: list[dict], mode: str) -> list[dict]:
         "composite_risk_score",
     ]
 
+    def _operation_for_item(item: dict) -> str:
+        op = item.get("operation")
+        if op:
+            return str(op)
+        pk = item.get("pk", "")
+        if isinstance(pk, str) and pk.startswith("OBSERVATORY#"):
+            return pk.split("#", 1)[1]
+        return ""
+
     def _key_for(item: dict) -> tuple:
         if mode == "by_agent":
             return (item.get("agent_id", ""),)
         if mode == "by_model":
             return (item.get("model_id", ""),)
         if mode == "by_operation":
-            return (item.get("operation", ""),)
+            return (_operation_for_item(item),)
         if mode == "by_decision":
             return (item.get("decision", ""),)
         if mode == "by_hour":
@@ -483,7 +492,13 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
             )
             # Apply operation filter if specified
             if operation != "all":
-                items = [i for i in items if i.get("operation") == operation]
+                items = [
+                    i for i in items
+                    if (
+                        i.get("operation") == operation
+                        or i.get("pk") == f"OBSERVATORY#{operation}"
+                    )
+                ]
         elif operation == "all":
             # Query all known operation PKs and merge results.
             # Pagination is not supported for merged queries.
