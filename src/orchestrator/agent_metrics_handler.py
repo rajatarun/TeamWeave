@@ -237,6 +237,32 @@ def _query_by_agent_id(
     return resp.get("Items", []), resp.get("ScannedCount", 0), resp.get("LastEvaluatedKey")
 
 
+def _unwrap_ddb_value(value: Any) -> Any:
+    """Unwrap low-level DynamoDB AttributeValue maps to plain Python values."""
+    if not isinstance(value, dict) or len(value) != 1:
+        return value
+
+    attr_type, attr_val = next(iter(value.items()))
+    if attr_type == "S":
+        return attr_val
+    if attr_type == "N":
+        return Decimal(str(attr_val))
+    if attr_type == "BOOL":
+        return bool(attr_val)
+    if attr_type == "NULL":
+        return None
+    if attr_type == "M" and isinstance(attr_val, dict):
+        return {k: _unwrap_ddb_value(v) for k, v in attr_val.items()}
+    if attr_type == "L" and isinstance(attr_val, list):
+        return [_unwrap_ddb_value(v) for v in attr_val]
+    return value
+
+
+def _normalize_item(item: dict) -> dict:
+    """Normalize DynamoDB item shape (resource format or low-level AttributeValue format)."""
+    return {k: _unwrap_ddb_value(v) for k, v in item.items()}
+
+
 def _fetch_all_for_aggregate(
     table,
     operation: str,
@@ -276,7 +302,7 @@ def _fetch_all_for_aggregate(
                 if not last_key or len(all_items) >= _AGGREGATE_SCAN_LIMIT:
                     break
 
-    return all_items, total_scanned
+    return [_normalize_item(item) for item in all_items], total_scanned
 
 
 def _aggregate_items(items: list[dict], mode: str) -> list[dict]:
@@ -490,6 +516,7 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
                 table, agent_id, start_iso, end_iso, filter_expr,
                 limit=limit, exclusive_start_key=exclusive_start_key
             )
+            items = [_normalize_item(item) for item in items]
             # Apply operation filter if specified
             if operation != "all":
                 items = [
@@ -507,7 +534,7 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
                     table, f"OBSERVATORY#{op}", start_iso, end_iso, filter_expr,
                     limit=limit, exclusive_start_key=None
                 )
-                items.extend(op_items)
+                items.extend(_normalize_item(item) for item in op_items)
                 scanned += op_scanned
             last_key = None  # merged queries; pagination not supported for all+merged
         else:
@@ -516,6 +543,7 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
                 table, pk, start_iso, end_iso, filter_expr,
                 limit=limit, exclusive_start_key=exclusive_start_key
             )
+            items = [_normalize_item(item) for item in items]
     except Exception as exc:
         log.error("agent_metrics_query_error", extra={"err": str(exc)})
         return _resp(500, {"error": "Failed to query metrics"})
