@@ -151,6 +151,14 @@ class TestListModeQueryRouting(unittest.TestCase):
         values = _condition_values(call_kwargs["KeyConditionExpression"])
         self.assertIn("AGENT-123", values)
 
+    def test_agent_id_operation_filter_falls_back_to_pk_for_legacy_items(self):
+        legacy_item = self._item("invoke_agent")
+        legacy_item.pop("operation")
+        tbl = _mock_table(items=[legacy_item])
+        resp = _run({"agent_id": "AGENT-123", "operation": "invoke_agent"}, table=tbl)
+        body = json.loads(resp["body"])
+        self.assertEqual(body["count"], 1)
+
     def test_time_range_filter_applied_to_sk(self):
         tbl = _mock_table(items=[self._item("invoke_agent")])
         _run({"operation": "invoke_agent", "start": "2024-01-01T00:00:00",
@@ -357,6 +365,15 @@ class TestAggregateMode(unittest.TestCase):
             self._model_item("M1", "t3"),
         ]
         tbl = _mock_table(items=items)
+        resp = _run({"aggregate": "by_operation"}, table=tbl)
+        body = json.loads(resp["body"])
+        groups = {g["key"]["operation"]: g for g in body["groups"]}
+        self.assertIn("invoke_agent", groups)
+
+    def test_aggregate_by_operation_uses_pk_when_operation_missing(self):
+        item = self._agent_item("A1", "t1")
+        item.pop("operation")
+        tbl = _mock_table(items=[item])
         resp = _run({"aggregate": "by_operation"}, table=tbl)
         body = json.loads(resp["body"])
         groups = {g["key"]["operation"]: g for g in body["groups"]}
