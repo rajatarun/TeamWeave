@@ -132,13 +132,16 @@ class TestListModeQueryRouting(unittest.TestCase):
     def test_all_operations_queries_both_pks(self):
         tbl = _mock_table(items=[])
         _run({"operation": "all"}, table=tbl)
-        # Should have been called twice (once per pk)
-        self.assertEqual(tbl.query.call_count, 2)
+        # Should have been called once per known operation PK (invoke_agent,
+        # invoke_model, classify_question, synthesize_answer)
+        self.assertEqual(tbl.query.call_count, 4)
         all_values = []
         for c in tbl.query.call_args_list:
             all_values.extend(_condition_values(c[1]["KeyConditionExpression"]))
         self.assertIn("OBSERVATORY#invoke_agent", all_values)
         self.assertIn("OBSERVATORY#invoke_model", all_values)
+        self.assertIn("OBSERVATORY#classify_question", all_values)
+        self.assertIn("OBSERVATORY#synthesize_answer", all_values)
 
     def test_agent_id_filter_uses_gsi(self):
         tbl = _mock_table(items=[self._item("invoke_agent")])
