@@ -45,7 +45,12 @@ from .logger import get_logger
 
 log = get_logger("agent_metrics_handler")
 
-_VALID_OPERATIONS = {"invoke_agent", "invoke_model", "all"}
+_VALID_OPERATIONS = {"invoke_agent", "invoke_model", "classify_question", "synthesize_answer", "all"}
+
+# All known operation PK suffixes stored under OBSERVATORY#{op}.
+# classify_question / synthesize_answer were used by earlier versions of
+# mcp_observatory before the schema was unified to invoke_model.
+_ALL_OPERATION_PKS = ["invoke_agent", "invoke_model", "classify_question", "synthesize_answer"]
 _VALID_SORT_BY = {
     "timestamp", "cost_usd", "prompt_tokens", "completion_tokens",
     "composite_risk_score", "hallucination_risk_score", "retries", "grounding_score",
@@ -257,7 +262,7 @@ def _fetch_all_for_aggregate(
             if not last_key or len(all_items) >= _AGGREGATE_SCAN_LIMIT:
                 break
     else:
-        ops = ["invoke_agent", "invoke_model"] if operation == "all" else [operation]
+        ops = _ALL_OPERATION_PKS if operation == "all" else [operation]
         for op in ops:
             pk = f"OBSERVATORY#{op}"
             last_key = None
@@ -480,17 +485,15 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
             if operation != "all":
                 items = [i for i in items if i.get("operation") == operation]
         elif operation == "all":
-            # Query both operation types and merge
-            items_a, scanned_a, _ = _query_by_pk(
-                table, "OBSERVATORY#invoke_agent", start_iso, end_iso, filter_expr,
-                limit=limit, exclusive_start_key=None
-            )
-            items_m, scanned_m, _ = _query_by_pk(
-                table, "OBSERVATORY#invoke_model", start_iso, end_iso, filter_expr,
-                limit=limit, exclusive_start_key=None
-            )
-            items = items_a + items_m
-            scanned = scanned_a + scanned_m
+            # Query all known operation PKs and merge results.
+            # Pagination is not supported for merged queries.
+            for op in _ALL_OPERATION_PKS:
+                op_items, op_scanned, _ = _query_by_pk(
+                    table, f"OBSERVATORY#{op}", start_iso, end_iso, filter_expr,
+                    limit=limit, exclusive_start_key=None
+                )
+                items.extend(op_items)
+                scanned += op_scanned
             last_key = None  # merged queries; pagination not supported for all+merged
         else:
             pk = f"OBSERVATORY#{operation}"
