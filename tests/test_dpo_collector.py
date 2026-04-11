@@ -30,7 +30,7 @@ class DpoCollectorTests(unittest.TestCase):
         # Reset module-level S3 client singleton between tests
         self.dpo._s3_client = None
         # Clear DPO env vars so each test starts clean
-        _clearenv("DPO_TRAINING_BUCKET", "DPO_DELTA_THRESHOLD")
+        _clearenv("DPO_TRAINING_BUCKET", "DPO_DELTA_THRESHOLD", "DPO_PROJECT")
 
     # ── dpo_bucket / dpo_delta_threshold ─────────────────────────────────────
 
@@ -136,7 +136,8 @@ class DpoCollectorTests(unittest.TestCase):
             return "rejected-text", {"composite_risk_score": 0.8, "trace_id": "t2"}
 
         mock_s3 = MagicMock()
-        with _setenv(DPO_TRAINING_BUCKET="mybucket", DPO_DELTA_THRESHOLD="0.4"):
+        with _setenv(DPO_TRAINING_BUCKET="mybucket", DPO_DELTA_THRESHOLD="0.4",
+                     DPO_PROJECT="myproject"):
             with patch.object(self.dpo, "_get_s3", return_value=mock_s3):
                 self.dpo.collect_dpo_step(
                     invoke,
@@ -148,11 +149,12 @@ class DpoCollectorTests(unittest.TestCase):
 
         call_kwargs = mock_s3.put_object.call_args.kwargs
         self.assertEqual(call_kwargs["Bucket"], "mybucket")
-        self.assertIn("myteam/mystep/myrun/dpo_", call_kwargs["Key"])
+        self.assertIn("myproject/myteam/mystep/myrun/dpo_", call_kwargs["Key"])
         self.assertEqual(call_kwargs["ContentType"], "application/json")
 
         record = json.loads(call_kwargs["Body"].decode("utf-8"))
         self.assertEqual(record["schema_version"], "dpo-v1")
+        self.assertEqual(record["project"], "myproject")
         self.assertEqual(record["team"], "myteam")
         self.assertEqual(record["step_id"], "mystep")
         self.assertEqual(record["run_id"], "myrun")
@@ -167,13 +169,14 @@ class DpoCollectorTests(unittest.TestCase):
         self.assertIn("metrics_a", record)
         self.assertIn("metrics_b", record)
 
-    def test_upload_key_uses_team_step_run(self):
+    def test_upload_key_uses_project_team_step_run(self):
         def invoke(session_id):
             score = 0.1 if "dpo-a" in session_id else 0.9
             return "text", {"composite_risk_score": score}
 
         mock_s3 = MagicMock()
-        with _setenv(DPO_TRAINING_BUCKET="b", DPO_DELTA_THRESHOLD="0.4"):
+        with _setenv(DPO_TRAINING_BUCKET="b", DPO_DELTA_THRESHOLD="0.4",
+                     DPO_PROJECT="projX"):
             with patch.object(self.dpo, "_get_s3", return_value=mock_s3):
                 self.dpo.collect_dpo_step(
                     invoke,
@@ -184,7 +187,27 @@ class DpoCollectorTests(unittest.TestCase):
                 )
 
         key = mock_s3.put_object.call_args.kwargs["Key"]
-        self.assertTrue(key.startswith("teamA/stepX/runZ/dpo_"))
+        self.assertTrue(key.startswith("projX/teamA/stepX/runZ/dpo_"))
+
+    def test_upload_key_uses_default_project_when_env_unset(self):
+        """When DPO_PROJECT is not set the key should start with 'default/'."""
+        def invoke(session_id):
+            score = 0.1 if "dpo-a" in session_id else 0.9
+            return "text", {"composite_risk_score": score}
+
+        mock_s3 = MagicMock()
+        with _setenv(DPO_TRAINING_BUCKET="b", DPO_DELTA_THRESHOLD="0.4"):
+            _clearenv("DPO_PROJECT")
+            with patch.object(self.dpo, "_get_s3", return_value=mock_s3):
+                self.dpo.collect_dpo_step(
+                    invoke,
+                    team="t", step_id="s", run_id="r",
+                    prompt="p", context={},
+                    session_id_a="r-s-dpo-a", session_id_b="r-s-dpo-b",
+                )
+
+        key = mock_s3.put_object.call_args.kwargs["Key"]
+        self.assertTrue(key.startswith("default/t/s/r/dpo_"))
 
     # ── collect_dpo_step — error handling ────────────────────────────────────
 

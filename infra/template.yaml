@@ -1025,6 +1025,7 @@ Resources:
           AMP_REGION: !Ref AWS::Region
           DPO_TRAINING_BUCKET: !If [HasDPOBucket, !Ref DPOTrainingBucketName, !Ref "AWS::NoValue"]
           DPO_DELTA_THRESHOLD: !Ref DPODeltaThreshold
+          DPO_PROJECT: !Sub "${AWS::StackName}"
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:
