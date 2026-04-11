@@ -141,6 +141,23 @@ Parameters:
     Type: String
     Default: ""
     Description: ARN of the SIWE Lambda authorizer function exported from the siwe-infra CloudFormation stack (AuthorizerFunctionArn output).
+  DPOTrainingBucketName:
+    Type: String
+    Default: ""
+    Description: >
+      S3 bucket name for DPO training data — taken from shared stack DPOTrainingBucketName output.
+      When set, WorkerFunction invokes each agent twice per step and uploads chosen/rejected
+      pairs when composite_risk_score delta exceeds DPODeltaThreshold.
+  DPOTrainingBucketArn:
+    Type: String
+    Default: ""
+    Description: >
+      S3 bucket ARN for DPO training data — taken from shared stack DPOTrainingBucketArn output.
+      Required when DPOTrainingBucketName is set.
+  DPODeltaThreshold:
+    Type: String
+    Default: "0.4"
+    Description: Minimum composite_risk_score delta between two invocations to trigger DPO pair upload.
 
 Conditions:
   CreateConfigBucket: !Equals [!Ref ConfigBucketName, ""]
@@ -155,6 +172,7 @@ Conditions:
   HasSamAssumeRoleName: !Not [!Equals [!Ref SamAssumeRoleName, ""]]
   DeployWAF: !Equals [!Ref EnableWAF, "true"]
   HasSiweAuthorizer: !Not [!Equals [!Ref SiweAuthorizerFunctionArn, ""]]
+  HasDPOBucket: !Not [!Equals [!Ref DPOTrainingBucketName, ""]]
 
 Globals:
   Function:
@@ -310,6 +328,12 @@ Resources:
                   - CreateArtifactBucket
                   - !Sub "${TeamArtifactBucket.Arn}/*"
                   - !Sub "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/*"
+              - !If
+                - HasDPOBucket
+                - Effect: Allow
+                  Action: [s3:PutObject]
+                  Resource: !Sub "${DPOTrainingBucketArn}/*"
+                - !Ref "AWS::NoValue"
               - Effect: Allow
                 Action:
                   - dynamodb:PutItem
@@ -999,6 +1023,8 @@ Resources:
           OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTableName
           AMP_WORKSPACE_ID: !Ref AMPWorkspaceId
           AMP_REGION: !Ref AWS::Region
+          DPO_TRAINING_BUCKET: !If [HasDPOBucket, !Ref DPOTrainingBucketName, !Ref "AWS::NoValue"]
+          DPO_DELTA_THRESHOLD: !Ref DPODeltaThreshold
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:
