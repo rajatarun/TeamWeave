@@ -5,7 +5,8 @@ from typing import Any, Dict, Optional
 
 import boto3
 
-from .bedrock_invoke import invoke_agent
+from .bedrock_invoke import invoke_agent, invoke_agent_with_metrics
+from . import dpo_collector
 from .config_loader import load_team_config
 from .db import DbDao
 from .enrich import enrich_step_output
@@ -131,6 +132,44 @@ def _build_step_inputs(
     return base
 
 
+def _invoke_with_dpo(
+    *,
+    agent,
+    prompt: str,
+    run_id: str,
+    step_id: str,
+    team: str,
+    step_inputs: Dict[str, Any],
+    shadow_alias_id: Optional[str],
+) -> str:
+    """Invoke the agent twice, rank by composite_risk_score, upload DPO pair if delta > threshold.
+
+    Uses independent session IDs so the agent treats both calls as separate
+    conversations.  The better response (lower composite_risk_score) is
+    returned for use in the pipeline.  If invocation B fails, falls back to
+    response A gracefully.
+    """
+    def _invoke(session_id: str):
+        return invoke_agent_with_metrics(
+            agent.bedrock.agentId,
+            agent.bedrock.aliasId,
+            session_id,
+            prompt,
+            shadow_alias_id=shadow_alias_id,
+        )
+
+    return dpo_collector.collect_dpo_step(
+        _invoke,
+        team=team,
+        step_id=step_id,
+        run_id=run_id,
+        prompt=prompt,
+        context=step_inputs,
+        session_id_a=f"{run_id}-{step_id}-dpo-a",
+        session_id_b=f"{run_id}-{step_id}-dpo-b",
+    )
+
+
 def run_team_pipeline(
     team: str,
     version: str,
@@ -226,10 +265,22 @@ def run_team_pipeline(
         if agent.bedrock.shadow_model_id and agent.bedrock.model_aliases:
             shadow_alias_id = agent.bedrock.model_aliases.get(agent.bedrock.shadow_model_id) or None
 
-        raw_text = invoke_agent(
-            agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt,
-            shadow_alias_id=shadow_alias_id,
-        )
+        # ── Agent invocation — dual when DPO collection is enabled ──────────
+        if dpo_collector.dpo_bucket():
+            raw_text = _invoke_with_dpo(
+                agent=agent,
+                prompt=prompt,
+                run_id=run_id,
+                step_id=step_id,
+                team=team,
+                step_inputs=step_inputs,
+                shadow_alias_id=shadow_alias_id,
+            )
+        else:
+            raw_text = invoke_agent(
+                agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt,
+                shadow_alias_id=shadow_alias_id,
+            )
 
         try:
             out_json = extract_json_payload(raw_text)

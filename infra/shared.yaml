@@ -121,6 +121,43 @@ Resources:
           Value: !Ref AWS::StackName
 
   # ---------------------------------------------------------------------------
+  # DPO Training data store — one bucket shared across all application modules
+  # ---------------------------------------------------------------------------
+  # Stores chosen/rejected response pairs for Direct Preference Optimization.
+  # Upload path: s3://{bucket}/{team}/{step_id}/{run_id}/dpo_{timestamp}.json
+  # Data retained for 2 years; transitions to cheaper tiers after 90/365 days.
+
+  DPOTrainingBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+          - Id: ArchiveDPOTrainingData
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 365
+                StorageClass: GLACIER
+            ExpirationInDays: 730
+      Tags:
+        - Key: Purpose
+          Value: DPO Training Data
+        - Key: Stack
+          Value: !Ref AWS::StackName
+
+  # ---------------------------------------------------------------------------
   # Amazon Managed Prometheus workspace
   # ---------------------------------------------------------------------------
 
@@ -495,3 +532,15 @@ Outputs:
     Value: !Ref NatInstance
     Export:
       Name: !Sub "${AWS::StackName}-NatInstanceId"
+
+  DPOTrainingBucketName:
+    Description: S3 bucket name for DPO training data — used by all application modules
+    Value: !Ref DPOTrainingBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-DPOTrainingBucketName"
+
+  DPOTrainingBucketArn:
+    Description: S3 bucket ARN for DPO training data
+    Value: !GetAtt DPOTrainingBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-DPOTrainingBucketArn"
