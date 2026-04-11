@@ -45,11 +45,12 @@ class McpObservatoryTests(unittest.TestCase):
 
         with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
             with patch.object(self.observatory, "_push_metric"):
-                output = self.observatory.observe_agent_request(
+                output, span_metrics = self.observatory.observe_agent_request(
                     MagicMock(), agent_id="a1", alias_id="al1",
                     session_id="s1", input_text="hello",
                 )
         self.assertEqual(output, expected)
+        self.assertIsInstance(span_metrics, dict)
 
     def test_observe_agent_request_no_shadow_uses_dual_invoke_false(self):
         fake_result = _make_wrapper_result({"completion": []})
@@ -198,7 +199,7 @@ class McpObservatoryTests(unittest.TestCase):
         with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
             os.environ.pop("OBSERVATORY_METRICS_TABLE", None)
             self.observatory._ddb_table = None
-            output = self.observatory.observe_agent_request(
+            output, _ = self.observatory.observe_agent_request(
                 MagicMock(), agent_id="a1", alias_id="al1",
                 session_id="s1", input_text="hello",
             )
@@ -211,7 +212,7 @@ class McpObservatoryTests(unittest.TestCase):
 
         with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
             with patch.object(self.observatory, "_get_ddb_table", return_value=bad_table):
-                output = self.observatory.observe_agent_request(
+                output, _ = self.observatory.observe_agent_request(
                     MagicMock(), agent_id="a1", alias_id="al1",
                     session_id="s1", input_text="hello",
                 )

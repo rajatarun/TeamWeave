@@ -21,7 +21,7 @@ import os
 import time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Optional
+from typing import Optional, Tuple
 
 import boto3
 from mcp_observatory.instrument import instrument_wrapper_api
@@ -130,6 +130,35 @@ def _extract_span_fields(span) -> dict:
             except Exception:  # noqa: BLE001
                 pass
 
+    return result
+
+
+def _get_plain_span_metrics(span) -> dict:
+    """Return plain-Python (non-Decimal) span metrics for DPO scoring.
+
+    Extracts float/int/bool/str fields from an mcp-observatory span into a
+    dict of native Python values.  Returns an empty dict when span is None.
+    """
+    if span is None:
+        return {}
+    result: dict = {}
+    for field in _SPAN_FLOAT_FIELDS:
+        val = getattr(span, field, _MISSING)
+        if val is not _MISSING and val is not None:
+            result[field] = float(val)
+    for field in _SPAN_INT_FIELDS:
+        val = getattr(span, field, _MISSING)
+        if val is not _MISSING and val is not None:
+            result[field] = int(val)
+    for field in _SPAN_BOOL_FIELDS:
+        val = getattr(span, field, _MISSING)
+        if val is not _MISSING and val is not None:
+            result[field] = bool(val)
+    result["trace_id"] = getattr(span, "trace_id", None)
+    result["prompt_tokens"] = getattr(span, "prompt_tokens", 0)
+    result["completion_tokens"] = getattr(span, "completion_tokens", 0)
+    cost = getattr(span, "cost_usd", None)
+    result["cost_usd"] = float(cost) if cost is not None else 0.0
     return result
 
 
@@ -263,7 +292,7 @@ def observe_agent_request(
     session_id: str,
     input_text: str,
     shadow_alias_id: Optional[str] = None,
-) -> dict:
+) -> Tuple[dict, dict]:
     """Invoke a Bedrock agent through the mcp-observatory wrapper.
 
     When ``shadow_alias_id`` is provided the call is dual-invoked: the
@@ -344,7 +373,7 @@ def observe_agent_request(
         },
     )
 
-    return result.output
+    return result.output, _get_plain_span_metrics(result.span)
 
 
 def observe_model_request(
