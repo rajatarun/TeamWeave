@@ -51,8 +51,18 @@ def dpo_delta_threshold() -> float:
         return _DEFAULT_DELTA_THRESHOLD
 
 
+def dpo_project() -> str:
+    """Return the project namespace for S3 key partitioning.
+
+    Reads DPO_PROJECT (set to the CloudFormation stack name by the main template).
+    Falls back to "default" so the key is always valid even in local runs.
+    """
+    return os.environ.get("DPO_PROJECT", "default")
+
+
 def _upload_dpo_record(
     bucket: str,
+    project: str,
     team: str,
     step_id: str,
     run_id: str,
@@ -70,10 +80,11 @@ def _upload_dpo_record(
     timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.%f")
     ts_safe = now.strftime("%Y%m%dT%H%M%S%f")
 
-    key = f"{team}/{step_id}/{run_id}/dpo_{ts_safe}.json"
+    key = f"{project}/{team}/{step_id}/{run_id}/dpo_{ts_safe}.json"
     record = {
         "schema_version": "dpo-v1",
         "timestamp": timestamp,
+        "project": project,
         "team": team,
         "step_id": step_id,
         "run_id": run_id,
@@ -100,6 +111,7 @@ def _upload_dpo_record(
             extra={
                 "bucket": bucket,
                 "key": key,
+                "project": project,
                 "team": team,
                 "step_id": step_id,
                 "run_id": run_id,
@@ -213,6 +225,7 @@ def collect_dpo_step(
     if delta >= threshold and bucket:
         _upload_dpo_record(
             bucket=bucket,
+            project=dpo_project(),
             team=team,
             step_id=step_id,
             run_id=run_id,
