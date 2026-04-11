@@ -148,12 +148,6 @@ Parameters:
       S3 bucket name for DPO training data — taken from shared stack DPOTrainingBucketName output.
       When set, WorkerFunction invokes each agent twice per step and uploads chosen/rejected
       pairs when composite_risk_score delta exceeds DPODeltaThreshold.
-  DPOTrainingBucketArn:
-    Type: String
-    Default: ""
-    Description: >
-      S3 bucket ARN for DPO training data — taken from shared stack DPOTrainingBucketArn output.
-      Required when DPOTrainingBucketName is set.
   DPODeltaThreshold:
     Type: String
     Default: "0.4"
@@ -332,7 +326,7 @@ Resources:
                 - HasDPOBucket
                 - Effect: Allow
                   Action: [s3:PutObject]
-                  Resource: !Sub "${DPOTrainingBucketArn}/*"
+                  Resource: !Sub "arn:${AWS::Partition}:s3:::${DPOTrainingBucketName}/*"
                 - !Ref "AWS::NoValue"
               - Effect: Allow
                 Action:
