@@ -526,6 +526,46 @@ Resources:
                 Resource:
                   - !Sub "${StateMachine}:*"
 
+  ConversationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-conversation-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: conversation-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                  - ec2:AssignIpv6Addresses
+                  - ec2:UnassignIpv6Addresses
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeAgent
+                  - bedrock-agent-runtime:InvokeAgent
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent-alias/*"
+
   ProvisionTeamRole:
     Type: AWS::IAM::Role
     Properties:
@@ -761,6 +801,12 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-ObservatoryMetricsFunction"
+      RetentionInDays: 30
+
+  ConversationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-ConversationFunction"
       RetentionInDays: 30
 
   AgentMetricsDashboardFunctionLogGroup:
@@ -1020,6 +1066,34 @@ Resources:
           DPO_TRAINING_BUCKET: !If [HasDPOBucket, !Ref DPOTrainingBucketName, !Ref "AWS::NoValue"]
           DPO_DELTA_THRESHOLD: !Ref DPODeltaThreshold
           DPO_PROJECT: !Sub "${AWS::StackName}"
+      VpcConfig: !If
+        - HasVpcConfig
+        - SecurityGroupIds:
+            - !Ref OrchestratorSecurityGroup
+          SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
+        - !Ref AWS::NoValue
+
+  ConversationFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: ConversationFunctionLogGroup
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../
+      Handler: src/orchestrator/conversation_handler.handler
+      Role: !GetAtt ConversationRole.Arn
+      Architectures:
+        - arm64
+      MemorySize: 512
+      Timeout: 180
+      Events:
+        AgentConverseEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /agent/converse
+            Method: post
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:
