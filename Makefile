@@ -6,7 +6,8 @@
 	build-ProvisionTeamFunction \
 	build-OrchestratorFunction \
 	build-ObservatoryMetricsFunction \
-	build-AgentMetricsDashboardFunction
+	build-AgentMetricsDashboardFunction \
+	build-ConversationFunction
 
 package-lambda:
 	python -m pip install -r src/requirements.txt -t "$(ARTIFACTS_DIR)" \
@@ -35,3 +36,5 @@ build-OrchestratorFunction: package-lambda
 build-ObservatoryMetricsFunction: package-lambda
 
 build-AgentMetricsDashboardFunction: package-lambda
+
+build-ConversationFunction: package-lambda
