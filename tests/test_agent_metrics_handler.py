@@ -772,6 +772,27 @@ class TestTimestampParsing(unittest.TestCase):
         self.assertIn("2024", result)
         self.assertIn("T", result)
 
+    def test_negative_utc_offset_converted_to_utc(self):
+        # "14:34:37-05:00" == "19:34:37Z"; must be normalised so DynamoDB
+        # lexicographic SK comparison works against UTC-stored timestamps.
+        m = _load()
+        result = m._parse_timestamp("2026-04-28T14:34:37-05:00")
+        self.assertTrue(result.startswith("2026-04-28T19:34:37"), result)
+        self.assertNotIn("-05:00", result)
+
+    def test_positive_utc_offset_converted_to_utc(self):
+        m = _load()
+        result = m._parse_timestamp("2026-04-28T14:34:37+05:30")
+        # 14:34:37+05:30 == 09:04:37 UTC
+        self.assertTrue(result.startswith("2026-04-28T09:04:37"), result)
+        self.assertNotIn("+05:30", result)
+
+    def test_z_suffix_treated_as_utc(self):
+        m = _load()
+        result = m._parse_timestamp("2026-04-28T23:20:15Z")
+        self.assertTrue(result.startswith("2026-04-28T23:20:15"), result)
+        self.assertNotIn("Z", result)
+
 
 class TestTokenRoundtrip(unittest.TestCase):
     def test_encode_decode_roundtrip(self):
