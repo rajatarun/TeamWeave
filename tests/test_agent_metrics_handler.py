@@ -199,6 +199,20 @@ class TestListModeQueryRouting(unittest.TestCase):
         call_kwargs = tbl.query.call_args[1]
         self.assertNotIn("FilterExpression", call_kwargs)
 
+    def test_query_uses_descending_scan_order(self):
+        # ScanIndexForward=False ensures DynamoDB returns newest items first,
+        # so Limit applies to the most recent records rather than the oldest.
+        tbl = _mock_table(items=[self._item("invoke_model")])
+        _run({"operation": "invoke_model"}, table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        self.assertFalse(call_kwargs.get("ScanIndexForward", True))
+
+    def test_agent_id_gsi_uses_descending_scan_order(self):
+        tbl = _mock_table(items=[self._item("invoke_agent")])
+        _run({"agent_id": "AGENT-123"}, table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        self.assertFalse(call_kwargs.get("ScanIndexForward", True))
+
 
 class TestListModeResponse(unittest.TestCase):
     def _item(self, op="invoke_agent", ts="2024-01-15T10:30:00.000000",
@@ -603,6 +617,9 @@ class TestNewAggregationModes(unittest.TestCase):
 
 class TestAggregateLowLevelDynamoShape(unittest.TestCase):
     def test_by_operation_handles_attributevalue_items(self):
+        # Use a specific operation so only one DynamoDB query is made; otherwise
+        # operation=all queries 4 PKs and the single mock returns the same items
+        # for every call, causing an N-times overcount.
         items = [
             {
                 "pk": {"S": "OBSERVATORY#invoke_agent"},
@@ -615,20 +632,9 @@ class TestAggregateLowLevelDynamoShape(unittest.TestCase):
                 "decision": {"S": "allow"},
                 "timestamp": {"S": "2026-03-30T19:52:24.997872"},
             },
-            {
-                "pk": {"S": "OBSERVATORY#invoke_model"},
-                "sk": {"S": "2026-03-30T19:39:30.005896#15be86c9-dccc-4bbd-9a8c-e5c8cbf90d99"},
-                "operation": {"S": "invoke_model"},
-                "model_id": {"S": "amazon.nova-micro-v1:0"},
-                "prompt_tokens": {"N": "23"},
-                "completion_tokens": {"N": "125"},
-                "cost_usd": {"N": "0.000546"},
-                "decision": {"S": "allow"},
-                "timestamp": {"S": "2026-03-30T19:39:30.005896"},
-            },
         ]
         tbl = _mock_table(items=items)
-        resp = _run({"aggregate": "by_operation"}, table=tbl)
+        resp = _run({"operation": "invoke_agent", "aggregate": "by_operation"}, table=tbl)
         self.assertEqual(resp["statusCode"], 200)
         body = json.loads(resp["body"])
         groups = {g["key"]["operation"]: g for g in body["groups"]}
