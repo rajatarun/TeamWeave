@@ -193,7 +193,7 @@ def _query_by_pk(
     kwargs: dict[str, Any] = {
         "KeyConditionExpression": key_cond,
         "Limit": limit,
-        "ScanIndexForward": True,  # ascending by SK (timestamp); caller re-sorts
+        "ScanIndexForward": False,  # descending by SK so Limit returns the most recent items
     }
     if filter_expr is not None:
         kwargs["FilterExpression"] = filter_expr
@@ -226,7 +226,7 @@ def _query_by_agent_id(
         "IndexName": "AgentIdTimestampIndex",
         "KeyConditionExpression": key_cond,
         "Limit": limit,
-        "ScanIndexForward": True,
+        "ScanIndexForward": False,  # descending by timestamp so Limit returns the most recent items
     }
     if filter_expr is not None:
         kwargs["FilterExpression"] = filter_expr
