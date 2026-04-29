@@ -100,18 +100,29 @@ def _json_default(obj):
 
 
 def _parse_timestamp(value: str) -> str:
-    """Normalise a Unix epoch or ISO 8601 string to ISO 8601 format.
+    """Normalise a Unix epoch or ISO 8601 string to a UTC ISO 8601 string.
 
     The DynamoDB SK prefix is ``{iso_timestamp}#{trace_id}`` so range queries
-    use ISO string comparison.
+    use lexicographic string comparison.  All inputs are normalised to UTC so
+    that timezone-offset strings like ``2026-04-28T14:34:37-05:00`` are not
+    compared literally against UTC-stored SKs (which would produce wrong
+    results because ``"20" < "23"`` lexicographically).
     """
     try:
         epoch = float(value)
         return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")
     except ValueError:
         pass
-    # Assume already ISO 8601 — return as-is (strip trailing Z if present)
-    return value.replace("Z", "+00:00").replace("+00:00", "")
+    # Parse ISO 8601 with any timezone offset (Z, +HH:MM, -HH:MM) and
+    # convert to UTC so the result is safe for lexicographic SK comparison.
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc)
+        return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
+    except ValueError:
+        pass
+    return value
 
 
 def _decode_next_token(token: str) -> Optional[dict]:
