@@ -11,7 +11,7 @@ TeamWeave is a **config-driven, serverless multi-agent orchestration platform** 
 | Layer | Technology |
 |-------|-----------|
 | Runtime | Python 3.12 (AWS Lambda) |
-| AI/ML | Amazon Bedrock (Nova, Claude Haiku), Google Gemini 2.0 Flash |
+| AI/ML | Amazon Bedrock (Nova, Claude Haiku), Google Gemini 3.8 Flash |
 | Orchestration | AWS Step Functions (Standard Workflows) |
 | API | AWS API Gateway (REST) |
 | State | DynamoDB (run/task metadata) |
