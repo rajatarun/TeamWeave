@@ -42,7 +42,7 @@ Two production team patterns are deployed:
 - **Async-First** — Requests are asynchronous by default. Clients receive a `run_id` and poll for results.
 - **Least-Privilege IAM** — Each Lambda function has a dedicated IAM role with only the permissions it needs.
 - **Observability by Default** — All Bedrock agent invocations are instrumented via MCP Observatory, with metrics pushed to Amazon Managed Prometheus.
-- **RAG-Augmented Intelligence** — Agents are grounded with relevant context via pgvector similarity search before each invocation.
+- **RAG-Augmented Intelligence** — Agents are grounded with relevant context before each invocation, from the ContextWeave knowledge layer (recommended), pgvector, or run history — see [RAG Modes](#rag-modes).
 
 ---
 
@@ -52,7 +52,7 @@ Two production team patterns are deployed:
 |-------|-----------|
 | **Runtime** | Python 3.12 on AWS Lambda |
 | **AI/ML** | Amazon Bedrock (Nova micro/lite/pro/premier, Claude 3/3.5 Haiku) |
-| **AI Research** | Google Gemini 2.0 Flash |
+| **AI Research** | Google Gemini 3.8 Flash |
 | **Orchestration** | AWS Step Functions (Standard Workflows) |
 | **API** | Amazon API Gateway (REST) |
 | **Primary DB** | Amazon DynamoDB |
@@ -96,7 +96,8 @@ The core pipeline execution engine. For each workflow run:
 1. Loads the team definition JSON from S3
 2. For each step in the workflow:
    - Resolves the assigned Bedrock agent
-   - Fetches RAG context from pgvector (if `explicit_rag` enabled)
+   - Fetches RAG context from the configured source (if `explicit_rag` enabled) —
+     ContextWeave, pgvector or run history, per `globals.rag.mode`
    - Builds a prompt from the goal template + request data + RAG context
    - Invokes the Bedrock agent (streaming response)
    - Extracts and validates JSON output against the step's JSON Schema
@@ -105,7 +106,7 @@ The core pipeline execution engine. For each workflow run:
 
 #### Gemini Research Lambda (`config/examples/gemini_lambda.py`)
 - Invoked by Bedrock agents as a **tool action** during agent execution
-- Performs web research and content augmentation using Google Gemini 2.0 Flash
+- Performs web research and content augmentation using Google Gemini 3.8 Flash
 - API key retrieved from AWS Secrets Manager at runtime
 
 #### Observatory Metrics Lambda (`src/orchestrator/observatory_handler.py`)
@@ -142,7 +143,7 @@ The state machine is the async workflow coordinator. It:
    - Load team.json from S3
    - For each workflow step:
        a. Resolve Bedrock agent config
-       b. Query pgvector for RAG context (if enabled)
+       b. Fetch RAG context (if enabled) — see RAG Modes below
        c. Build goal prompt
        d. Invoke Bedrock Agent (streaming)
             │
@@ -159,7 +160,55 @@ The state machine is the async workflow coordinator. It:
    - Returns RUNNING or { status: SUCCEEDED, result: {...} }
 ```
 
-### RAG Flow (Explicit Mode)
+### RAG Modes
+
+`globals.rag.mode` in `team.json` selects where a run's grounding comes from.
+All three produce the same `RAG_CONTEXT` string, so nothing downstream —
+`prompt_builder.py`, the agents, the output schemas — depends on the choice.
+All three are gated by the `features.explicit_rag` switch, and all three
+degrade to an empty context (never an error) when their backing store is
+unreachable.
+
+| Mode | Source | Config keys |
+|------|--------|-------------|
+| `contextweave` | ContextWeave knowledge layer over HTTPS | `top_k`, `min_confidence` |
+| `explicit` | pgvector similarity search on `rag_chunks` | `top_k`, `rag_env_key` |
+| `history` | DynamoDB completed-task history for the owner | — |
+| `kb` / `none` | No retrieval | — |
+
+**`contextweave` is the recommended default for new teams.** ContextWeave is
+the platform's knowledge layer: it owns the expertise graph, the chunk store
+and a router that learns from feedback which retrieval strategy answers each
+question type best. Pointing TeamWeave at it means one knowledge layer that
+improves with use, instead of three services (TeamWeave, ContextWeave, the
+content orchestrator) each maintaining a static copy of the same corpus that
+only improves when someone re-ingests it. `explicit` and `history` remain
+supported and unchanged for the teams already using them.
+
+#### ContextWeave Mode
+
+```
+Worker Lambda
+   │
+   ├── POST {CONTEXTWEAVE_URL}/query-expertise  {question, topK}
+   │     └── ContextWeave: semantic cache → classify → route → retrieve
+   │         → graph-expand → synthesize
+   │
+   ├── Drop the answer if confidence < rag.min_confidence
+   │
+   ├── Render {answer, sources[]} as the [RAG #n] SOURCE: ... block list
+   │   and inject it into the agent goal prompt
+   │
+   ├── Persist queryId in the step record (inputs_json.rag_meta)
+   │
+   └── On a schema-valid run, optionally POST /feedback {queryId, "up"}
+         └── requires CONTEXTWEAVE_FEEDBACK_ON_VALID_OUTPUT=1
+```
+
+The Worker runs inside the VPC when `LambdaSubnetIds` is set, so reaching a
+public ContextWeave endpoint requires the usual NAT/egress path.
+
+#### Explicit Mode (pgvector)
 
 ```
 Worker Lambda
@@ -319,7 +368,7 @@ ttl:                         epoch seconds (90-day expiry)
     "default_channel": "linkedin",
     "hard_constraints": ["string"],
     "features": { "gemini_research": false, "explicit_rag": true },
-    "rag": { "mode": "explicit", "rag_env_key": "VECTOR_DB_TABLE", "top_k": 5 },
+    "rag": { "mode": "contextweave", "top_k": 6, "min_confidence": 0.4 },
     "artifact_store": {
       "artifact_bucket_env": "ARTIFACT_BUCKET",
       "dynamo_table_env": "DYNAMO_TABLE"
@@ -508,6 +557,7 @@ Trigger: push to main | manual workflow_dispatch
        TeamConfigPrefix=teams
        VectorDbTable=resume-rag-db
        GeminiSecretArn=<ARN>
+       ContextWeaveUrl=<ContextWeave API base URL>
          │
          ▼
 6. On Failure: Dump CloudFormation events

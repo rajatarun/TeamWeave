@@ -11,7 +11,7 @@ TeamWeave is a **config-driven, serverless multi-agent orchestration platform** 
 | Layer | Technology |
 |-------|-----------|
 | Runtime | Python 3.12 (AWS Lambda) |
-| AI/ML | Amazon Bedrock (Nova, Claude Haiku), Google Gemini 2.0 Flash |
+| AI/ML | Amazon Bedrock (Nova, Claude Haiku), Google Gemini 3.8 Flash |
 | Orchestration | AWS Step Functions (Standard Workflows) |
 | API | AWS API Gateway (REST) |
 | State | DynamoDB (run/task metadata) |
@@ -33,7 +33,8 @@ src/orchestrator/     # Core Lambda handlers and business logic
   status_handler.py   # Polls Step Functions DescribeExecution
   config_loader.py    # Loads team.json from S3
   bedrock_invoke.py   # Bedrock agent invocation
-  rag.py              # pgvector retrieval (explicit + history modes)
+  rag.py              # RAG mode dispatch (contextweave + explicit + history)
+  contextweave_client.py  # ContextWeave knowledge-layer HTTP client
   db.py               # DynamoDB DAO
   gemini.py           # Gemini API integration
   amp_metrics.py      # Amazon Managed Prometheus telemetry
@@ -48,7 +49,7 @@ infra/                # Infrastructure as Code
   bedrock-agents.yaml # Bedrock agent provisioning (11 agents)
   samconfig.toml      # SAM deployment parameters
 
-tests/                # pytest unit tests (17 test files)
+tests/                # pytest unit tests (24 test files)
 docs/                 # Architecture docs and C4 diagrams
 .github/workflows/    # GitHub Actions CI/CD pipeline
 Makefile              # Lambda packaging targets
@@ -116,8 +117,23 @@ Client
 All workflow logic lives in JSON stored in S3. Agents, pipeline steps, RAG settings, and output schemas are all defined there. No Lambda code changes needed for new workflows.
 
 ### RAG Modes
-- **Explicit mode** — pgvector similarity search on `rag_chunks` table
-- **History mode** — DynamoDB-based execution history retrieval
+Selected per team by `globals.rag.mode` in `team.json`. All modes emit the same
+`RAG_CONTEXT` string and degrade to an empty context (never an error) when
+their backing store is unreachable.
+
+- **ContextWeave mode** (`contextweave`) — `POST {CONTEXTWEAVE_URL}/query-expertise`
+  on the ContextWeave knowledge layer. Options: `top_k`, `min_confidence`.
+  **Recommended for new teams:** ContextWeave owns the expertise graph, the
+  chunk store and a router that learns from feedback, so the platform gets one
+  knowledge layer that improves with use instead of three services each keeping
+  a static copy of the same corpus. The run's `queryId` is persisted in the step
+  record (`inputs_json.rag_meta`), and a schema-valid run can up-vote the answer
+  via `POST /feedback` when `CONTEXTWEAVE_FEEDBACK_ON_VALID_OUTPUT=1`.
+- **Explicit mode** (`explicit`) — pgvector similarity search on `rag_chunks` table
+- **History mode** (`history`) — DynamoDB-based execution history retrieval
+- **`kb` / `none`** — no retrieval
+
+Client: `src/orchestrator/contextweave_client.py`; mode dispatch: `src/orchestrator/rag.py`.
 
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them downstream (`schema_validate.py`, `structured_transform.py`).
@@ -137,6 +153,9 @@ Every run is async: `POST /team/task` returns a `run_id`, then poll `GET /team/t
 | `STATE_MACHINE_ARN` | Step Functions state machine ARN |
 | `VECTOR_DB_SECRET_ARN` | Secrets Manager ARN for pgvector credentials |
 | `GEMINI_SECRET_ARN` | Secrets Manager ARN for Gemini API key (optional) |
+| `CONTEXTWEAVE_URL` | Base URL of the ContextWeave knowledge layer (required by `contextweave` RAG mode) |
+| `CONTEXTWEAVE_API_KEY` | Optional `x-api-key` for ContextWeave (not a template parameter — inject via Secrets Manager) |
+| `CONTEXTWEAVE_FEEDBACK_ON_VALID_OUTPUT` | `1` to up-vote the grounding answer after a schema-valid run (default off) |
 | `TEAM_CONFIG_PREFIX` | S3 prefix for team configs (default: `teams`) |
 | `VECTOR_DB_TABLE` | pgvector table name (default: `rag_chunks`) |
 | `VPC_ID` | VPC for Lambda networking |
