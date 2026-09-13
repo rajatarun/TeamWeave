@@ -4,6 +4,7 @@ import json
 import os
 import unittest
 import urllib.error
+import urllib.parse
 from unittest.mock import patch
 
 from src.orchestrator import contextweave_client as cw
@@ -167,6 +168,159 @@ class FeedbackTests(unittest.TestCase):
             cw.urllib.request, "urlopen", side_effect=OSError("down")
         ):
             self.assertFalse(cw.maybe_send_valid_output_feedback("q-123"))
+
+
+_HEALTH = {
+    "status": "healthy",
+    "knowledgeBaseId": "kb-1",
+    "neptuneGraphId": "g-1",
+    "environment": "dev",
+    "routingGraph": {
+        "documentTypeDistribution": [],
+        "health": {
+            "exploration": 0.2,
+            "priorStrength": 2.0,
+            "questionTypes": {
+                "skill_depth": {
+                    "verdict": "converged",
+                    "leader": "graph_first",
+                    "leaderPBest": 0.97,
+                    "starvedArms": [],
+                    "arms": {},
+                }
+            },
+        },
+    },
+}
+
+_DECISIONS = {
+    "groups": [
+        {
+            "questionType": "skill_depth",
+            "strategy": "graph_first",
+            "count": 120,
+            "ratedCount": 34,
+            "avgConfidence": 0.81,
+            "avgRating": 0.74,
+            "meanAbsDiff": 0.19,
+        }
+    ],
+    "totalCount": 512,
+    "totalRated": 140,
+}
+
+
+class GetHealthTests(unittest.TestCase):
+    def test_gets_health_endpoint_and_returns_body(self):
+        with _setenv(CONTEXTWEAVE_URL=_URL), patch.object(
+            cw.urllib.request, "urlopen", return_value=_ok(_HEALTH)
+        ) as mock_open:
+            payload = cw.get_health()
+
+        self.assertEqual(payload["routingGraph"], _HEALTH["routingGraph"])
+        req = mock_open.call_args[0][0]
+        self.assertEqual(req.full_url, _URL + "/health")
+        self.assertEqual(req.get_method(), "GET")
+        self.assertIsNone(req.data)
+
+    def test_returns_none_without_url_configured(self):
+        with _setenv(CONTEXTWEAVE_URL=""), patch.object(cw.urllib.request, "urlopen") as mock_open:
+            self.assertIsNone(cw.get_health())
+        mock_open.assert_not_called()
+
+    def test_retries_server_error_then_degrades_to_none(self):
+        with _setenv(CONTEXTWEAVE_URL=_URL), patch.object(
+            cw.urllib.request, "urlopen", side_effect=_http_error(503)
+        ) as mock_open:
+            self.assertIsNone(cw.get_health())
+        self.assertEqual(mock_open.call_count, cw._MAX_RETRIES + 1)
+
+    def test_does_not_retry_client_error(self):
+        with _setenv(CONTEXTWEAVE_URL=_URL), patch.object(
+            cw.urllib.request, "urlopen", side_effect=_http_error(404)
+        ) as mock_open:
+            self.assertIsNone(cw.get_health())
+        self.assertEqual(mock_open.call_count, 1)
+
+    def test_transport_failure_degrades_to_none(self):
+        with _setenv(CONTEXTWEAVE_URL=_URL), patch.object(
+            cw.urllib.request, "urlopen", side_effect=OSError("connection reset")
+        ):
+            self.assertIsNone(cw.get_health())
+
+    def test_error_body_is_treated_as_failure(self):
+        with _setenv(CONTEXTWEAVE_URL=_URL), patch.object(
+            cw.urllib.request, "urlopen", return_value=_ok({"error": "boom"})
+        ):
+            self.assertIsNone(cw.get_health())
+
+    def test_api_key_header_is_sent_on_get(self):
+        with _setenv(CONTEXTWEAVE_URL=_URL, CONTEXTWEAVE_API_KEY="secret"), patch.object(
+            cw.urllib.request, "urlopen", return_value=_ok(_HEALTH)
+        ) as mock_open:
+            cw.get_health()
+
+        # urllib capitalises header names on the Request object.
+        self.assertEqual(mock_open.call_args[0][0].get_header("X-api-key"), "secret")
+
+
+class GetRoutingDecisionsSummaryTests(unittest.TestCase):
+    def test_requests_summary_mode_by_default(self):
+        with _setenv(CONTEXTWEAVE_URL=_URL), patch.object(
+            cw.urllib.request, "urlopen", return_value=_ok(_DECISIONS)
+        ) as mock_open:
+            payload = cw.get_routing_decisions_summary()
+
+        self.assertEqual(payload["totalCount"], 512)
+        self.assertEqual(mock_open.call_args[0][0].full_url, _URL + "/routing-decisions?mode=summary")
+
+    def test_passes_question_type_and_since_as_query_params(self):
+        with _setenv(CONTEXTWEAVE_URL=_URL), patch.object(
+            cw.urllib.request, "urlopen", return_value=_ok(_DECISIONS)
+        ) as mock_open:
+            cw.get_routing_decisions_summary(question_type="skill_depth", since="2026-09-01")
+
+        url = mock_open.call_args[0][0].full_url
+        base, _, query = url.partition("?")
+        self.assertEqual(base, _URL + "/routing-decisions")
+        self.assertEqual(
+            dict(urllib.parse.parse_qsl(query)),
+            {"mode": "summary", "questionType": "skill_depth", "since": "2026-09-01"},
+        )
+
+    def test_blank_filters_are_omitted_from_the_query_string(self):
+        with _setenv(CONTEXTWEAVE_URL=_URL), patch.object(
+            cw.urllib.request, "urlopen", return_value=_ok(_DECISIONS)
+        ) as mock_open:
+            cw.get_routing_decisions_summary(question_type="", since=None)
+
+        self.assertEqual(mock_open.call_args[0][0].full_url, _URL + "/routing-decisions?mode=summary")
+
+    def test_null_averages_in_unrated_group_are_preserved(self):
+        body = {
+            "groups": [{"questionType": "project", "strategy": "keyword_boosted",
+                        "count": 4, "ratedCount": 0, "avgConfidence": None,
+                        "avgRating": None, "meanAbsDiff": None}],
+            "totalCount": 4,
+            "totalRated": 0,
+        }
+        with _setenv(CONTEXTWEAVE_URL=_URL), patch.object(
+            cw.urllib.request, "urlopen", return_value=_ok(body)
+        ):
+            payload = cw.get_routing_decisions_summary()
+
+        self.assertIsNone(payload["groups"][0]["avgRating"])
+
+    def test_returns_none_without_url_configured(self):
+        with _setenv(CONTEXTWEAVE_URL=""), patch.object(cw.urllib.request, "urlopen") as mock_open:
+            self.assertIsNone(cw.get_routing_decisions_summary())
+        mock_open.assert_not_called()
+
+    def test_failure_degrades_to_none(self):
+        with _setenv(CONTEXTWEAVE_URL=_URL), patch.object(
+            cw.urllib.request, "urlopen", side_effect=OSError("down")
+        ):
+            self.assertIsNone(cw.get_routing_decisions_summary())
 
 
 class FormatRagContextTests(unittest.TestCase):
