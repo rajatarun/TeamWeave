@@ -1,6 +1,14 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+# globals.rag.mode values understood by rag.get_rag_context().
+#   kb / none     — no retrieval
+#   explicit      — pgvector similarity search (VECTOR_DB_TABLE)
+#   history       — DynamoDB completed-task history
+#   contextweave  — ContextWeave knowledge layer (CONTEXTWEAVE_URL)
+CONTEXTWEAVE_MODE = "contextweave"
+RAG_MODES = frozenset({"kb", "none", "explicit", "history", CONTEXTWEAVE_MODE})
+
 @dataclass
 class BedrockRef:
     agentId: str
@@ -19,6 +27,13 @@ class AgentConfig:
 
 @dataclass
 class TeamGlobals:
+    """Team-wide settings.
+
+    ``rag`` accepts: ``mode`` (see RAG_MODES), ``top_k``, ``rag_env_key``
+    (explicit mode) and ``min_confidence`` (contextweave mode — answers below
+    it are dropped rather than injected into the prompt).
+    """
+
     north_star: str
     default_channel: str
     hard_constraints: List[str]
