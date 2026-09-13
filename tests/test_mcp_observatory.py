@@ -4,6 +4,8 @@ import unittest
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 
 def _make_wrapper_result(output, *, action="allow", reason="within_budget",
                          shadow_disagreement=None, shadow_variance=None):
@@ -217,6 +219,51 @@ class McpObservatoryTests(unittest.TestCase):
                     session_id="s1", input_text="hello",
                 )
         self.assertEqual(output, {"completion": []})
+
+    # ------------------------------------------------------------------
+    # REVIEW / non-ALLOW verdict handling
+    #
+    # observe_agent_request()/observe_model_request() return only
+    # (output, span_metrics) -- the WrapperPolicy decision.action ("allow" /
+    # "review" / "block") never reaches the return value at all. It is only
+    # (a) logged, and (b) folded into the *DynamoDB item* built fresh inside
+    # _push_metric() via _enrich_risk_fields(), which sets item["gate_blocked"]
+    # -- it never mutates result.span, so span_metrics["gate_blocked"]
+    # (read from the span by _get_plain_span_metrics) is always False
+    # regardless of the actual decision. bedrock_invoke.invoke_agent(), the
+    # primary caller, discards even that: `resp, _ = observe_agent_request(...)`
+    # throws the span_metrics dict away entirely and returns the raw
+    # completion text unconditionally. No caller anywhere can distinguish a
+    # reviewed or blocked call from a clean allow. Same "ignores the verdict"
+    # gap as DeviceWeave's tests/test_observatory_wrapper.py documents.
+    # ------------------------------------------------------------------
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "observe_agent_request() returns only (output, span_metrics); "
+            "the WrapperPolicy decision.action is logged and folded into the "
+            "DynamoDB item's gate_blocked field but never surfaced in the "
+            "return value, so no caller can act on a 'review' or 'block' "
+            "verdict. This documents the expected behaviour once the "
+            "decision is surfaced to callers instead of being discarded."
+        ),
+    )
+    def test_observe_agent_request_surfaces_review_verdict_instead_of_discarding_it(self):
+        fake_result = _make_wrapper_result(
+            {"completion": []}, action="review", reason="cost_budget_exceeded"
+        )
+
+        with patch.object(self.observatory._wrapper, "invoke", new=AsyncMock(return_value=fake_result)):
+            with patch.object(self.observatory, "_push_metric"):
+                _output, span_metrics = self.observatory.observe_agent_request(
+                    MagicMock(), agent_id="a1", alias_id="al1",
+                    session_id="s1", input_text="hello",
+                )
+
+        # Desired future behaviour: a non-"allow" decision must be visible to
+        # the caller instead of being indistinguishable from a clean allow.
+        self.assertEqual(span_metrics.get("decision"), "review")
 
     # ------------------------------------------------------------------
     # observe_model_request — core behaviour
