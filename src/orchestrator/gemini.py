@@ -103,7 +103,7 @@ def gemini_research_brief(feats: Dict[str, Any], request_obj: Dict[str, Any], co
         log.warning("Gemini enabled but GEMINI_SECRET_ARN missing/empty")
         return ""
 
-    model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
     url = GEMINI_ENDPOINT.format(model=model)
 
     topic = request_obj.get("topic", "")

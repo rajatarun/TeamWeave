@@ -52,7 +52,7 @@ Two production team patterns are deployed:
 |-------|-----------|
 | **Runtime** | Python 3.12 on AWS Lambda |
 | **AI/ML** | Amazon Bedrock (Nova micro/lite/pro/premier, Claude 3/3.5 Haiku) |
-| **AI Research** | Google Gemini 2.0 Flash |
+| **AI Research** | Google Gemini 3.8 Flash |
 | **Orchestration** | AWS Step Functions (Standard Workflows) |
 | **API** | Amazon API Gateway (REST) |
 | **Primary DB** | Amazon DynamoDB |
@@ -106,7 +106,7 @@ The core pipeline execution engine. For each workflow run:
 
 #### Gemini Research Lambda (`config/examples/gemini_lambda.py`)
 - Invoked by Bedrock agents as a **tool action** during agent execution
-- Performs web research and content augmentation using Google Gemini 2.0 Flash
+- Performs web research and content augmentation using Google Gemini 3.8 Flash
 - API key retrieved from AWS Secrets Manager at runtime
 
 #### Observatory Metrics Lambda (`src/orchestrator/observatory_handler.py`)

@@ -338,7 +338,7 @@ Text is embedded with Bedrock Titan; the resulting vector is used for cosine dis
 
 **Files:** `src/orchestrator/gemini.py`
 
-Google Gemini 2.0 Flash is called as an optional enrichment step to generate a research brief that is injected into the pipeline context (`features.gemini_research` flag in team config).
+Google Gemini 3.8 Flash is called as an optional enrichment step to generate a research brief that is injected into the pipeline context (`features.gemini_research` flag in team config).
 
 ---
 
