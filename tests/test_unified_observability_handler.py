@@ -4,67 +4,43 @@ DynamoDB is mocked the same way tests/test_agent_metrics_handler.py mocks it
 (patch boto3.resource, hand back a MagicMock table with .query() stubbed);
 the ContextWeave half is mocked at the client-function boundary so the HTTP
 layer stays the concern of tests/test_contextweave_client.py.
+
+The ContextWeave payloads are **not** written here.  They are read out of
+``contracts/contextweave_http_api.json`` -- the contract ContextWeave owns and
+this repository vendors (see contracts/README.md) -- so that a field renamed by
+the producer fails these tests instead of leaving them green against a private
+copy of what TeamWeave assumes ContextWeave returns.  The same samples are
+driven through the real HTTP client in tests/test_contextweave_contract.py;
+here they exercise composition and the degradation paths below.
 """
+import copy
 import importlib
 import json
 import os
+import sys
 import unittest
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # Pre-import boto3 so module-level stubs installed by other test files do not
 # shadow the real package before this module imports the handler.
 import boto3  # noqa: F401
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 _URL = "https://contextweave.example.com"
 
-_HEALTH = {
-    "status": "healthy",
-    "knowledgeBaseId": "kb-123",
-    "neptuneGraphId": "g-123",
-    "environment": "dev",
-    "routingGraph": {
-        "documentTypeDistribution": [{"documentType": "technical_spec", "count": 12}],
-        "health": {
-            "exploration": 0.21,
-            "priorStrength": 2.0,
-            "questionTypes": {
-                "skill_depth": {
-                    "verdict": "converged",
-                    "leader": "graph_first",
-                    "leaderPBest": 0.97,
-                    "starvedArms": [],
-                    "arms": {"graph_first": {"alpha": 40.0, "beta": 5.0}},
-                }
-            },
-        },
-    },
-}
+with open(_REPO_ROOT / "contracts" / "contextweave_http_api.json", encoding="utf-8") as _fh:
+    _CONTRACT = json.load(_fh)
 
-_DECISIONS = {
-    "groups": [
-        {
-            "questionType": "skill_depth",
-            "strategy": "graph_first",
-            "count": 120,
-            "ratedCount": 34,
-            "avgConfidence": 0.81,
-            "avgRating": 0.74,
-            "meanAbsDiff": 0.19,
-        },
-        {
-            "questionType": "project",
-            "strategy": "keyword_boosted",
-            "count": 12,
-            "ratedCount": 0,
-            "avgConfidence": None,
-            "avgRating": None,
-            "meanAbsDiff": None,
-        },
-    ],
-    "totalCount": 512,
-    "totalRated": 140,
-}
+_HEALTH = copy.deepcopy(_CONTRACT["endpoints"]["GET /health"]["sample"])
+_DECISIONS = copy.deepcopy(
+    _CONTRACT["endpoints"]["GET /routing-decisions?mode=summary"]["sample"]
+)
+_SUMMARY_SPEC = _CONTRACT["endpoints"]["GET /routing-decisions?mode=summary"]
 
 _ITEMS = [
     {
@@ -173,6 +149,27 @@ class TestAllThreeSourcesHealthy(unittest.TestCase):
         self.assertEqual(body["observatoryMetrics"]["aggregate"], "by_operation")
         self.assertEqual(body["routingGraph"], _HEALTH["routingGraph"])
         self.assertEqual(body["routingDecisions"], _DECISIONS)
+
+    def test_routing_decisions_keep_every_key_the_contract_requires(self):
+        body = _body(_run()[0])
+        for key in _SUMMARY_SPEC["required_top_level_keys"]:
+            self.assertIn(key, body["routingDecisions"])
+        for group in body["routingDecisions"]["groups"]:
+            for key in _SUMMARY_SPEC["required_group_keys"]:
+                self.assertIn(key, group, f"group key {key!r} lost in composition")
+
+    def test_unrated_group_keeps_null_averages_rather_than_zero(self):
+        """null, never 0.0, for a group nobody has rated: a zero would read as
+        perfect agreement on exactly the groups where nothing is known.  The
+        nullable key names come from the contract, not from this file."""
+        nullable = _SUMMARY_SPEC["nullable_group_keys"]
+        nulls = [(i, k) for i, g in enumerate(_DECISIONS["groups"])
+                 for k in nullable if g.get(k) is None]
+        self.assertTrue(nulls, "contract sample no longer has an unrated group")
+
+        groups = _body(_run()[0])["routingDecisions"]["groups"]
+        for index, key in nulls:
+            self.assertIsNone(groups[index][key], f"group {index} key {key!r}")
 
     def test_observatory_metrics_are_aggregated_by_operation(self):
         resp, _, _ = _run()
