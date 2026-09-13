@@ -56,6 +56,20 @@ Parameters:
     NoEcho: true
     Default: "postgresql://masteruser:YourStrongPassword123!@resume-rag-db.cplgkqp9qd3a.us-east-1.rds.amazonaws.com:5432/postgres"
     Description: Full PostgreSQL connection URL. When set, this overrides host/port/name/user/password parameters.
+  ContextWeaveUrl:
+    Type: String
+    Default: ""
+    Description: >-
+      Base URL of the ContextWeave knowledge layer API (used by RAG mode "contextweave",
+      e.g. https://abc123.execute-api.us-east-1.amazonaws.com/prod). Empty means the mode is
+      unavailable and any team selecting it fails at config-load time.
+  ContextWeaveFeedbackOnValidOutput:
+    Type: String
+    Default: "0"
+    AllowedValues: ["0", "1"]
+    Description: >-
+      Set to "1" to up-vote the ContextWeave answer that grounded a run whose structured output
+      validated (POST /feedback). Off by default.
   GeminiSecretArn:
     Type: String
     Default: ""
@@ -1015,6 +1029,7 @@ Resources:
           VECTOR_DB_SSL_ROOT_CERT: /var/task/certs/rds-ca-bundle.pem
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
           GEMINI_MODEL: gemini-2.0-flash
+          CONTEXTWEAVE_URL: !Ref ContextWeaveUrl
           STATE_MACHINE_ARN: !Ref StateMachine
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
           OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTableName
@@ -1058,6 +1073,8 @@ Resources:
           VECTOR_DB_SSL_ROOT_CERT: /var/task/certs/rds-ca-bundle.pem
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
           GEMINI_MODEL: gemini-2.0-flash
+          CONTEXTWEAVE_URL: !Ref ContextWeaveUrl
+          CONTEXTWEAVE_FEEDBACK_ON_VALID_OUTPUT: !Ref ContextWeaveFeedbackOnValidOutput
           GEMINI_LAMBDA_ARN: !GetAtt GeminiResearchFunction.Arn
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
           OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTableName
