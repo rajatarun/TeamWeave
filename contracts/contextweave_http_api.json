@@ -1,0 +1,102 @@
+{
+  "contract": "contextweave_http_api",
+  "version": "1.0.0",
+  "canonical_home": "https://github.com/rajatarun/ContextWeave/blob/main/contracts/contextweave_http_api.json",
+  "description": [
+    "The HTTP surface ContextWeave exposes and TeamWeave consumes. ContextWeave owns the",
+    "producing handlers; TeamWeave owns contextweave_client.py and the unified /observability",
+    "endpoint that reads them. Before this file existed each side tested against its own",
+    "private idea of the other: TeamWeave hard-coded sample response dicts in its test file",
+    "and ContextWeave asserted its handlers against sqlite fakes. Renaming a field on either",
+    "side left both suites green and broke production, because nothing compared the two.",
+    "Both repositories now validate against the samples below."
+  ],
+  "endpoints": {
+    "GET /health": {
+      "required_top_level_keys": ["status", "routingGraph"],
+      "consumed_by": ["teamweave:unified_observability_handler -> response.routingGraph"],
+      "sample": {
+        "status": "healthy",
+        "knowledgeBaseId": "KB123",
+        "neptuneGraphId": "g-abc",
+        "environment": "prod",
+        "routingGraph": {
+          "documentTypeDistribution": [{"documentType": "technical_spec", "count": 42}],
+          "health": {
+            "exploration": 1.0,
+            "priorStrength": 2.0,
+            "questionTypes": {
+              "skill_depth": {
+                "verdict": "converged",
+                "leader": "graph_first",
+                "leaderPBest": 0.97,
+                "starvedArms": [],
+                "arms": {
+                  "graph_first": {"alpha": 9.1, "beta": 1.2, "mean": 0.88, "sd": 0.1, "observations": 8.3, "pBest": 0.97}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GET /routing-decisions?mode=summary": {
+      "required_top_level_keys": ["groups", "totalCount", "totalRated"],
+      "required_group_keys": ["questionType", "strategy", "count", "ratedCount", "avgConfidence", "avgRating", "meanAbsDiff"],
+      "nullable_group_keys": ["avgRating", "meanAbsDiff", "avgConfidence"],
+      "consumed_by": ["teamweave:unified_observability_handler -> response.routingDecisions"],
+      "notes": [
+        "avgRating and meanAbsDiff are null, never 0.0, for a group nobody has rated: a zero",
+        "would read as perfect agreement on exactly the groups where nothing is known."
+      ],
+      "sample": {
+        "groups": [
+          {"questionType": "skill_depth", "strategy": "graph_first", "count": 120, "ratedCount": 34, "avgConfidence": 0.81, "avgRating": 0.74, "meanAbsDiff": 0.19},
+          {"questionType": "general", "strategy": "semantic_search", "count": 8, "ratedCount": 0, "avgConfidence": 0.66, "avgRating": null, "meanAbsDiff": null}
+        ],
+        "totalCount": 128,
+        "totalRated": 34
+      }
+    },
+    "GET /routing-decisions?mode=list": {
+      "required_top_level_keys": ["items", "count"],
+      "required_item_keys": ["queryId", "questionType", "strategy", "propensity", "confidence", "rating", "createdAt", "ratedAt"],
+      "notes": ["count is the total matching the filters, not the size of this page."],
+      "sample": {
+        "items": [
+          {"queryId": "q-1", "questionType": "skill_depth", "strategy": "graph_first", "propensity": 0.31, "confidence": 0.82, "rating": 1.0, "createdAt": "2026-09-13T18:00:00+00:00", "ratedAt": "2026-09-13T18:05:00+00:00"},
+          {"queryId": "q-2", "questionType": "general", "strategy": "semantic_search", "propensity": 0.25, "confidence": 0.61, "rating": null, "createdAt": "2026-09-13T17:00:00+00:00", "ratedAt": null}
+        ],
+        "count": 2
+      }
+    },
+    "POST /query-expertise": {
+      "request_keys": ["question", "topK"],
+      "required_top_level_keys": ["queryId", "answer", "sources", "confidence", "questionType", "cacheHit"],
+      "required_source_keys": ["file", "excerpt", "weight"],
+      "consumed_by": ["teamweave:contextweave_client.query_expertise -> format_rag_context"],
+      "notes": [
+        "queryId is what makes a later POST /feedback able to reach this answer; a client",
+        "that drops it cannot ever rate the answer it received."
+      ],
+      "sample": {
+        "queryId": "q-abc",
+        "answer": "The routing graph learns from every answered question.",
+        "sources": [{"file": "CLAUDE.md", "excerpt": "The graph learns from every answered question.", "weight": 1.0}],
+        "confidence": 0.82,
+        "confidenceReported": true,
+        "questionType": "skill_depth",
+        "cacheHit": false,
+        "latencyMs": 1840
+      }
+    },
+    "POST /feedback": {
+      "request_keys": ["queryId", "rating"],
+      "accepted_ratings": ["up", "down", "neutral", true, false, "any number in [0,1]"],
+      "required_top_level_keys": ["queryId", "strategy", "questionType"],
+      "consumed_by": ["teamweave:contextweave_client.send_feedback"],
+      "error_statuses": {"400": "unusable rating", "404": "unknown queryId", "409": "already rated"},
+      "sample": {"queryId": "q-abc", "strategy": "graph_first", "questionType": "skill_depth"}
+    }
+  }
+}
