@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 import boto3
 
 from .bedrock_invoke import invoke_agent, invoke_agent_with_metrics
+from . import contextweave_client
 from . import dpo_collector
 from .config_loader import load_team_config
 from .db import DbDao
@@ -16,7 +17,7 @@ from .logger import get_logger
 from .models import StepFailed
 from .profile_context import get_owner_profile_context
 from .prompt_builder import build_prompt
-from .rag import get_rag_context
+from .rag import get_rag_context_with_meta
 from .storage import save_artifact
 from .structured_transform import transform_json_to_schema
 from .tool_registry import execute_post_tools, execute_pre_tools
@@ -85,6 +86,7 @@ def _build_step_inputs(
     rag_context: str,
     owner_profile_context: str,
     gemini_brief: str,
+    rag_meta: Dict[str, Any],
     outputs: Dict[str, Any],
     supervisor_brief: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -108,6 +110,9 @@ def _build_step_inputs(
         "rag_context": rag_context,
         "owner_profile_context": owner_profile_context,
         "gemini_brief": gemini_brief,
+        # Retrieval provenance (e.g. ContextWeave queryId) — persisted with the
+        # step record so an answer can be rated later; kept out of the prompt.
+        "rag_meta": rag_meta,
     }
 
     # Merge all completed step outputs so every downstream step can access
@@ -193,7 +198,7 @@ def run_team_pipeline(
     )
 
     try:
-        rag_context = get_rag_context(
+        rag_context, rag_meta = get_rag_context_with_meta(
             request_obj,
             {"rag": team_cfg.globals.rag, "features": team_cfg.globals.features},
             owner=owner,
@@ -204,7 +209,7 @@ def run_team_pipeline(
             "rag_context_unavailable_proceeding_without_rag",
             extra={"run_id": run_id, "owner": owner},
         )
-        rag_context = ""
+        rag_context, rag_meta = "", {}
 
     owner_profile_context = get_owner_profile_context(request_obj, team_raw, owner)
 
@@ -217,6 +222,7 @@ def run_team_pipeline(
 
     outputs: Dict[str, Any] = {}
     supervisor_brief: Dict[str, Any] = {}
+    schema_valid = True
 
     workflow = team_raw.get("workflow") or []
 
@@ -236,6 +242,7 @@ def run_team_pipeline(
             rag_context,
             owner_profile_context,
             gemini_brief,
+            rag_meta,
             outputs,
             supervisor_brief,
         )
@@ -315,6 +322,7 @@ def run_team_pipeline(
                     run_id,
                     agent.schema_ref,
                 )
+                schema_valid = False
                 out_json = _build_transform_fallback(raw_text, transform_error)
 
         # ── Post-tools — enrich/transform agent output after schema coercion ─
@@ -338,6 +346,12 @@ def run_team_pipeline(
 
         if step_id == "TIT_TDEPT-002_TIT-003_advisor" and isinstance(out_json.get("daily_tasks"), list):
             dao.put_tasks(owner=owner, tasks=out_json["daily_tasks"], source_run_id=run_id)
+
+    # Close the loop with the knowledge layer: every step produced schema-valid
+    # output from this grounding, so rate it up. Opt-in (see the client) because
+    # a schema-valid run is only weak evidence that the answer was good.
+    if schema_valid:
+        contextweave_client.maybe_send_valid_output_feedback(rag_meta.get("query_id", ""))
 
     dao.put_run_meta(
         run_id,

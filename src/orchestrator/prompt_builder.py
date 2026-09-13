@@ -78,7 +78,7 @@ def build_prompt(
         parts.append("")
 
     # ── Prior step outputs — strip fields already shown above ─────────────────
-    _SKIP_KEYS = {"request", "owner_profile_context", "rag_context", "gemini_brief", "owner"}
+    _SKIP_KEYS = {"request", "owner_profile_context", "rag_context", "rag_meta", "gemini_brief", "owner"}
     inputs_clean = {k: v for k, v in step_inputs.items() if k not in _SKIP_KEYS}
     if inputs_clean:
         parts.append("STEP_INPUTS_JSON:")

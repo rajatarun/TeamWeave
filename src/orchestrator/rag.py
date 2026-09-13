@@ -1,15 +1,17 @@
 import os
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
 import psycopg
 from psycopg import sql
+from . import contextweave_client
 from .bedrock_wrappers import invoke_model_request
 from .logger import get_logger
 from .db import DbDao
+from .models import CONTEXTWEAVE_MODE
 
 log = get_logger("rag")
 bedrock_runtime = boto3.client(
@@ -206,13 +208,62 @@ def retrieve_from_vector_store(collection_id: str, query: str, top_k: int) -> Li
         log.exception("vector_store_query_failed", extra={"collection_id": collection_id, "top_k": top_k})
         return []
 
-def get_rag_context(request_obj: Dict[str, Any], team_globals: Dict[str, Any], owner: str, dao: Optional[DbDao] = None) -> str:
+def _request_query(request_obj: Dict[str, Any]) -> str:
+    """Collapse the run request into a single retrieval query."""
+    return " ".join(
+        [request_obj.get("topic", ""), request_obj.get("objective", ""), request_obj.get("audience", "")]
+    ).strip()
+
+
+def _contextweave_context(request_obj: Dict[str, Any], rag: Dict[str, Any], top_k: int) -> Tuple[str, Dict[str, Any]]:
+    """Ask the ContextWeave knowledge layer and render its answer as RAG_CONTEXT.
+
+    Returns ("", {}) on any failure — the same "no context, run continues"
+    contract the pgvector and history modes follow.
+    """
+    if not contextweave_client.is_configured():
+        log.warning("contextweave_mode_selected_but_not_configured", extra={"required": ["CONTEXTWEAVE_URL"]})
+        return "", {}
+
+    payload = contextweave_client.query_expertise(_request_query(request_obj), top_k)
+    if not payload:
+        return "", {}
+
+    min_confidence = float(rag.get("min_confidence") or 0.0)
+    confidence = payload.get("confidence")
+    confidence = float(confidence) if isinstance(confidence, (int, float)) else 0.0
+    if min_confidence and confidence < min_confidence:
+        log.warning(
+            "contextweave_answer_below_min_confidence; returning empty",
+            extra={"confidence": confidence, "min_confidence": min_confidence},
+        )
+        return "", {}
+
+    meta = {
+        "provider": CONTEXTWEAVE_MODE,
+        # Carried into the step record so the answer can be rated later via
+        # ContextWeave's POST /feedback.
+        "query_id": payload.get("queryId", ""),
+        "confidence": confidence,
+        "question_type": payload.get("questionType", ""),
+        "cache_hit": bool(payload.get("cacheHit")),
+    }
+    return contextweave_client.format_rag_context(payload), meta
+
+
+def get_rag_context_with_meta(
+    request_obj: Dict[str, Any],
+    team_globals: Dict[str, Any],
+    owner: str,
+    dao: Optional[DbDao] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """Build RAG_CONTEXT plus retrieval metadata worth persisting with the run."""
     rag = (team_globals or {}).get("rag") or {}
     feats = (team_globals or {}).get("features") or {}
 
     if not feats.get("explicit_rag", False):
         log.info("explicit_rag_disabled; skipping_rag_context_generation")
-        return ""
+        return "", {}
 
     mode = (rag.get("mode") or "kb").lower()
     top_k = int(rag.get("top_k") or 8)
@@ -220,24 +271,33 @@ def get_rag_context(request_obj: Dict[str, Any], team_globals: Dict[str, Any], o
 
     if mode == "kb":
         log.info("KB mode enabled; returning empty RAG_CONTEXT")
-        return ""
+        return "", {}
 
     if mode == "explicit":
         collection_id = os.environ.get(env_key, "") or os.environ.get("VECTOR_DB_TABLE","")
-        query = " ".join([request_obj.get("topic",""), request_obj.get("objective",""), request_obj.get("audience","")]).strip()
+        query = _request_query(request_obj)
         hits = retrieve_from_vector_store(collection_id, query, top_k) if collection_id else []
         blocks = []
         for i, h in enumerate(hits, start=1):
             blocks.append(f"[RAG #{i}] SOURCE: {h.get('source','')}")
             blocks.append(h.get("text",""))
             blocks.append("---")
-        return "\n".join(blocks).strip()
+        return "\n".join(blocks).strip(), {}
 
     if mode == "history":
         completed = dao.list_completed_topic_levels(owner=owner, limit=200) if dao else []
         if not completed:
-            return ""
-        return "COMPLETED_TASKS_HISTORY:\n" + "\n".join([f"- {c}" for c in completed])
+            return "", {}
+        return "COMPLETED_TASKS_HISTORY:\n" + "\n".join([f"- {c}" for c in completed]), {}
+
+    if mode == CONTEXTWEAVE_MODE:
+        return _contextweave_context(request_obj, rag, top_k)
 
     log.warning("Unknown RAG mode; returning empty", extra={"mode": mode})
-    return ""
+    return "", {}
+
+
+def get_rag_context(request_obj: Dict[str, Any], team_globals: Dict[str, Any], owner: str, dao: Optional[DbDao] = None) -> str:
+    """RAG_CONTEXT only — for callers that do not persist retrieval metadata."""
+    context, _meta = get_rag_context_with_meta(request_obj, team_globals, owner, dao)
+    return context
