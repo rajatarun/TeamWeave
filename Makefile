@@ -7,6 +7,7 @@
 	build-OrchestratorFunction \
 	build-ObservatoryMetricsFunction \
 	build-AgentMetricsDashboardFunction \
+	build-UnifiedObservabilityFunction \
 	build-ConversationFunction
 
 package-lambda:
@@ -36,5 +37,7 @@ build-OrchestratorFunction: package-lambda
 build-ObservatoryMetricsFunction: package-lambda
 
 build-AgentMetricsDashboardFunction: package-lambda
+
+build-UnifiedObservabilityFunction: package-lambda
 
 build-ConversationFunction: package-lambda
