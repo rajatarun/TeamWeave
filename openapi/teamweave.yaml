@@ -1,0 +1,763 @@
+openapi: 3.0.3
+
+info:
+  title: TeamWeave Orchestration API
+  version: "1.0.0"
+  description: |
+    The HTTP surface of the TeamWeave multi-agent orchestration platform:
+    pipeline runs, the improvement loop, agent/team provisioning, and the
+    unified observability console.
+
+    **Almost nothing here is synchronous.** `POST /team/task` and every
+    provisioning mutation return **202** with a `run_id` and a Step Functions
+    execution id; the work has not happened when you get the response. Poll
+    `GET /team/task/{run_id}` until it reports `SUCCEEDED` or `FAILED`. A
+    harness that treats the 202 as completion will assert against a run that
+    has not started.
+
+    **Resolving the server and the data stores.** Do not hardcode anything:
+
+        aws cloudformation describe-stacks --stack-name teamweave \
+          --query "Stacks[0].Outputs"
+
+    `scripts/stack_env.py` turns those outputs into environment variables —
+    the API base URL, the run table, the Observatory metrics table **and the
+    names of its two GSIs**, the config and artifact buckets, and the
+    ContextWeave URL. A table name alone does not let you query a table whose
+    access pattern is an index: you either name the index or you scan.
+
+    `tests/test_openapi_contract.py` checks this file against the route
+    literals in `src/orchestrator/*.py` and the `Path:` entries in
+    `infra/template.yaml`, in both directions, so it cannot drift from what is
+    deployed.
+
+servers:
+  - url: "{httpApiUrl}"
+    description: Resolved from the HttpApiUrl stack output
+    variables:
+      httpApiUrl:
+        default: https://example.execute-api.us-east-1.amazonaws.com/prod
+        description: The HttpApiUrl output of the teamweave stack
+
+tags:
+  - name: runs
+    description: Pipeline execution — start a run, poll it
+  - name: improve
+    description: The personal improvement loop
+  - name: provisioning
+    description: |
+      Agents, teams, roles and departments. Reads are synchronous; writes are
+      not. Only the methods listed here exist: the trigger handler's
+      `_is_agent_mgmt_route` accepts DELETE on every management path, but
+      API Gateway routes DELETE only on `/agents` and `/teams/{team_name}`, so
+      DELETE on `/roles/{role_id}` or `/departments/{dept_id}` never reaches
+      the handler that would service it.
+  - name: observability
+    description: Telemetry — Prometheus, the Observatory table, and the unified console
+
+paths:
+
+  /team/task:
+    post:
+      tags: [runs]
+      operationId: startRun
+      summary: Start a pipeline run (asynchronous)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team, version]
+              properties:
+                team:
+                  type: string
+                  description: Team config name; the config itself is fetched from S3 at runtime, not from the repo
+                version: { type: string }
+                request:
+                  type: object
+                  description: Free-form input handed to the pipeline's first step
+                  additionalProperties: true
+      responses:
+        "202": { $ref: "#/components/responses/RunAccepted" }
+        "400":
+          description: team or version missing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          description: STATE_MACHINE_ARN is not configured, or Step Functions refused the execution
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /team/task/{run_id}:
+    get:
+      tags: [runs]
+      operationId: getRunStatus
+      summary: Poll a run
+      description: |
+        Reads Step Functions `DescribeExecution` directly, so the status is the
+        execution's, not a cached copy.
+
+        A **`FAILED` run is still a 200** — the failure is in the body, not the
+        status code. A harness that only checks HTTP status will record every
+        failed run as a pass.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200": { $ref: "#/components/responses/RunStatus" }
+        "400":
+          description: run_id missing or malformed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No execution with that run_id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /teams/task/{run_id}:
+    get:
+      tags: [runs]
+      operationId: getRunStatusAlias
+      summary: Alias of GET /team/task/{run_id}
+      description: Same handler, same behaviour. Kept for clients written against the plural spelling.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200": { $ref: "#/components/responses/RunStatus" }
+        "400":
+          description: run_id missing or malformed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No execution with that run_id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /improve/tasks:
+    get:
+      tags: [improve]
+      operationId: listImprovementTasks
+      parameters:
+        - name: owner
+          in: query
+          description: Defaults to "Tarun Raja" — a single-tenant default, not a required field
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: team
+          in: query
+          description: With version, selects a team-specific task store
+          schema: { type: string }
+        - name: version
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Tasks for this owner
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+
+  /improve/task/done:
+    post:
+      tags: [improve]
+      operationId: completeImprovementTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task_id]
+              properties:
+                task_id: { type: string }
+                owner: { type: string, description: 'Defaults to "Tarun Raja"' }
+                team: { type: string }
+                version: { type: string }
+      responses:
+        "200":
+          description: The updated task record, as the DAO returns it
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          description: task_id missing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /agents:
+    get:
+      tags: [provisioning]
+      operationId: listAgents
+      description: Synchronous — proxied to the provision Lambda and its reply returned.
+      responses:
+        "200": { $ref: "#/components/responses/ProvisionRead" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+    post:
+      tags: [provisioning]
+      operationId: createAgent
+      description: Asynchronous — returns 202; poll the run_id.
+      requestBody: { $ref: "#/components/requestBodies/ProvisionWrite" }
+      responses:
+        "202": { $ref: "#/components/responses/RunAccepted" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+    delete:
+      tags: [provisioning]
+      operationId: deleteAgents
+      description: Asynchronous — returns 202; poll the run_id.
+      responses:
+        "202": { $ref: "#/components/responses/RunAccepted" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+
+  /agents/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [provisioning]
+      operationId: getAgent
+      responses:
+        "200": { $ref: "#/components/responses/ProvisionRead" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+    put:
+      tags: [provisioning]
+      operationId: updateAgent
+      description: Asynchronous — returns 202; poll the run_id.
+      requestBody: { $ref: "#/components/requestBodies/ProvisionWrite" }
+      responses:
+        "202": { $ref: "#/components/responses/RunAccepted" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+
+  /teams:
+    get:
+      tags: [provisioning]
+      operationId: listTeams
+      responses:
+        "200": { $ref: "#/components/responses/ProvisionRead" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+    post:
+      tags: [provisioning]
+      operationId: createTeam
+      description: Asynchronous — returns 202; poll the run_id.
+      requestBody: { $ref: "#/components/requestBodies/ProvisionWrite" }
+      responses:
+        "202": { $ref: "#/components/responses/RunAccepted" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+
+  /teams/{team_name}:
+    parameters:
+      - name: team_name
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [provisioning]
+      operationId: getTeam
+      responses:
+        "200": { $ref: "#/components/responses/ProvisionRead" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+    put:
+      tags: [provisioning]
+      operationId: updateTeam
+      description: Asynchronous — returns 202; poll the run_id.
+      requestBody: { $ref: "#/components/requestBodies/ProvisionWrite" }
+      responses:
+        "202": { $ref: "#/components/responses/RunAccepted" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+    delete:
+      tags: [provisioning]
+      operationId: deleteTeam
+      description: Asynchronous — returns 202; poll the run_id.
+      responses:
+        "202": { $ref: "#/components/responses/RunAccepted" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+
+  /roles:
+    get:
+      tags: [provisioning]
+      operationId: listRoles
+      responses:
+        "200": { $ref: "#/components/responses/ProvisionRead" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+    post:
+      tags: [provisioning]
+      operationId: createRole
+      description: Asynchronous — returns 202; poll the run_id.
+      requestBody: { $ref: "#/components/requestBodies/ProvisionWrite" }
+      responses:
+        "202": { $ref: "#/components/responses/RunAccepted" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+
+  /roles/{role_id}:
+    parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [provisioning]
+      operationId: getRole
+      responses:
+        "200": { $ref: "#/components/responses/ProvisionRead" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+    put:
+      tags: [provisioning]
+      operationId: updateRole
+      description: Asynchronous — returns 202; poll the run_id.
+      requestBody: { $ref: "#/components/requestBodies/ProvisionWrite" }
+      responses:
+        "202": { $ref: "#/components/responses/RunAccepted" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+
+  /departments:
+    get:
+      tags: [provisioning]
+      operationId: listDepartments
+      responses:
+        "200": { $ref: "#/components/responses/ProvisionRead" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+    post:
+      tags: [provisioning]
+      operationId: createDepartment
+      description: Asynchronous — returns 202; poll the run_id.
+      requestBody: { $ref: "#/components/requestBodies/ProvisionWrite" }
+      responses:
+        "202": { $ref: "#/components/responses/RunAccepted" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+
+  /departments/{dept_id}:
+    parameters:
+      - name: dept_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [provisioning]
+      operationId: getDepartment
+      responses:
+        "200": { $ref: "#/components/responses/ProvisionRead" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+    put:
+      tags: [provisioning]
+      operationId: updateDepartment
+      description: Asynchronous — returns 202; poll the run_id.
+      requestBody: { $ref: "#/components/requestBodies/ProvisionWrite" }
+      responses:
+        "202": { $ref: "#/components/responses/RunAccepted" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+
+  /agent/converse:
+    post:
+      tags: [provisioning]
+      operationId: converse
+      summary: One synchronous turn against a Bedrock agent alias
+      description: |
+        The only synchronous Bedrock call on this API. `session_id` is what
+        carries conversational state — reusing one continues a conversation,
+        a fresh one starts over.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id, alias_id, session_id, message]
+              properties:
+                agent_id: { type: string }
+                alias_id: { type: string }
+                session_id: { type: string }
+                message: { type: string }
+      responses:
+        "200":
+          description: The agent's reply
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent_id, alias_id, session_id, response]
+                properties:
+                  agent_id: { type: string }
+                  alias_id: { type: string }
+                  session_id: { type: string }
+                  response: { type: string }
+        "400":
+          description: 'Missing fields; the error names them: "Missing required fields: a, b"'
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "405":
+          description: Method not allowed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: Bedrock refused or the agent step failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /observability/metrics:
+    get:
+      tags: [observability]
+      operationId: queryPrometheus
+      summary: SigV4-signed passthrough to Amazon Managed Prometheus
+      description: |
+        Forwards to the AMP workspace's `/api/v1/query`, or `/api/v1/query_range`
+        when **both** `start` and `end` are given. The response is AMP's own
+        body and status code, passed through unchanged — so a PromQL syntax
+        error arrives as Prometheus's 400, not as one of this API's.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: PromQL expression
+          schema: { type: string }
+        - name: start
+          in: query
+          description: Range start; range mode needs both start and end
+          schema: { type: string }
+        - name: end
+          in: query
+          schema: { type: string }
+        - name: step
+          in: query
+          description: Range resolution; defaults to 60s
+          schema: { type: string, default: 60s }
+        - name: time
+          in: query
+          description: Instant-query evaluation time (ignored in range mode)
+          schema: { type: string }
+      responses:
+        "200":
+          description: The Prometheus response, verbatim
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          description: query parameter missing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /observability/agent-metrics:
+    get:
+      tags: [observability]
+      operationId: getAgentMetrics
+      summary: Query the Observatory span table
+      description: |
+        Two modes. With `aggregate=none` (the default) it returns spans;
+        with any other value it groups them and returns `groups`.
+
+        Reads go through the `SpanTimelineIndex` GSI — published as the
+        `ObservatoryMetricsSpanTimelineIndex` stack output — except when
+        `agent_id` is given, which uses `AgentIdTimestampIndex`. A span written
+        without both of an index's key attributes is not in that index and no
+        query here will ever return it, however well-formed the row is.
+
+        **Aggregate mode scans at most 5000 items**, so `total_count` is a
+        count of what was scanned, not of what exists. `scanned_count` is how
+        many rows were read to produce the answer.
+      parameters:
+        - name: operation
+          in: query
+          schema:
+            type: string
+            enum: [all, invoke_agent, invoke_model, classify_question, synthesize_answer]
+            default: all
+        - name: aggregate
+          in: query
+          schema:
+            type: string
+            enum: [none, by_agent, by_model, by_operation, by_decision, by_hour, by_day, by_risk_tier, by_composite_risk_level, by_hallucination_risk_level, by_policy_decision]
+            default: none
+        - name: agent_id
+          in: query
+          description: Switches the query to AgentIdTimestampIndex
+          schema: { type: string }
+        - name: model_id
+          in: query
+          schema: { type: string }
+        - name: decision
+          in: query
+          schema: { type: string }
+        - name: risk_tier
+          in: query
+          schema: { type: string }
+        - name: policy_decision
+          in: query
+          schema: { type: string }
+        - name: composite_risk_level
+          in: query
+          schema: { type: string }
+        - name: hallucination_risk_level
+          in: query
+          schema: { type: string }
+        - name: is_shadow
+          in: query
+          schema: { type: boolean }
+        - name: gate_blocked
+          in: query
+          schema: { type: boolean }
+        - name: fallback_used
+          in: query
+          schema: { type: boolean }
+        - name: start
+          in: query
+          description: Unix epoch or ISO 8601
+          schema: { type: string }
+        - name: end
+          in: query
+          description: Unix epoch or ISO 8601
+          schema: { type: string }
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [timestamp, cost_usd, prompt_tokens, completion_tokens, composite_risk_score, hallucination_risk_score, retries, grounding_score]
+            default: timestamp
+        - name: sort_order
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - name: limit
+          in: query
+          description: Clamped to 1..1000
+          schema: { type: integer, default: 100 }
+        - name: next_token
+          in: query
+          description: Opaque cursor from a previous list-mode response
+          schema: { type: string }
+      responses:
+        "200":
+          description: Spans (list mode) or groups (aggregate mode)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [items, count, scanned_count]
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Span" }
+                      count: { type: integer, description: Size of items in this page }
+                      scanned_count: { type: integer }
+                      next_token:
+                        type: string
+                        description: Present only when more pages exist
+                  - $ref: "#/components/schemas/AggregateResult"
+        "400":
+          description: An unusable parameter; the error names the accepted values
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          description: OBSERVATORY_METRICS_TABLE unset, or the query failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /observability:
+    get:
+      tags: [observability]
+      operationId: getUnifiedObservability
+      summary: One view across TeamWeave's spans and ContextWeave's router
+      description: |
+        Three sections, and **every one of them can fail independently without
+        failing the request**. The status is always 200; each section is either
+        its data or an object with a single `error` key.
+
+        `routingGraph` and `routingDecisions` are `null` — not an error — when
+        ContextWeave is not configured at all, because it is optional for this
+        platform. Read the `ContextWeaveUrl` stack output to tell "not
+        configured" from "configured and unreachable"; the two are different
+        problems and this body alone does not distinguish them.
+      parameters:
+        - name: questionType
+          in: query
+          description: Filters the ContextWeave routing-decisions summary
+          schema: { type: string }
+        - name: since
+          in: query
+          description: Filters the ContextWeave routing-decisions summary
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: The console view
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generatedAt, observatoryMetrics, routingGraph, routingDecisions]
+                properties:
+                  generatedAt: { type: string, format: date-time }
+                  observatoryMetrics:
+                    description: Spans aggregated by operation, or an error object
+                    oneOf:
+                      - $ref: "#/components/schemas/AggregateResult"
+                      - $ref: "#/components/schemas/SectionError"
+                  routingGraph:
+                    nullable: true
+                    description: |
+                      The `routingGraph` block of ContextWeave's GET /health, an
+                      error object, or null when ContextWeave is not configured.
+                    oneOf:
+                      - type: object
+                        additionalProperties: true
+                      - $ref: "#/components/schemas/SectionError"
+                  routingDecisions:
+                    nullable: true
+                    description: |
+                      ContextWeave's GET /routing-decisions?mode=summary, an
+                      error object, or null when ContextWeave is not configured.
+                    oneOf:
+                      - type: object
+                        additionalProperties: true
+                      - $ref: "#/components/schemas/SectionError"
+
+components:
+
+  parameters:
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      description: The run_id returned by the 202 that started the work
+      schema: { type: string }
+
+  requestBodies:
+    ProvisionWrite:
+      required: false
+      description: |
+        Passed through to the provision Lambda unchanged. The accepted fields
+        are that Lambda's contract, not this API's, so they are deliberately
+        not enumerated here rather than guessed at.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+
+  responses:
+    RunAccepted:
+      description: |
+        Accepted. The work has **not** happened — a Step Functions execution
+        has been started. Poll GET /team/task/{run_id}.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [run_id]
+            properties:
+              run_id: { type: string }
+              state_fn_execution_id: { type: string, nullable: true }
+              state_fn_execution_arn: { type: string, nullable: true }
+
+    RunStatus:
+      description: |
+        The execution's current state. FAILED arrives as a 200 — check
+        `status`, not the HTTP code.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [status]
+            properties:
+              status:
+                type: string
+                enum: [RUNNING, SUCCEEDED, FAILED, TIMED_OUT, ABORTED]
+              result:
+                description: SUCCEEDED only — the execution output, parsed
+                type: object
+                additionalProperties: true
+              error:
+                type: string
+                nullable: true
+                description: FAILED only — the execution's cause
+
+    ProvisionRead:
+      description: |
+        The provision Lambda's reply, passed through. A non-object reply is
+        wrapped as `{"result": ...}` so the body is always an object.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+
+    ProvisionUnconfigured:
+      description: PROVISION_FUNCTION_NAME or STATE_MACHINE_ARN is not configured on the trigger Lambda
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    SectionError:
+      type: object
+      required: [error]
+      description: One section of a multi-section response failed; the request did not
+      properties:
+        error: { type: string }
+
+    AggregateResult:
+      type: object
+      required: [aggregate, groups, total_count, scanned_count]
+      properties:
+        aggregate: { type: string }
+        groups:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        total_count:
+          type: integer
+          description: Items aggregated — capped by the 5000-item scan limit, so not a count of what exists
+        scanned_count:
+          type: integer
+          description: Rows read to produce this answer
+
+    Span:
+      type: object
+      description: |
+        One Observatory telemetry span. The shape is owned by the
+        mcp-observatory shared-table contract
+        (`contracts/observatory_metrics_item.json` in that repo), which this
+        repo vendors and validates against in
+        tests/test_shared_table_contract.py — not by this spec.
+      additionalProperties: true
+      properties:
+        pk: { type: string }
+        sk: { type: string }
+        timestamp: { type: string, format: date-time }
+        span_date:
+          type: string
+          description: UTC YYYY-MM-DD; the SpanTimelineIndex partition key
+        operation: { type: string }
+        agent_id: { type: string }
+        model_id: { type: string }
+        cost_usd: { type: number }
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
