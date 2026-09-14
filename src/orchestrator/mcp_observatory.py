@@ -6,6 +6,14 @@ estimates, cost, latency, policy decision) via structured log records
 and persisting each span as an item in the ObservatoryMetrics DynamoDB
 table (pk=OBSERVATORY#{operation}, sk={iso_timestamp}#{trace_id}).
 
+Readers do not query that pk.  Since contract v2.0.0 the supported read
+path is the ``SpanTimelineIndex`` GSI (``span_date`` HASH, ``timestamp``
+RANGE), so what makes a span visible to a dashboard is that it carries
+``span_date``, ``timestamp`` and ``operation`` -- not the prefix chosen
+for the pk, which is now this writer's own business.  See
+``contracts/observatory_metrics_item.json`` invariants I6-I8, enforced by
+``tests/test_shared_table_contract.py``.
+
 When a ``shadow_alias_id`` is supplied to ``observe_agent_request``,
 ``dual_invoke=True`` is activated: the shadow alias is invoked in
 parallel, and shadow telemetry (disagreement score, numeric variance)
@@ -249,6 +257,15 @@ def _push_metric(operation: str, span, decision, extra: dict) -> None:
                 "trace_id": span.trace_id,
                 "operation": operation,
                 "timestamp": now_iso,
+                # SpanTimelineIndex partition key (contract v2, I6/I7). It is
+                # derived from the very string used for `timestamp` and `sk`,
+                # never from a second clock reading: a row indexed under a day
+                # it did not happen on is worse than one not indexed at all,
+                # and two calls to now() either side of midnight would do
+                # exactly that. A GSI indexes only items carrying both of its
+                # key attributes, so omitting this makes every span here
+                # invisible to every dashboard, silently.
+                "span_date": now_iso[:10],
                 "prompt_tokens": Decimal(span.prompt_tokens),
                 "completion_tokens": Decimal(span.completion_tokens),
                 "cost_usd": _to_decimal(span.cost_usd),
