@@ -49,7 +49,9 @@ infra/                # Infrastructure as Code
   bedrock-agents.yaml # Bedrock agent provisioning (11 agents)
   samconfig.toml      # SAM deployment parameters
 
-tests/                # pytest unit tests (24 test files)
+tests/                # pytest unit tests
+openapi/teamweave.yaml  # OpenAPI 3.0 description of the HTTP surface
+scripts/stack_env.py    # Resolve API/table/index/bucket coordinates from stack outputs
 docs/                 # Architecture docs and C4 diagrams
 .github/workflows/    # GitHub Actions CI/CD pipeline
 Makefile              # Lambda packaging targets
@@ -166,14 +168,64 @@ Every run is async: `POST /team/task` returns a `run_id`, then poll `GET /team/t
 
 ## API Endpoints
 
+`openapi/teamweave.yaml` is the full description, including request and
+response shapes. `tests/test_openapi_contract.py` compares it against the
+`Path:`/`Method:` pairs in `infra/template.yaml` method by method, so the spec
+cannot document a route API Gateway does not forward (or miss one it does).
+
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/team/task` | Start a pipeline run → returns `run_id` |
+| `POST` | `/team/task` | Start a pipeline run → **202** with a `run_id` |
 | `GET` | `/team/task/{run_id}` | Poll run status (RUNNING / SUCCEEDED / FAILED) |
+| `GET` | `/teams/task/{run_id}` | Alias of the above |
 | `GET` | `/improve/tasks` | List improvement tasks |
 | `POST` | `/improve/task/done` | Mark a task complete |
-| `GET` | `/observability/metrics` | Bedrock telemetry from AMP |
+| `GET`/`POST`/`DELETE` | `/agents` | Agent CRUD — GET is synchronous, writes return 202 |
+| `GET`/`PUT` | `/agents/{name}` | |
+| `GET`/`POST` | `/teams` | |
+| `GET`/`PUT`/`DELETE` | `/teams/{team_name}` | |
+| `GET`/`POST` | `/roles` | |
+| `GET`/`PUT` | `/roles/{role_id}` | |
+| `GET`/`POST` | `/departments` | |
+| `GET`/`PUT` | `/departments/{dept_id}` | |
+| `POST` | `/agent/converse` | One synchronous turn against a Bedrock agent alias |
+| `GET` | `/observability/metrics` | SigV4 passthrough to Amazon Managed Prometheus |
+| `GET` | `/observability/agent-metrics` | Query the Observatory span table (list or aggregate) |
 | `GET` | `/observability` | Unified view: OBSERVATORY_METRICS + ContextWeave routing health + routing decisions |
+
+Three things a client has to get right:
+
+- **Writes are asynchronous.** `POST /team/task` and every provisioning
+  mutation return 202 with a `run_id`; nothing has happened yet. Poll
+  `GET /team/task/{run_id}`.
+- **A `FAILED` run is a 200.** The failure is in the body. A harness that
+  checks only the HTTP status records every failed run as a pass.
+- **`DELETE` is routed on `/agents` and `/teams/{team_name}` only.** The
+  trigger handler accepts DELETE on every management path, but API Gateway
+  does not forward it elsewhere, so `DELETE /roles/{role_id}` never reaches
+  the handler that would service it.
+
+## Stack Outputs
+
+Everything a harness needs is published by the stack; nothing needs to be
+hardcoded. `scripts/stack_env.py` resolves them into environment variables:
+
+```bash
+eval "$(python scripts/stack_env.py --stack teamweave --format sh)"
+curl -sS "$TEAMWEAVE_API_BASE/observability"
+```
+
+| Output | Why a harness needs it |
+|--------|------------------------|
+| `HttpApiUrl` | The server for every request |
+| `DdbTable` | Run and task metadata |
+| `ObservatoryMetricsTable` | The span table |
+| `ObservatoryMetricsSpanTimelineIndex` | How the timeline is queried — without the index name a caller scans the table and gets a truncated aggregate that looks like data |
+| `ObservatoryMetricsAgentIdTimestampIndex` | Per-agent span queries |
+| `ConfigBucket` / `ArtifactBucket` | Team configs and run artifacts |
+| `StateMachineArn` | The execution a `run_id` belongs to |
+| `ContextWeaveUrl` | Empty when unconfigured — the only way to read `/observability`'s null `routingGraph` as "not configured" rather than "broken" |
+| `VectorDbSecretArn` | pgvector host/port/dbname/password, fetched at point of use |
 
 ---
 
@@ -191,6 +243,6 @@ Every run is async: `POST /team/task` returns a `run_id`, then poll `GET /team/t
 - Python 3.12 — match this version locally to avoid dependency drift
 - All secrets go through AWS Secrets Manager — never hardcode credentials
 - Lambda functions run inside a VPC for RDS access; local integration tests require VPN or RDS proxy
-- Test coverage lives in `tests/` — run `pytest` before any PR
+- Test coverage lives in `tests/` — CI runs `pytest tests/` before `sam build`, so a failing test stops the deploy
 - CI/CD triggers on push to `main` — the GitHub Actions workflow runs `sam build` + `sam deploy`
 - Team configs in `config/examples/` are examples only; live configs are fetched from S3 at runtime

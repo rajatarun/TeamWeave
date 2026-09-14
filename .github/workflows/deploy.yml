@@ -55,6 +55,19 @@ jobs:
             aws s3 cp "$file" "s3://expertise-rag-artifacts-239571291755-prod/raw/${REPO_NAME}/${file#./}"
           done
 
+      # CLAUDE.md has said "run pytest before any PR" for as long as the suite
+      # has existed, but nothing enforced it: this workflow went straight from
+      # checkout to sam build, so 463 tests ran only on whatever machine a
+      # contributor remembered to run them on. They need no AWS, so they run
+      # here, before the build -- including the contract tests that compare
+      # openapi/teamweave.yaml against the template's routes and the handlers'
+      # validation sets.
+      - name: Install test dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
       - name: SAM Build
         run: |
           cd infra

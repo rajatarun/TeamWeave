@@ -1757,3 +1757,38 @@ Outputs:
   DualStackEnabled:
     Value: !Ref DualStackEnabled
     Description: Whether Lambda subnets are dual-stack (IPv4 + IPv6) — sourced from shared stack
+
+  # The outputs below complete the set an automation harness needs to resolve
+  # every coordinate from `describe-stacks` alone. scripts/stack_env.py reads
+  # them; tests/test_openapi_contract.py asserts each one still exists and, for
+  # the index names, that the shared stack actually defines an index by that
+  # name. An output naming an index that does not exist is worse than no
+  # output: the query fails at runtime rather than at deploy.
+
+  ObservatoryMetricsSpanTimelineIndex:
+    Value: SpanTimelineIndex
+    Description: >
+      GSI on the Observatory metrics table, partitioned by span_date (a UTC
+      YYYY-MM-DD bucket) and sorted by timestamp. This is how the timeline is
+      read; ObservatoryMetricsTable on its own does not tell a caller that, and
+      a caller who guesses wrong scans the whole table. Defined in
+      infra/shared.yaml.
+
+  ObservatoryMetricsAgentIdTimestampIndex:
+    Value: AgentIdTimestampIndex
+    Description: GSI for per-agent queries (agent_id → timestamp). Defined in infra/shared.yaml.
+
+  ContextWeaveUrl:
+    Value: !Ref ContextWeaveUrl
+    Description: >
+      Base URL of the ContextWeave knowledge layer, or empty when not
+      configured. GET /observability returns null (not an error) for its
+      routingGraph and routingDecisions sections in that case, so a harness
+      reads this to tell "not configured" from "configured and broken".
+
+  OpenApiSpecPath:
+    Value: openapi/teamweave.yaml
+    Description: >
+      Repo-relative path to the OpenAPI description of this API. Its `servers`
+      block is templated on HttpApiUrl above, so a harness resolves the stack
+      first and the spec second rather than hardcoding a URL.
