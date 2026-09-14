@@ -99,6 +99,8 @@ Resources:
           AttributeType: S
         - AttributeName: timestamp
           AttributeType: S
+        - AttributeName: span_date
+          AttributeType: S
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
@@ -108,6 +110,35 @@ Resources:
         - IndexName: AgentIdTimestampIndex
           KeySchema:
             - AttributeName: agent_id
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # SpanTimelineIndex — the supported read path for this table.
+        #
+        # Reads used to go through the partition key, so a writer's rows were
+        # visible only if it had guessed the same pk prefix grammar the reader
+        # enumerated. Three of five writers had not, and their telemetry was
+        # durable, billable and permanently invisible; migrating a service onto
+        # the shared library exporter was itself enough to make it disappear.
+        # Keying this index on a date bucket and a timestamp removes the
+        # agreement entirely: a reader queries the days it wants and filters in
+        # memory, and never needs to know what prefix a writer chose.
+        #
+        # A GSI only indexes items carrying BOTH key attributes, so span_date
+        # and timestamp are required by the item contract
+        # (mcp-observatory/contracts/observatory_metrics_item.json, I6-I8) and a
+        # conformance test in every writer's repository enforces them.
+        #
+        # Deployment notes: AWS creates at most one GSI per UpdateTable, so this
+        # must go out as its own change; the backfill must finish (index status
+        # ACTIVE) before readers are switched to it; and the index is not
+        # retroactive — rows written before span_date existed will never appear
+        # in it and stay reachable only by their original pk.
+        - IndexName: SpanTimelineIndex
+          KeySchema:
+            - AttributeName: span_date
               KeyType: HASH
             - AttributeName: timestamp
               KeyType: RANGE

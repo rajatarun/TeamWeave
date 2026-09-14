@@ -26,6 +26,13 @@ Responses
 200  Aggregate mode: {"aggregate": "...", "groups": [...], "total_count": N, "scanned_count": N}
 400  {"error": "..."}
 500  {"error": "..."}
+
+The OBSERVATORY_METRICS access and aggregation helpers below are public
+(``get_table``, ``fetch_all_for_aggregate``, ``aggregate_items``,
+``query_by_pk``) along with the response helpers (``json_response``,
+``json_default``, ``CORS_HEADERS``) because ``unified_observability_handler``
+composes this same data into ``GET /observability``.  There is one source of
+truth for the DynamoDB query and aggregation logic: this module.
 """
 
 from __future__ import annotations
@@ -63,7 +70,7 @@ _DEFAULT_LIMIT = 100
 _MAX_LIMIT = 1000
 _AGGREGATE_SCAN_LIMIT = 5000  # max items scanned per aggregate request
 
-_CORS_HEADERS = {
+CORS_HEADERS = {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key",
@@ -74,7 +81,7 @@ _CORS_HEADERS = {
 _ddb_table = None
 
 
-def _get_table():
+def get_table():
     global _ddb_table
     table_name = os.environ.get("OBSERVATORY_METRICS_TABLE")
     if not table_name:
@@ -84,15 +91,15 @@ def _get_table():
     return _ddb_table
 
 
-def _resp(status: int, body: dict) -> dict:
+def json_response(status: int, body: dict) -> dict:
     return {
         "statusCode": status,
-        "headers": _CORS_HEADERS,
-        "body": json.dumps(body, default=_json_default),
+        "headers": CORS_HEADERS,
+        "body": json.dumps(body, default=json_default),
     }
 
 
-def _json_default(obj):
+def json_default(obj):
     """JSON serializer for Decimal (DynamoDB returns Decimal for numbers)."""
     if isinstance(obj, Decimal):
         return float(obj)
@@ -133,7 +140,7 @@ def _decode_next_token(token: str) -> Optional[dict]:
 
 
 def _encode_next_token(last_key: dict) -> str:
-    return base64.b64encode(json.dumps(last_key, default=_json_default).encode()).decode()
+    return base64.b64encode(json.dumps(last_key, default=json_default).encode()).decode()
 
 
 def _parse_bool_param(value: Optional[str]) -> Optional[bool]:
@@ -183,7 +190,7 @@ def _build_filter_expression(
     return expr
 
 
-def _query_by_pk(
+def query_by_pk(
     table,
     pk_value: str,
     start_iso: Optional[str],
@@ -274,7 +281,7 @@ def _normalize_item(item: dict) -> dict:
     return {k: _unwrap_ddb_value(v) for k, v in item.items()}
 
 
-def _fetch_all_for_aggregate(
+def fetch_all_for_aggregate(
     table,
     operation: str,
     agent_id: Optional[str],
@@ -304,7 +311,7 @@ def _fetch_all_for_aggregate(
             pk = f"OBSERVATORY#{op}"
             last_key = None
             while True:
-                items, scanned, last_key = _query_by_pk(
+                items, scanned, last_key = query_by_pk(
                     table, pk, start_iso, end_iso, filter_expr,
                     limit=_AGGREGATE_SCAN_LIMIT, exclusive_start_key=last_key
                 )
@@ -316,7 +323,7 @@ def _fetch_all_for_aggregate(
     return [_normalize_item(item) for item in all_items], total_scanned
 
 
-def _aggregate_items(items: list[dict], mode: str) -> list[dict]:
+def aggregate_items(items: list[dict], mode: str) -> list[dict]:
     """Group items by the requested dimension and compute aggregates."""
     _NUMERIC_FIELDS = [
         "prompt_tokens", "completion_tokens", "cost_usd",
@@ -436,33 +443,33 @@ def _sort_items(items: list[dict], sort_by: str, sort_order: str) -> list[dict]:
 
 
 def handler(event: dict, context: object) -> dict:  # noqa: C901
-    table = _get_table()
+    table = get_table()
     if table is None:
-        return _resp(500, {"error": "OBSERVATORY_METRICS_TABLE environment variable not set"})
+        return json_response(500, {"error": "OBSERVATORY_METRICS_TABLE environment variable not set"})
 
     params: dict[str, str] = event.get("queryStringParameters") or {}
 
     # --- Parameter parsing & validation ---
     operation = params.get("operation", "all").lower()
     if operation not in _VALID_OPERATIONS:
-        return _resp(400, {"error": f"operation must be one of {sorted(_VALID_OPERATIONS)}"})
+        return json_response(400, {"error": f"operation must be one of {sorted(_VALID_OPERATIONS)}"})
 
     aggregate = params.get("aggregate", "none").lower()
     if aggregate not in _VALID_AGGREGATES:
-        return _resp(400, {"error": f"aggregate must be one of {sorted(_VALID_AGGREGATES)}"})
+        return json_response(400, {"error": f"aggregate must be one of {sorted(_VALID_AGGREGATES)}"})
 
     sort_by = params.get("sort_by", "timestamp").lower()
     if sort_by not in _VALID_SORT_BY:
-        return _resp(400, {"error": f"sort_by must be one of {sorted(_VALID_SORT_BY)}"})
+        return json_response(400, {"error": f"sort_by must be one of {sorted(_VALID_SORT_BY)}"})
 
     sort_order = params.get("sort_order", "desc").lower()
     if sort_order not in {"asc", "desc"}:
-        return _resp(400, {"error": "sort_order must be 'asc' or 'desc'"})
+        return json_response(400, {"error": "sort_order must be 'asc' or 'desc'"})
 
     try:
         limit = int(params.get("limit", _DEFAULT_LIMIT))
     except ValueError:
-        return _resp(400, {"error": "limit must be an integer"})
+        return json_response(400, {"error": "limit must be an integer"})
     limit = max(1, min(limit, _MAX_LIMIT))
 
     agent_id = params.get("agent_id") or None
@@ -483,12 +490,12 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
         try:
             start_iso = _parse_timestamp(params["start"])
         except Exception:
-            return _resp(400, {"error": "start must be a Unix epoch or ISO 8601 timestamp"})
+            return json_response(400, {"error": "start must be a Unix epoch or ISO 8601 timestamp"})
     if params.get("end"):
         try:
             end_iso = _parse_timestamp(params["end"])
         except Exception:
-            return _resp(400, {"error": "end must be a Unix epoch or ISO 8601 timestamp"})
+            return json_response(400, {"error": "end must be a Unix epoch or ISO 8601 timestamp"})
 
     filter_expr = _build_filter_expression(
         model_id, decision, risk_tier, policy_decision,
@@ -499,15 +506,15 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
     # --- Aggregate mode: fetch all, group, return ---
     if aggregate != "none":
         try:
-            items, scanned = _fetch_all_for_aggregate(
+            items, scanned = fetch_all_for_aggregate(
                 table, operation, agent_id, start_iso, end_iso, filter_expr
             )
         except Exception as exc:
             log.error("agent_metrics_aggregate_error", extra={"err": str(exc)})
-            return _resp(500, {"error": "Failed to query metrics"})
+            return json_response(500, {"error": "Failed to query metrics"})
 
-        groups = _aggregate_items(items, aggregate)
-        return _resp(200, {
+        groups = aggregate_items(items, aggregate)
+        return json_response(200, {
             "aggregate": aggregate,
             "groups": groups,
             "total_count": len(items),
@@ -541,7 +548,7 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
             # Query all known operation PKs and merge results.
             # Pagination is not supported for merged queries.
             for op in _ALL_OPERATION_PKS:
-                op_items, op_scanned, _ = _query_by_pk(
+                op_items, op_scanned, _ = query_by_pk(
                     table, f"OBSERVATORY#{op}", start_iso, end_iso, filter_expr,
                     limit=limit, exclusive_start_key=None
                 )
@@ -550,14 +557,14 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
             last_key = None  # merged queries; pagination not supported for all+merged
         else:
             pk = f"OBSERVATORY#{operation}"
-            items, scanned, last_key = _query_by_pk(
+            items, scanned, last_key = query_by_pk(
                 table, pk, start_iso, end_iso, filter_expr,
                 limit=limit, exclusive_start_key=exclusive_start_key
             )
             items = [_normalize_item(item) for item in items]
     except Exception as exc:
         log.error("agent_metrics_query_error", extra={"err": str(exc)})
-        return _resp(500, {"error": "Failed to query metrics"})
+        return json_response(500, {"error": "Failed to query metrics"})
 
     # Sort
     items = _sort_items(items, sort_by, sort_order)[:limit]
@@ -570,4 +577,4 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
     if last_key:
         response_body["next_token"] = _encode_next_token(last_key)
 
-    return _resp(200, response_body)
+    return json_response(200, response_body)
