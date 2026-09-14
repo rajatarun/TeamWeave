@@ -2,6 +2,7 @@ import base64
 import importlib
 import json
 import os
+import re
 import sys
 import unittest
 from decimal import Decimal
@@ -27,6 +28,11 @@ def _condition_values(condition) -> list:
     builder = ConditionExpressionBuilder()
     expr = builder.build_expression(condition)
     return list(expr.attribute_value_placeholders.values())
+
+
+def _IS_SPAN_DATE(value) -> bool:
+    """True for a "YYYY-MM-DD" SpanTimelineIndex partition value."""
+    return bool(isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value))
 
 
 def _mock_table(items=None, scanned=None, last_key=None):
@@ -115,33 +121,61 @@ class TestListModeQueryRouting(unittest.TestCase):
             "decision_reason": "none",
         }
 
-    def test_invoke_agent_queries_correct_pk(self):
+    # The four tests below asserted the v1 read path: one partition query per
+    # operation, with the operation *as* the pk.  Contract v2.0.0 moves reads
+    # onto SpanTimelineIndex and the operation becomes an ordinary filter, so
+    # these now assert that shape instead.  The rest of this file -- every
+    # response-shape, filter, sort and aggregation assertion -- is unchanged,
+    # because none of that was supposed to move.
+
+    def test_invoke_agent_queries_the_index_and_filters_on_operation(self):
         tbl = _mock_table(items=[self._item("invoke_agent")])
         _run({"operation": "invoke_agent"}, table=tbl)
         call_kwargs = tbl.query.call_args[1]
-        values = _condition_values(call_kwargs["KeyConditionExpression"])
-        self.assertIn("OBSERVATORY#invoke_agent", values)
+        self.assertEqual(call_kwargs["IndexName"], "SpanTimelineIndex")
+        # The partition is a day, not a category.
+        key_values = _condition_values(call_kwargs["KeyConditionExpression"])
+        self.assertTrue(any(_IS_SPAN_DATE(v) for v in key_values), key_values)
+        self.assertNotIn("OBSERVATORY#invoke_agent", key_values)
+        self.assertIn("invoke_agent", _condition_values(call_kwargs["FilterExpression"]))
 
-    def test_invoke_model_queries_correct_pk(self):
+    def test_invoke_model_queries_the_index_and_filters_on_operation(self):
         tbl = _mock_table(items=[self._item("invoke_model")])
         _run({"operation": "invoke_model"}, table=tbl)
         call_kwargs = tbl.query.call_args[1]
-        values = _condition_values(call_kwargs["KeyConditionExpression"])
-        self.assertIn("OBSERVATORY#invoke_model", values)
+        self.assertEqual(call_kwargs["IndexName"], "SpanTimelineIndex")
+        self.assertNotIn(
+            "OBSERVATORY#invoke_model",
+            _condition_values(call_kwargs["KeyConditionExpression"]),
+        )
+        self.assertIn("invoke_model", _condition_values(call_kwargs["FilterExpression"]))
 
-    def test_all_operations_queries_both_pks(self):
+    def test_all_operations_is_one_query_per_day_with_no_operation_filter(self):
+        """"all" is the absence of a filter now, not an enumeration.
+
+        Under v1 this was one query per known operation, which is precisely why
+        a writer using an unlisted pk prefix could never be seen.  On the index
+        the fan-out is over days, and an operation this repo has never heard of
+        comes back like any other.
+        """
         tbl = _mock_table(items=[])
         _run({"operation": "all"}, table=tbl)
-        # Should have been called once per known operation PK (invoke_agent,
-        # invoke_model, classify_question, synthesize_answer)
-        self.assertEqual(tbl.query.call_count, 4)
-        all_values = []
+
+        self.assertGreater(tbl.query.call_count, 0)
+        queried_days = []
         for c in tbl.query.call_args_list:
-            all_values.extend(_condition_values(c[1]["KeyConditionExpression"]))
-        self.assertIn("OBSERVATORY#invoke_agent", all_values)
-        self.assertIn("OBSERVATORY#invoke_model", all_values)
-        self.assertIn("OBSERVATORY#classify_question", all_values)
-        self.assertIn("OBSERVATORY#synthesize_answer", all_values)
+            self.assertEqual(c[1]["IndexName"], "SpanTimelineIndex")
+            self.assertNotIn("FilterExpression", c[1])
+            queried_days.extend(
+                v for v in _condition_values(c[1]["KeyConditionExpression"])
+                if _IS_SPAN_DATE(v)
+            )
+        # One partition per distinct UTC day, covering the default 7-day window.
+        self.assertEqual(len(queried_days), len(set(queried_days)))
+        self.assertEqual(len(queried_days), tbl.query.call_count)
+        for pk in ("OBSERVATORY#invoke_agent", "OBSERVATORY#invoke_model",
+                   "OBSERVATORY#classify_question", "OBSERVATORY#synthesize_answer"):
+            self.assertNotIn(pk, queried_days)
 
     def test_agent_id_filter_uses_gsi(self):
         tbl = _mock_table(items=[self._item("invoke_agent")])
@@ -194,10 +228,20 @@ class TestListModeQueryRouting(unittest.TestCase):
         self.assertIn("nova-micro", values)
 
     def test_no_filter_expression_when_no_filters(self):
+        # operation="all" with no other filter is now a filter-free query; the
+        # operation itself is the only thing that moved into FilterExpression.
+        tbl = _mock_table(items=[self._item("invoke_agent")])
+        _run({"operation": "all"}, table=tbl)
+        call_kwargs = tbl.query.call_args[1]
+        self.assertNotIn("FilterExpression", call_kwargs)
+
+    def test_operation_is_the_only_filter_when_no_other_filters(self):
         tbl = _mock_table(items=[self._item("invoke_agent")])
         _run({"operation": "invoke_agent"}, table=tbl)
         call_kwargs = tbl.query.call_args[1]
-        self.assertNotIn("FilterExpression", call_kwargs)
+        self.assertEqual(
+            _condition_values(call_kwargs["FilterExpression"]), ["invoke_agent"]
+        )
 
     def test_query_uses_descending_scan_order(self):
         # ScanIndexForward=False ensures DynamoDB returns newest items first,
