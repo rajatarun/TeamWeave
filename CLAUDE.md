@@ -173,6 +173,7 @@ Every run is async: `POST /team/task` returns a `run_id`, then poll `GET /team/t
 | `GET` | `/improve/tasks` | List improvement tasks |
 | `POST` | `/improve/task/done` | Mark a task complete |
 | `GET` | `/observability/metrics` | Bedrock telemetry from AMP |
+| `GET` | `/observability` | Unified view: OBSERVATORY_METRICS + ContextWeave routing health + routing decisions |
 
 ---
 

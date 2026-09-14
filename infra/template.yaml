@@ -737,6 +737,46 @@ Resources:
                   - !Ref ObservatoryMetricsTableArn
                   - !Sub "${ObservatoryMetricsTableArn}/index/*"
 
+  UnifiedObservabilityRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-unified-observability-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: unified-observability-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                  - ec2:AssignIpv6Addresses
+                  - ec2:UnassignIpv6Addresses
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Ref ObservatoryMetricsTableArn
+                  - !Sub "${ObservatoryMetricsTableArn}/index/*"
+
   StepFunctionsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -827,6 +867,12 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-AgentMetricsDashboardFunction"
+      RetentionInDays: 30
+
+  UnifiedObservabilityFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-UnifiedObservabilityFunction"
       RetentionInDays: 30
 
   GeminiResearchFunctionLogGroup:
@@ -1244,6 +1290,38 @@ Resources:
           Properties:
             RestApiId: !Ref TeamWeaveApi
             Path: /observability/agent-metrics
+            Method: get
+      VpcConfig: !If
+        - HasVpcConfig
+        - SecurityGroupIds:
+            - !Ref OrchestratorSecurityGroup
+          SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
+        - !Ref AWS::NoValue
+
+  UnifiedObservabilityFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: UnifiedObservabilityFunctionLogGroup
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../
+      Handler: src/orchestrator/unified_observability_handler.handler
+      Role: !GetAtt UnifiedObservabilityRole.Arn
+      Architectures:
+        - arm64
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTableName
+          CONTEXTWEAVE_URL: !Ref ContextWeaveUrl
+      Events:
+        UnifiedObservabilityGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /observability
             Method: get
       VpcConfig: !If
         - HasVpcConfig

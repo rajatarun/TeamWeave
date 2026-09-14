@@ -15,6 +15,20 @@ Contract (ContextWeave ``src/query_api/handler.py``):
     POST {CONTEXTWEAVE_URL}/feedback
         {"queryId": str, "rating": "up" | "down" | "neutral"}
 
+    GET {CONTEXTWEAVE_URL}/health
+    -> {"status", "knowledgeBaseId", "neptuneGraphId", "environment",
+        "routingGraph": {"documentTypeDistribution": [...],
+                         "health": {"exploration", "priorStrength",
+                                    "questionTypes": {<type>: {"verdict",
+                                        "leader", "leaderPBest", "starvedArms",
+                                        "arms"}}}}}
+
+    GET {CONTEXTWEAVE_URL}/routing-decisions?mode=summary[&questionType=][&since=]
+    -> {"groups": [{"questionType", "strategy", "count", "ratedCount",
+                    "avgConfidence", "avgRating", "meanAbsDiff"}],
+        "totalCount": int, "totalRated": int}
+        (the three averages are null in a group with ratedCount 0)
+
 Every call degrades gracefully: failures are logged and reported as "no
 context", exactly the contract the pgvector modes already follow
 (``retrieve_from_vector_store`` returns ``[]``, ``get_rag_context`` returns
@@ -26,6 +40,7 @@ JSON APIs — so no new dependency is introduced.
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional
 
@@ -35,6 +50,8 @@ log = get_logger("contextweave_client")
 
 QUERY_PATH = "/query-expertise"
 FEEDBACK_PATH = "/feedback"
+HEALTH_PATH = "/health"
+ROUTING_DECISIONS_PATH = "/routing-decisions"
 
 # Matches the read timeout used for the other external JSON API (gemini.py);
 # ContextWeave runs a full RAG pipeline on a cache miss.
@@ -106,6 +123,118 @@ def _post(path: str, body: Dict[str, Any], max_retries: int = _MAX_RETRIES) -> O
 
     log.warning("contextweave_request_failed", extra={"path": path, "err": last_err})
     return None
+
+
+def _get(
+    path: str,
+    params: Optional[Dict[str, Any]] = None,
+    max_retries: int = _MAX_RETRIES,
+) -> Optional[Dict[str, Any]]:
+    """GET JSON from ContextWeave; return the decoded body or None on failure.
+
+    Same degradation contract as ``_post``: transport errors and 5xx are
+    retried, a 4xx is reported immediately, and nothing raises out of here —
+    a read endpoint being down must never fail the caller.
+    """
+    url = base_url()
+    if not url:
+        log.warning("contextweave_not_configured", extra={"required": ["CONTEXTWEAVE_URL"]})
+        return None
+
+    query = urllib.parse.urlencode(
+        {k: v for k, v in (params or {}).items() if v is not None and v != ""}
+    )
+    full_url = url + path + (f"?{query}" if query else "")
+    req = urllib.request.Request(full_url, headers=_headers(), method="GET")
+
+    last_err = ""
+    for attempt in range(0, max_retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="ignore")[:300]
+            if e.code < 500:
+                log.warning(
+                    "contextweave_http_error",
+                    extra={"path": path, "code": e.code, "body_prefix": detail},
+                )
+                return None
+            last_err = f"HTTP {e.code}: {detail}"
+        except Exception as e:  # transport, timeout, malformed JSON
+            last_err = str(e)[:240]
+        if attempt < max_retries:
+            log.warning(
+                "contextweave_request_retrying",
+                extra={"path": path, "attempt": attempt, "err": last_err},
+            )
+
+    log.warning("contextweave_request_failed", extra={"path": path, "err": last_err})
+    return None
+
+
+def get_health() -> Optional[Dict[str, Any]]:
+    """Read the knowledge layer's health, including its routing-graph verdicts.
+
+    Returns the decoded ``/health`` body, or None when ContextWeave is not
+    configured, unreachable, or answers with something that is not a JSON
+    object.
+    """
+    payload = _get(HEALTH_PATH)
+    if payload is None:
+        return None
+    if not isinstance(payload, dict) or payload.get("error"):
+        log.warning("contextweave_health_failed", extra={"body_prefix": str(payload)[:300]})
+        return None
+
+    routing_graph = payload.get("routingGraph") or {}
+    question_types = (routing_graph.get("health") or {}).get("questionTypes") or {}
+    log.info(
+        "contextweave_health_ok",
+        extra={
+            "status": payload.get("status", ""),
+            "environment": payload.get("environment", ""),
+            "question_type_count": len(question_types) if isinstance(question_types, dict) else 0,
+        },
+    )
+    return payload
+
+
+def get_routing_decisions_summary(
+    question_type: Optional[str] = None,
+    since: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Read the per (question type, strategy) rollup of routing decisions.
+
+    ``question_type`` and ``since`` are passed straight through as the
+    ``questionType`` / ``since`` query params when given.  Returns the decoded
+    body or None on any failure.
+    """
+    params: Dict[str, Any] = {"mode": "summary"}
+    if question_type:
+        params["questionType"] = question_type
+    if since:
+        params["since"] = since
+
+    payload = _get(ROUTING_DECISIONS_PATH, params)
+    if payload is None:
+        return None
+    if not isinstance(payload, dict) or payload.get("error"):
+        log.warning(
+            "contextweave_routing_decisions_failed",
+            extra={"body_prefix": str(payload)[:300]},
+        )
+        return None
+
+    log.info(
+        "contextweave_routing_decisions_ok",
+        extra={
+            "group_count": len(payload.get("groups") or []),
+            "total_count": payload.get("totalCount"),
+            "total_rated": payload.get("totalRated"),
+        },
+    )
+    return payload
 
 
 def query_expertise(question: str, top_k: int = 8) -> Optional[Dict[str, Any]]:
