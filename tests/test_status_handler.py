@@ -17,11 +17,17 @@ class _FakeSfnClient:
 class StatusHandlerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if "boto3" not in sys.modules:
-            fake_boto3 = types.ModuleType("boto3")
-            fake_boto3.client = lambda *_args, **_kwargs: _FakeSfnClient()
-            sys.modules["boto3"] = fake_boto3
-
+        # These stubs used to be installed only `if "boto3" not in sys.modules`,
+        # which made the whole class order-dependent: several other test modules
+        # put their own boto3 stand-in in sys.modules first, status_handler
+        # imported *that* at module scope, and `sfn` came out as None. Running
+        # this file alone passed; running the suite failed with
+        # "'NoneType' object has no attribute 'describe_execution'", which reads
+        # like a handler bug and is not one.
+        #
+        # So the module-level client is replaced after the import rather than
+        # the import being steered by a stub. Whatever boto3 the rest of the
+        # suite has installed, these tests now exercise the same fake.
         if "botocore.exceptions" not in sys.modules:
             fake_botocore_exceptions = types.ModuleType("botocore.exceptions")
 
@@ -31,7 +37,21 @@ class StatusHandlerTests(unittest.TestCase):
             fake_botocore_exceptions.ClientError = _FakeClientError
             sys.modules["botocore.exceptions"] = fake_botocore_exceptions
 
+        if "boto3" not in sys.modules:
+            fake_boto3 = types.ModuleType("boto3")
+            fake_boto3.client = lambda *_args, **_kwargs: _FakeSfnClient()
+            sys.modules["boto3"] = fake_boto3
+
         cls.status_handler = importlib.import_module("src.orchestrator.status_handler")
+        cls._real_sfn = cls.status_handler.sfn
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.status_handler.sfn = cls._real_sfn
+
+    def setUp(self):
+        # A fresh fake per test, so last_execution_arn cannot leak between them.
+        self.status_handler.sfn = _FakeSfnClient()
 
     def test_options_request_returns_cors_without_run_id(self):
         response = self.status_handler.handler({"httpMethod": "OPTIONS"}, None)
