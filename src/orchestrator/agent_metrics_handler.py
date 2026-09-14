@@ -27,6 +27,33 @@ Responses
 400  {"error": "..."}
 500  {"error": "..."}
 
+Read path
+---------
+Spans are read through the ``SpanTimelineIndex`` GSI (``span_date`` HASH,
+``timestamp`` RANGE), one query per UTC day in the requested range, with
+``operation`` applied as a FilterExpression.  Before this, reads enumerated the
+partition key (``OBSERVATORY#{operation}``), which meant a writer's rows showed
+up here only if it had guessed a prefix this module happened to list -- three
+of the shared table's five writers had not, and their telemetry was durable,
+billable and permanently invisible.  Nothing about the query now depends on
+what any writer chose for its pk.
+
+Two consequences for callers, both deliberate:
+
+* ``start``/``end`` absent no longer means "everything".  The index is queried
+  per day, so an open range is an open-ended fan-out; the default window is the
+  last 7 days (``_DEFAULT_LOOKBACK_DAYS``).
+* Rows written before the contract added ``span_date`` are not in the index and
+  will not appear.  They stay reachable by their original pk; backfilling them
+  is a separate migration.
+
+While ``SpanTimelineIndex`` does not exist -- it ships in a different stack, and
+a new GSI is not queryable until its backfill finishes -- the old pk
+enumeration is used instead and a warning is logged once per process.  That
+fallback is triggered by index-absence alone (see ``_is_index_missing_error``);
+every other failure propagates, because answering a throttled query out of the
+legacy partitions would report "no traffic" for most writers.
+
 The OBSERVATORY_METRICS access and aggregation helpers below are public
 (``get_table``, ``fetch_all_for_aggregate``, ``aggregate_items``,
 ``query_by_pk``) along with the response helpers (``json_response``,
@@ -41,7 +68,7 @@ import base64
 import json
 import os
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -57,7 +84,61 @@ _VALID_OPERATIONS = {"invoke_agent", "invoke_model", "classify_question", "synth
 # All known operation PK suffixes stored under OBSERVATORY#{op}.
 # classify_question / synthesize_answer were used by earlier versions of
 # mcp_observatory before the schema was unified to invoke_model.
+#
+# This list is now only the *legacy* read path (see _legacy_list_query and
+# _fetch_all_via_pk below).  It is exactly the enumeration the v2 contract
+# exists to abolish: a writer whose rows land under a prefix absent from this
+# list is invisible to this dashboard, which is how three of the shared
+# table's five writers came to emit telemetry nobody could see.
 _ALL_OPERATION_PKS = ["invoke_agent", "invoke_model", "classify_question", "synthesize_answer"]
+
+# ---------------------------------------------------------------------------
+# SpanTimelineIndex -- the supported read path (shared contract v2.0.0)
+# ---------------------------------------------------------------------------
+# Keyed span_date (HASH, "YYYY-MM-DD" UTC) + timestamp (RANGE, ISO 8601 UTC).
+# Reading through it removes the pk-prefix agreement entirely: this handler
+# queries the days the caller asked about and filters in memory, so it never
+# needs to know what partition-key grammar any writer chose.  The names below
+# must equal contracts/observatory_metrics_item.json's "gsi" block; a
+# conformance test in tests/test_shared_table_contract.py reads them from that
+# file and asserts the query really uses them.
+SPAN_TIMELINE_INDEX = "SpanTimelineIndex"
+SPAN_TIMELINE_PARTITION_KEY = "span_date"
+SPAN_TIMELINE_SORT_KEY = "timestamp"
+
+# One query is issued per day in the requested range, so an unbounded range is
+# an unbounded number of queries.  With neither `start` nor `end` given the
+# window is the last 7 days: enough to cover the weekly rhythm these dashboards
+# are read on, small enough that the default request is 8 partition queries
+# rather than a fan-out that grows without limit as the table ages.  Callers
+# who want more say so with `start`/`end`.
+_DEFAULT_LOOKBACK_DAYS = 7
+
+# Upper bound on the day fan-out for an explicit range.  Items carry a 90-day
+# TTL (see mcp_observatory._TTL_SECONDS), so days older than that hold nothing
+# to find and querying them only buys latency.  The newest _MAX_SPAN_DATES days
+# of the requested range are the ones queried.
+_MAX_SPAN_DATES = 92
+
+# The timestamp spelling the writer uses, and what _parse_timestamp normalises
+# user input to; defaults are generated in the same shape so that range
+# comparisons stay lexicographic.
+_TS_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
+
+# A DynamoDB error means "this index does not exist yet" only in these two
+# shapes.  Anything else -- throttling, credentials, a malformed expression --
+# must propagate, or the fallback becomes a mechanism for turning real outages
+# into quietly wrong dashboards.
+_INDEX_ABSENCE_MARKERS = (
+    SPAN_TIMELINE_INDEX.lower(),
+    "specified index",
+    "index not found",
+)
+
+# The fallback warns once per process rather than once per query: it is a
+# deploy-ordering condition that persists for minutes, and one line per
+# dashboard refresh would bury it.
+_index_fallback_warned = False
 _VALID_SORT_BY = {
     "timestamp", "cost_usd", "prompt_tokens", "completion_tokens",
     "composite_risk_score", "hallucination_risk_score", "retries", "grounding_score",
@@ -222,6 +303,137 @@ def query_by_pk(
     return resp.get("Items", []), resp.get("ScannedCount", 0), resp.get("LastEvaluatedKey")
 
 
+def _resolve_window(start_iso: Optional[str], end_iso: Optional[str]) -> tuple[str, str]:
+    """Fill in the ends of the requested time range that the caller left open.
+
+    The index partition is a day, so a query needs both ends to know which days
+    to ask for.  An absent `end` means "up to now"; an absent `start` means
+    "_DEFAULT_LOOKBACK_DAYS before the end of the window".
+    """
+    now = datetime.now(timezone.utc)
+    resolved_end = end_iso or now.strftime(_TS_FORMAT)
+    if start_iso:
+        return start_iso, resolved_end
+    anchor = now if end_iso is None else _iso_to_datetime(end_iso) or now
+    return (anchor - timedelta(days=_DEFAULT_LOOKBACK_DAYS)).strftime(_TS_FORMAT), resolved_end
+
+
+def _iso_to_datetime(value: str) -> Optional[datetime]:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def span_dates(start_iso: str, end_iso: str) -> list[str]:
+    """The SpanTimelineIndex partitions covering [start, end], newest day first.
+
+    Newest first so that a list-mode query with a Limit fills up from the most
+    recent spans, which is what ScanIndexForward=False gave the old single-
+    partition query.  An unparseable bound yields no days -- and therefore no
+    rows -- rather than a guess at what the caller meant.
+    """
+    try:
+        first = date.fromisoformat(str(start_iso)[:10])
+        last = date.fromisoformat(str(end_iso)[:10])
+    except ValueError:
+        return []
+    if last < first:
+        return []
+    span = min((last - first).days + 1, _MAX_SPAN_DATES)
+    return [(last - timedelta(days=offset)).isoformat() for offset in range(span)]
+
+
+def _with_operation_filter(filter_expr, operation: Optional[str]):
+    """Apply `operation` as a filter rather than as a partition.
+
+    Under v1 this was the partition key, so "all" meant one query per known
+    operation and an operation nobody had enumerated was unreachable.  On the
+    index it is an ordinary attribute: "all" is simply the absence of a filter,
+    and an operation this repository has never heard of still comes back.
+    """
+    if not operation or operation == "all":
+        return filter_expr
+    condition = Attr("operation").eq(operation)
+    return condition if filter_expr is None else filter_expr & condition
+
+
+def query_span_timeline(
+    table,
+    span_date: str,
+    start_iso: str,
+    end_iso: str,
+    filter_expr,
+    limit: int,
+    exclusive_start_key: Optional[dict],
+) -> tuple[list[dict], int, Optional[dict]]:
+    """Query one day of SpanTimelineIndex, bounded by the timestamp range.
+
+    The same range condition is applied to every day: interior days pass it
+    whole, and the two end days are trimmed by DynamoDB rather than in memory.
+    """
+    key_cond = Key(SPAN_TIMELINE_PARTITION_KEY).eq(span_date) & Key(
+        SPAN_TIMELINE_SORT_KEY
+    ).between(start_iso, end_iso + "~")
+
+    kwargs: dict[str, Any] = {
+        "IndexName": SPAN_TIMELINE_INDEX,
+        "KeyConditionExpression": key_cond,
+        "Limit": limit,
+        "ScanIndexForward": False,  # descending by timestamp: newest first
+    }
+    if filter_expr is not None:
+        kwargs["FilterExpression"] = filter_expr
+    if exclusive_start_key:
+        kwargs["ExclusiveStartKey"] = exclusive_start_key
+
+    resp = table.query(**kwargs)
+    return resp.get("Items", []), resp.get("ScannedCount", 0), resp.get("LastEvaluatedKey")
+
+
+def _is_index_missing_error(exc: BaseException) -> bool:
+    """True only for "SpanTimelineIndex does not exist (yet)".
+
+    The GSI is created by a separate stack whose deploy may land after this
+    code, and a new index is not queryable until its backfill completes, so a
+    reader that cannot tolerate its absence makes deploy order load-bearing.
+    Tolerating *any* failure instead would be worse than the bug this migration
+    fixes: a throttle or an expired credential would silently serve whatever
+    the legacy partitions happen to hold, which for most writers is nothing.
+    So the test is narrow and structural -- the error must be a DynamoDB
+    ClientError whose code is ResourceNotFoundException, or a
+    ValidationException that names an index.
+    """
+    response = getattr(exc, "response", None)
+    if not isinstance(response, dict):
+        return False
+    error = response.get("Error") or {}
+    code = str(error.get("Code") or "")
+    if code == "ResourceNotFoundException":
+        return True
+    if code != "ValidationException":
+        return False
+    message = str(error.get("Message") or "").lower()
+    return any(marker in message for marker in _INDEX_ABSENCE_MARKERS)
+
+
+def _warn_index_missing_once(exc: BaseException) -> None:
+    global _index_fallback_warned
+    if _index_fallback_warned:
+        return
+    _index_fallback_warned = True
+    log.warning(
+        "observatory_span_timeline_index_unavailable",
+        extra={
+            "index": SPAN_TIMELINE_INDEX,
+            "err": str(exc),
+            "fallback": "legacy pk enumeration (rows from writers using other "
+                        "pk prefixes are not visible on this path)",
+        },
+    )
+
+
 def _query_by_agent_id(
     table,
     agent_id: str,
@@ -281,6 +493,89 @@ def _normalize_item(item: dict) -> dict:
     return {k: _unwrap_ddb_value(v) for k, v in item.items()}
 
 
+def _dedupe(items: list[dict]) -> list[dict]:
+    """Drop repeats of the same row, identified by its base-table key.
+
+    Day partitions are disjoint, so in production this changes nothing.  It is
+    here because an aggregate that double-counts is indistinguishable from real
+    traffic: a retried page, or a cursor resumed across an overlapping
+    boundary, would otherwise inflate every sum on the dashboard with no error
+    anywhere.  Rows missing a key are kept as-is rather than collapsed
+    together, since nothing identifies them.
+    """
+    seen: set = set()
+    unique: list[dict] = []
+    for position, item in enumerate(items):
+        pk, sk = item.get("pk"), item.get("sk")
+        key = (pk, sk) if isinstance(pk, str) and isinstance(sk, str) else ("\x00", position)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def _fetch_all_via_index(
+    table,
+    operation: str,
+    start_iso: Optional[str],
+    end_iso: Optional[str],
+    filter_expr,
+) -> tuple[list[dict], int]:
+    """Aggregate-mode fetch over SpanTimelineIndex: every day, fully paged."""
+    window_start, window_end = _resolve_window(start_iso, end_iso)
+    expr = _with_operation_filter(filter_expr, operation)
+
+    all_items: list[dict] = []
+    total_scanned = 0
+    for day in span_dates(window_start, window_end):
+        last_key = None
+        while True:
+            items, scanned, last_key = query_span_timeline(
+                table, day, window_start, window_end, expr,
+                limit=_AGGREGATE_SCAN_LIMIT, exclusive_start_key=last_key,
+            )
+            all_items.extend(items)
+            total_scanned += scanned
+            if not last_key or len(all_items) >= _AGGREGATE_SCAN_LIMIT:
+                break
+        if len(all_items) >= _AGGREGATE_SCAN_LIMIT:
+            break
+    return all_items, total_scanned
+
+
+def _fetch_all_via_pk(
+    table,
+    operation: str,
+    start_iso: Optional[str],
+    end_iso: Optional[str],
+    filter_expr,
+) -> tuple[list[dict], int]:
+    """Legacy aggregate-mode fetch: one pass per enumerated OBSERVATORY# pk.
+
+    Reached only when SpanTimelineIndex is absent.  Unlike the index path it
+    does not impose a default time window, because it is deliberately the
+    pre-migration behaviour, unchanged: while the index is missing, a caller
+    who asked for no range gets what this endpoint has always given them.
+    """
+    all_items: list[dict] = []
+    total_scanned = 0
+    ops = _ALL_OPERATION_PKS if operation == "all" else [operation]
+    for op in ops:
+        pk = f"OBSERVATORY#{op}"
+        last_key = None
+        while True:
+            items, scanned, last_key = query_by_pk(
+                table, pk, start_iso, end_iso, filter_expr,
+                limit=_AGGREGATE_SCAN_LIMIT, exclusive_start_key=last_key
+            )
+            all_items.extend(items)
+            total_scanned += scanned
+            if not last_key or len(all_items) >= _AGGREGATE_SCAN_LIMIT:
+                break
+    return all_items, total_scanned
+
+
 def fetch_all_for_aggregate(
     table,
     operation: str,
@@ -290,11 +585,11 @@ def fetch_all_for_aggregate(
     filter_expr,
 ) -> tuple[list[dict], int]:
     """Fetch all matching items for in-memory aggregation (no pagination)."""
-    all_items: list[dict] = []
-    total_scanned = 0
-
     if agent_id:
-        # Use GSI
+        # AgentIdTimestampIndex: unrelated to this migration and already keyed
+        # on an attribute every writer sets, so it is untouched.
+        all_items: list[dict] = []
+        total_scanned = 0
         last_key = None
         while True:
             items, scanned, last_key = _query_by_agent_id(
@@ -306,21 +601,124 @@ def fetch_all_for_aggregate(
             if not last_key or len(all_items) >= _AGGREGATE_SCAN_LIMIT:
                 break
     else:
-        ops = _ALL_OPERATION_PKS if operation == "all" else [operation]
-        for op in ops:
-            pk = f"OBSERVATORY#{op}"
-            last_key = None
-            while True:
-                items, scanned, last_key = query_by_pk(
-                    table, pk, start_iso, end_iso, filter_expr,
-                    limit=_AGGREGATE_SCAN_LIMIT, exclusive_start_key=last_key
-                )
-                all_items.extend(items)
-                total_scanned += scanned
-                if not last_key or len(all_items) >= _AGGREGATE_SCAN_LIMIT:
-                    break
+        try:
+            all_items, total_scanned = _fetch_all_via_index(
+                table, operation, start_iso, end_iso, filter_expr
+            )
+        except Exception as exc:  # noqa: BLE001 -- re-raised unless it is the index
+            if not _is_index_missing_error(exc):
+                raise
+            _warn_index_missing_once(exc)
+            all_items, total_scanned = _fetch_all_via_pk(
+                table, operation, start_iso, end_iso, filter_expr
+            )
 
-    return [_normalize_item(item) for item in all_items], total_scanned
+    return _dedupe([_normalize_item(item) for item in all_items]), total_scanned
+
+
+def _list_via_index(
+    table,
+    operation: str,
+    start_iso: Optional[str],
+    end_iso: Optional[str],
+    filter_expr,
+    limit: int,
+    exclusive_start_key: Optional[dict],
+) -> tuple[list[dict], int, Optional[dict]]:
+    """List-mode fetch over SpanTimelineIndex, newest day first.
+
+    A page ends at the first day DynamoDB could not finish: that day's
+    LastEvaluatedKey becomes the next_token, and because it carries span_date
+    the resumed request knows which day to pick up on and which days it has
+    already returned.
+    """
+    window_start, window_end = _resolve_window(start_iso, end_iso)
+    days = span_dates(window_start, window_end)
+    expr = _with_operation_filter(filter_expr, operation)
+
+    resume_key = None
+    if exclusive_start_key:
+        resume_day = _unwrap_ddb_value(exclusive_start_key.get(SPAN_TIMELINE_PARTITION_KEY))
+        if isinstance(resume_day, str) and resume_day:
+            days = [day for day in days if day <= resume_day]
+            resume_key = exclusive_start_key
+
+    items: list[dict] = []
+    scanned = 0
+    last_key: Optional[dict] = None
+    for position, day in enumerate(days):
+        page, page_scanned, page_last_key = query_span_timeline(
+            table, day, window_start, window_end, expr,
+            limit=limit, exclusive_start_key=resume_key if position == 0 else None,
+        )
+        items.extend(page)
+        scanned += page_scanned
+        if page_last_key:
+            last_key = page_last_key
+            break
+        if len(items) >= limit:
+            break
+    return items, scanned, last_key
+
+
+def _list_via_pk(
+    table,
+    operation: str,
+    start_iso: Optional[str],
+    end_iso: Optional[str],
+    filter_expr,
+    limit: int,
+    exclusive_start_key: Optional[dict],
+) -> tuple[list[dict], int, Optional[dict]]:
+    """Legacy list-mode fetch: the pre-migration pk enumeration, unchanged."""
+    if operation == "all":
+        # Merged partitions; pagination was never supported for this shape.
+        items: list[dict] = []
+        scanned = 0
+        for op in _ALL_OPERATION_PKS:
+            op_items, op_scanned, _ = query_by_pk(
+                table, f"OBSERVATORY#{op}", start_iso, end_iso, filter_expr,
+                limit=limit, exclusive_start_key=None,
+            )
+            items.extend(op_items)
+            scanned += op_scanned
+        return items, scanned, None
+
+    return query_by_pk(
+        table, f"OBSERVATORY#{operation}", start_iso, end_iso, filter_expr,
+        limit=limit, exclusive_start_key=exclusive_start_key,
+    )
+
+
+def _list_items(
+    table,
+    operation: str,
+    start_iso: Optional[str],
+    end_iso: Optional[str],
+    filter_expr,
+    limit: int,
+    exclusive_start_key: Optional[dict],
+) -> tuple[list[dict], int, Optional[dict]]:
+    """List-mode fetch: the index, falling back to pk only when it is absent."""
+    if exclusive_start_key and not exclusive_start_key.get(SPAN_TIMELINE_PARTITION_KEY):
+        # A cursor is only meaningful against the index that minted it.  One
+        # without span_date came from the legacy path, so resume it there
+        # rather than replaying a base-table key against the GSI.
+        return _list_via_pk(
+            table, operation, start_iso, end_iso, filter_expr, limit, exclusive_start_key
+        )
+
+    try:
+        return _list_via_index(
+            table, operation, start_iso, end_iso, filter_expr, limit, exclusive_start_key
+        )
+    except Exception as exc:  # noqa: BLE001 -- re-raised unless it is the index
+        if not _is_index_missing_error(exc):
+            raise
+        _warn_index_missing_once(exc)
+        return _list_via_pk(
+            table, operation, start_iso, end_iso, filter_expr, limit, exclusive_start_key
+        )
 
 
 def aggregate_items(items: list[dict], mode: str) -> list[dict]:
@@ -544,24 +942,12 @@ def handler(event: dict, context: object) -> dict:  # noqa: C901
                         or i.get("pk") == f"OBSERVATORY#{operation}"
                     )
                 ]
-        elif operation == "all":
-            # Query all known operation PKs and merge results.
-            # Pagination is not supported for merged queries.
-            for op in _ALL_OPERATION_PKS:
-                op_items, op_scanned, _ = query_by_pk(
-                    table, f"OBSERVATORY#{op}", start_iso, end_iso, filter_expr,
-                    limit=limit, exclusive_start_key=None
-                )
-                items.extend(_normalize_item(item) for item in op_items)
-                scanned += op_scanned
-            last_key = None  # merged queries; pagination not supported for all+merged
         else:
-            pk = f"OBSERVATORY#{operation}"
-            items, scanned, last_key = query_by_pk(
-                table, pk, start_iso, end_iso, filter_expr,
-                limit=limit, exclusive_start_key=exclusive_start_key
+            items, scanned, last_key = _list_items(
+                table, operation, start_iso, end_iso, filter_expr,
+                limit=limit, exclusive_start_key=exclusive_start_key,
             )
-            items = [_normalize_item(item) for item in items]
+            items = _dedupe([_normalize_item(item) for item in items])
     except Exception as exc:
         log.error("agent_metrics_query_error", extra={"err": str(exc)})
         return json_response(500, {"error": "Failed to query metrics"})
