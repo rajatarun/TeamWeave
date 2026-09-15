@@ -62,8 +62,15 @@ jobs:
       # here, before the build -- including the contract tests that compare
       # openapi/teamweave.yaml against the template's routes and the handlers'
       # validation sets.
+      # requirements-dev.txt, not `requirements.txt pytest`. The first version
+      # of this step installed the latter and the run failed in one second,
+      # before a single test executed: five test modules import boto3/botocore
+      # at module scope and one parses YAML, and none of those are in
+      # requirements.txt -- correctly, since the Lambda runtime provides boto3
+      # and shipping a second copy in the bundle is wasted space. A collection
+      # error is not a test failure, and it is easy to misread as one.
       - name: Install test dependencies
-        run: pip install -r requirements.txt pytest
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run tests
         run: python -m pytest tests/ -q
