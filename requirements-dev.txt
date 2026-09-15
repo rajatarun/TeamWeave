@@ -1,0 +1,15 @@
+# Test-only dependencies, kept out of requirements.txt so none of this is
+# packaged into a Lambda -- src/requirements.txt is what ships.
+#
+# boto3/botocore are deliberately NOT in src/requirements.txt: the Lambda
+# runtime provides them, and shipping a second copy in the bundle is wasted
+# space. But five test modules import them at module scope, so without them
+# here `pytest` cannot even collect, which is how the first CI run of the test
+# step failed -- in one second, before a single test executed.
+boto3>=1.34
+botocore>=1.34
+
+# tests/test_openapi_contract.py parses openapi/teamweave.yaml.
+PyYAML>=6.0
+
+pytest>=8.0
