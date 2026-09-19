@@ -170,6 +170,12 @@ def get_config() -> dict:
         "roles_key":        f"{prefix}/roles.json" if prefix else "roles.json",
         "depts_key":        f"{prefix}/departments.json" if prefix else "departments.json",
         "teams_prefix":     f"{prefix}/teams" if prefix else "teams",
+        # The schema files ship inside the Lambda bundle, so the catalogue is
+        # readable without an S3 round trip and cannot drift from the code that
+        # validates against it.
+        "schemas_dir":      os.environ.get(
+            "SCHEMAS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "schemas")
+        ),
         "foundation_model": os.environ.get("FOUNDATION_MODEL", "amazon.nova-micro-v1:0"),
         "region":           os.environ.get("AWS_REGION",       "us-east-1"),
         "gemini_lambda_arn": os.environ.get("GEMINI_LAMBDA_ARN", "").strip(),
@@ -744,23 +750,47 @@ def handle_agents(method, path_param, body, cfg) -> dict:
             return _server_error(e)
 
     if method == "POST":
-        missing = [f for f in ["name", "role_id", "goal_template", "schema_ref"] if not body.get(f)]
+        missing = [f for f in ["name", "role_id", "goal_template"] if not body.get(f)]
         if missing:
             return _bad_request(f"Missing required fields: {missing}")
         try:
             role_index = build_role_index(_load_roles(cfg))
             role_obj   = role_index.get(body["role_id"])
             if not role_obj:
-                return _bad_request(f"role_id '{body['role_id']}' not found.")
+                return _bad_request(
+                    f"role_id '{body['role_id']}' not found. "
+                    f"Valid values: {sorted(role_index.keys())}"
+                )
+
+            # Every role already declares the schema its output is validated
+            # against, so requiring the caller to repeat it asked them to
+            # re-derive something the role had already decided — and let them
+            # contradict it. Supplying it is now an override, not a duty.
+            schema_ref = (body.get("schema_ref") or "").strip() or role_obj.get("schema_ref", "")
+            if not schema_ref:
+                return _bad_request(
+                    f"No schema_ref given and role '{body['role_id']}' does not declare one."
+                )
+            known = schema_refs(cfg)
+            if known and schema_ref not in known:
+                # Previously any string was accepted here and the mistake only
+                # surfaced when a run failed output validation, far from the
+                # call that caused it.
+                return _bad_request(
+                    f"schema_ref '{schema_ref}' is not a known schema. "
+                    f"Valid values: {sorted(known)}"
+                )
+
             aid, alid = create_bedrock_agent(
                 client=bedrock, agent_id_slug=body.get("id", body["name"]),
                 agent_name=body["name"], goal_template=body["goal_template"],
-                schema_ref=body["schema_ref"], role_obj=role_obj,
+                schema_ref=schema_ref, role_obj=role_obj,
                 bedrock_role_arn=cfg["bedrock_role_arn"],
                 foundation_model=body.get("foundation_model", cfg["foundation_model"]),
             )
             return _created({"agentId": aid, "aliasId": alid,
-                             "name": sanitise_agent_name(body["name"])})
+                             "name": sanitise_agent_name(body["name"]),
+                             "schema_ref": schema_ref})
         except Exception as e:
             return _server_error(e)
 
@@ -1160,6 +1190,70 @@ def handle_departments(method, path_param, body, cfg) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Schemas
+#
+# `schema_ref` names the JSON Schema an agent's output is validated against.
+# Nothing served it, so a caller had to know the fourteen valid strings by
+# heart and a typo was only discovered when a run failed validation. The
+# catalogue below is the same set the worker loads, read from the bundle.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def list_schemas(cfg) -> list:
+    """Every schema an agent may be pointed at, newest-first by name."""
+    directory = cfg["schemas_dir"]
+    if not os.path.isdir(directory):
+        log.warning(f"schemas_dir not found: {directory}")
+        return []
+
+    out = []
+    for filename in sorted(os.listdir(directory)):
+        if not filename.endswith(".json"):
+            continue
+        ref = filename[: -len(".json")]
+        entry = {"schema_ref": ref, "title": ref, "required": [], "fields": []}
+        try:
+            with open(os.path.join(directory, filename), "r", encoding="utf-8") as fh:
+                doc = json.load(fh)
+            entry["title"] = doc.get("title") or ref
+            if doc.get("description"):
+                entry["description"] = doc["description"]
+            required = doc.get("required")
+            if isinstance(required, list):
+                entry["required"] = [f for f in required if isinstance(f, str)]
+            properties = doc.get("properties")
+            if isinstance(properties, dict):
+                # The field names are what makes a choice between two schemas
+                # meaningful; a list of bare ids does not.
+                entry["fields"] = sorted(properties.keys())
+        except Exception as e:
+            # A malformed file should not hide the other thirteen.
+            log.warning(f"could not read schema {filename}: {e}")
+            entry["error"] = "unreadable"
+        out.append(entry)
+    return out
+
+
+def schema_refs(cfg) -> set:
+    return {entry["schema_ref"] for entry in list_schemas(cfg)}
+
+
+def handle_schemas(method, path_param, body, cfg) -> dict:
+    if method != "GET":
+        return _method_not_allowed(method)
+
+    entries = list_schemas(cfg)
+    if path_param:
+        match = next((e for e in entries if e["schema_ref"] == path_param), None)
+        if not match:
+            return _not_found(
+                f"schema_ref '{path_param}' not found. "
+                f"Valid values: {sorted(e['schema_ref'] for e in entries)}"
+            )
+        return _ok(match)
+    return _ok({"schemas": entries, "count": len(entries)})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Router
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1168,6 +1262,7 @@ _ROUTES = {
     "teams":       handle_teams,
     "roles":       handle_roles,
     "departments": handle_departments,
+    "schemas":     handle_schemas,
 }
 
 def handler(event: dict, context) -> dict:

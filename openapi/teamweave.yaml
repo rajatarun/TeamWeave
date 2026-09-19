@@ -364,6 +364,32 @@ paths:
         "202": { $ref: "#/components/responses/RunAccepted" }
         "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
 
+  /schemas:
+    get:
+      tags: [provisioning]
+      operationId: listSchemas
+      description: >
+        The JSON Schemas an agent's `schema_ref` may name. Read straight from
+        the deployed bundle, so it is the set the worker actually validates
+        against. Synchronous, unlike the provisioning writes.
+      responses:
+        "200": { $ref: "#/components/responses/ProvisionRead" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+
+  /schemas/{schema_ref}:
+    parameters:
+      - name: schema_ref
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [provisioning]
+      operationId: getSchema
+      description: One schema, with its title and the fields it requires.
+      responses:
+        "200": { $ref: "#/components/responses/ProvisionRead" }
+        "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
+
   /agent/converse:
     post:
       tags: [provisioning]
