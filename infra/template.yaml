@@ -1058,6 +1058,22 @@ Resources:
               - method.request.path.dept_id:
                   Required: true
                   Caching: false
+        SchemasGetEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /schemas
+            Method: get
+        SchemaByRefGetEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /schemas/{schema_ref}
+            Method: get
+            RequestParameters:
+              - method.request.path.schema_ref:
+                  Required: true
+                  Caching: false
       Environment:
         Variables:
           CONFIG_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
