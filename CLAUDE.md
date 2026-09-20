@@ -193,7 +193,21 @@ so building the application inside a function leaves it nothing to serve and
 the runtime never boots — a failure that surfaces at the first invocation,
 long after the deploy reports success. The logic therefore lives in
 `src/agentcore/agent.py` (no SDK import) and `app.py` holds only the
-module-level `app` and the `@app.entrypoint` function. The zip is **flat**:
+module-level `app` and the `@app.entrypoint` function.
+
+**The artifact must be built for Linux ARM64.** AgentCore runtimes are ARM64
+and CI runs on x86-64, so `pip install --target` resolves the wrong wheels for
+anything compiled — `bedrock-agentcore` brings two, `pydantic_core` and
+`websockets.speedups`. Every gate passed on that artifact (template valid,
+cfn-lint clean, zip uploaded, entrypoint imported, CloudFormation accepted the
+resource) and the runtime then refused to start nine minutes later, rolling
+the stack back: *"Your artifact contains binary files that are incompatible
+with Linux ARM64."* The shipped tree is now resolved with
+`--platform manylinux2014_aarch64 --implementation cp --python-version 3.12
+--only-binary=:all:`, and `scripts/check_arm64_artifact.py` reads the ELF
+`e_machine` of every `.so` before the upload — the filename is a hint, the
+header is evidence. Because aarch64 wheels cannot be imported on the runner,
+the entrypoint boot check runs against a second, natively installed tree. The zip is **flat**:
 both files sit at its root, which is why `EntryPoint` is `app.py` and the
 import in `app.py` is `from agent import run_turn`. The packaging step builds
 that zip and imports it before uploading, and

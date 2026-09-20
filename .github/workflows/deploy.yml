@@ -250,13 +250,39 @@ jobs:
           # Flat at the zip root: the entrypoint is a file the runtime
           # imports, so app.py and agent.py sit beside their dependencies
           # rather than inside a package the runtime has no reason to know.
-          rm -rf .agentcore-build && mkdir -p .agentcore-build
+          #
+          # Two trees, because one cannot do both jobs. AgentCore runtimes are
+          # Linux ARM64 and this runner is x86-64, so the shipped tree must be
+          # resolved for aarch64 -- bedrock-agentcore pulls in pydantic_core
+          # and websockets.speedups, both compiled. A plain `pip install
+          # --target` here produced x86-64 wheels, and the runtime refused to
+          # start: "Your artifact contains binary files that are incompatible
+          # with Linux ARM64." But aarch64 wheels cannot be imported on this
+          # runner, so the boot check needs a native tree of its own.
+          rm -rf .agentcore-build .agentcore-check
+          mkdir -p .agentcore-build .agentcore-check
           cp src/agentcore/app.py src/agentcore/agent.py .agentcore-build/
-          pip install --quiet --target .agentcore-build bedrock-agentcore
-          # Prove the artifact imports and exposes the ASGI app before it is
-          # uploaded. A runtime that cannot boot is otherwise only discovered
-          # at the first invocation, long after the deploy reports success.
-          (cd .agentcore-build && python3 -c "import app; assert hasattr(app,'app'), 'entrypoint exposes no ASGI app'; assert callable(getattr(app,'invoke',None)), 'entrypoint has no invoke'; print('entrypoint imports and exposes app')")
+          cp src/agentcore/app.py src/agentcore/agent.py .agentcore-check/
+
+          # The tree that ships. --only-binary=:all: because with --platform
+          # pip cannot build from source anyway, and a silent sdist fallback
+          # would put this runner's architecture back in the zip.
+          pip install --quiet --target .agentcore-build \
+            --platform manylinux2014_aarch64 \
+            --implementation cp \
+            --python-version 3.12 \
+            --only-binary=:all: \
+            bedrock-agentcore
+          # Read the ELF header of every compiled extension rather than
+          # trusting the wheel's filename.
+          python3 scripts/check_arm64_artifact.py .agentcore-build --expect aarch64
+
+          # The tree that proves the entrypoint boots. A runtime that cannot
+          # start is otherwise only discovered at the first invocation, long
+          # after the deploy reports success.
+          pip install --quiet --target .agentcore-check bedrock-agentcore
+          (cd .agentcore-check && python3 -c "import app; assert hasattr(app,'app'), 'entrypoint exposes no ASGI app'; assert callable(getattr(app,'invoke',None)), 'entrypoint has no invoke'; print('entrypoint imports and exposes app')")
+
           (cd .agentcore-build && zip -qr ../agentcore-app.zip .)
           aws s3 cp agentcore-app.zip "s3://${CONFIG_BUCKET}/agentcore/app.zip" --region "${AWS_REGION}"
           echo "Uploaded agent code to s3://${CONFIG_BUCKET}/agentcore/app.zip"
