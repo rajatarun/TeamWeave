@@ -201,6 +201,19 @@ Parameters:
       ScreenWeave's MCP endpoint (https://.../mcp), published by that stack.
       Empty means no gateway target is created: a gateway with nothing behind
       it is infrastructure for nothing.
+  AgentCoreRuntimeName:
+    Type: String
+    Default: "teamweave_agent"
+    # CreateAgentRuntime's agentRuntimeName must match
+    # [a-zA-Z][a-zA-Z0-9_]{0,47} -- letters, digits and underscores only. It
+    # was built from ${AWS::StackName}, and this stack is tarun-content-team,
+    # so the name could never have been created: every deploy that reached
+    # this resource failed on it and rolled the whole update back. Same
+    # constraint, same mistake and same fix as AgentCoreMemoryName below; the
+    # difference is that this one is now checked by a test that walks every
+    # AgentCore name property rather than one written per property.
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9_]{0,47}"
+    Description: Name of the AgentCore runtime. Letters, digits and underscores only.
   AgentCoreMemoryName:
     Type: String
     Default: "teamweave_session_memory"
@@ -1830,7 +1843,7 @@ Resources:
     Type: AWS::BedrockAgentCore::Runtime
     Condition: AgentCoreEnabled
     Properties:
-      AgentRuntimeName: !Sub "${AWS::StackName}_teamweave_agent"
+      AgentRuntimeName: !Ref AgentCoreRuntimeName
       Description: Hosts src/agentcore/app.py, the program one agent turn runs in.
       RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
       AgentRuntimeArtifact:
