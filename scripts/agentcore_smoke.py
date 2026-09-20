@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -31,6 +32,29 @@ _CANNOT_VERIFY_CODES = {"AccessDeniedException", "UnrecognizedClientException", 
 EXIT_OK = 0
 EXIT_BROKEN = 1
 EXIT_CANNOT_VERIFY = 0
+
+
+def announce(level: str, message: str) -> None:
+    """Say what happened where both GitHub and a human will see it.
+
+    Workflow commands (``::warning::``) are parsed from **stdout** only. These
+    were written to stderr, so the one outcome that most needs to be noticed --
+    the check silently not running because the CI role cannot invoke -- would
+    have produced no annotation at all, in a step that exits 0. A passing step
+    with no visible result is precisely the failure this script exists to stop.
+
+    The step summary is written too, so the run page states the outcome without
+    anyone paging through the log to find it.
+    """
+    print(f"::{level}::{message}", flush=True)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        try:
+            with open(summary, "a", encoding="utf-8") as handle:
+                handle.write(f"**AgentCore smoke test — {level}:** {message}\n\n")
+        except OSError:
+            # Never let reporting be the thing that fails the deploy.
+            pass
 
 
 def cannot_verify_reason(exc: Exception) -> str:
@@ -97,7 +121,7 @@ def main() -> int:
             config=Config(read_timeout=300, connect_timeout=30, retries={"max_attempts": 0}),
         )
     except UnknownServiceError as exc:
-        print(f"::warning::AgentCore runtime NOT VERIFIED -- {cannot_verify_reason(exc)}", file=sys.stderr)
+        announce("warning", f"AgentCore runtime NOT VERIFIED -- {cannot_verify_reason(exc)}")
         return EXIT_CANNOT_VERIFY
 
     last_error: Exception | None = None
@@ -109,7 +133,7 @@ def main() -> int:
             reason = cannot_verify_reason(exc)
             if reason:
                 # Retrying will not grant a permission. Say so once and stop.
-                print(f"::warning::AgentCore runtime NOT VERIFIED -- {reason}", file=sys.stderr)
+                announce("warning", f"AgentCore runtime NOT VERIFIED -- {reason}")
                 return EXIT_CANNOT_VERIFY
             last_error = exc
             print(f"attempt {attempt}/{args.attempts} failed: {exc}", file=sys.stderr)
@@ -121,19 +145,21 @@ def main() -> int:
         # could not read. That is a 200, so it has to be checked explicitly or
         # a runtime that rejects every request passes this test.
         if body.get("error"):
-            print(f"runtime answered with an error: {body['error']}", file=sys.stderr)
+            announce("error", f"AgentCore runtime answered with an error: {body['error']}")
             return EXIT_BROKEN
         result = body.get("result")
         if not isinstance(result, str) or not result.strip():
-            print(f"runtime answered with no result: {json.dumps(body)[:400]}", file=sys.stderr)
+            announce("error", f"AgentCore runtime answered with no result: {json.dumps(body)[:400]}")
             return EXIT_BROKEN
 
-        print(f"AgentCore runtime served a turn on attempt {attempt}.")
-        print(f"  modelId: {body.get('modelId', '<unset>')}")
-        print(f"  result:  {result[:200]}")
+        announce(
+            "notice",
+            f"AgentCore runtime served a turn on attempt {attempt} "
+            f"(model {body.get('modelId', '<unset>')}): {result[:160]}",
+        )
         return EXIT_OK
 
-    print(f"AgentCore runtime never served a turn: {last_error}", file=sys.stderr)
+    announce("error", f"AgentCore runtime never served a turn: {last_error}")
     return EXIT_BROKEN
 
 
