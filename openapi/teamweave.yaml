@@ -394,23 +394,49 @@ paths:
     post:
       tags: [provisioning]
       operationId: converse
-      summary: One synchronous turn against a Bedrock agent alias
+      summary: One synchronous turn against an agent, on whichever substrate is deployed
       description: |
-        The only synchronous Bedrock call on this API. `session_id` is what
+        The only synchronous agent call on this API. `session_id` is what
         carries conversational state — reusing one continues a conversation,
         a fresh one starts over.
+
+        **Only `session_id` and `message` are required.** Which agent
+        coordinates are needed depends on the stack's `AGENT_RUNTIME`:
+
+        - `agentcore` (the default): nothing else. One runtime serves every
+          agent and its ARN is a stack-level value, so the call works with no
+          agent coordinates at all. Send `runtime_arn` (and optionally
+          `qualifier`) only for an agent that has its own runtime.
+        - `classic`: `agent_id` and `alias_id`, as before.
+
+        Sending coordinates the deployed substrate does not use is harmless —
+        they are carried and ignored. Omitting ones it *does* need is a 400
+        whose `error` names both ways to supply them and whose `runtime` says
+        which substrate asked.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [agent_id, alias_id, session_id, message]
+              required: [session_id, message]
               properties:
-                agent_id: { type: string }
-                alias_id: { type: string }
                 session_id: { type: string }
                 message: { type: string }
+                agent_id:
+                  type: string
+                  description: Bedrock Agents Classic agent id. Required when `AGENT_RUNTIME=classic`.
+                alias_id:
+                  type: string
+                  description: Bedrock Agents Classic alias id. Required when `AGENT_RUNTIME=classic`.
+                runtime_arn:
+                  type: string
+                  description: |
+                    AgentCore runtime ARN for an agent with its own runtime.
+                    Omit to use the stack runtime (`AGENTCORE_RUNTIME_ARN`).
+                qualifier:
+                  type: string
+                  description: Optional AgentCore runtime qualifier (endpoint/version).
       responses:
         "200":
           description: The agent's reply
@@ -418,14 +444,25 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [agent_id, alias_id, session_id, response]
+                required: [agent_id, alias_id, runtime, session_id, response]
                 properties:
-                  agent_id: { type: string }
-                  alias_id: { type: string }
+                  agent_id:
+                    type: string
+                    description: Echoed back; empty on AgentCore, where agents have no Classic id.
+                  alias_id:
+                    type: string
+                    description: Echoed back; empty on AgentCore.
+                  runtime:
+                    type: string
+                    enum: [agentcore, classic]
+                    description: Which substrate answered. A console should read this rather than infer it.
                   session_id: { type: string }
                   response: { type: string }
         "400":
-          description: 'Missing fields; the error names them: "Missing required fields: a, b"'
+          description: |
+            Missing `session_id`/`message` ("Missing required fields: a, b"), or
+            agent coordinates the deployed substrate needs. The body carries
+            `runtime` alongside `error`.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
