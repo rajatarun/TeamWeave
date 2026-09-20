@@ -494,32 +494,14 @@ jobs:
           echo "All teams provisioned."
       - name: Dump CloudFormation events on failure
         if: failure()
-        # Why this filters instead of dumping. The raw form printed 50 events
-        # per stack with their full ResourceProperties -- thousands of lines of
-        # JSON, every one of them a status the deploy passed through rather
-        # than the one it died on. The actual error scrolled out of view, and
-        # reading a failed run meant paging through the properties of Lambdas
-        # that updated fine. Only *_FAILED events carry a ResourceStatusReason,
-        # and that reason is the whole answer.
+        # Scoped to this run. Filtered only by status, the dump printed the
+        # last three deploys' rollbacks into a log whose own deploy had
+        # succeeded -- which reads exactly like the current run failing and
+        # sends you to debug something already fixed. "No resource failed in
+        # this run" is the useful answer: the deploy was fine, look at the
+        # rest of the job.
         run: |
-          dump_failures() {
-            local stack="$1"
-            local status
-            status=$(aws cloudformation describe-stacks \
-              --stack-name "${stack}" --region "${AWS_REGION}" \
-              --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "NOT_FOUND")
-            echo "::group::${stack} (${status})"
-            if [ "${status}" = "NOT_FOUND" ]; then
-              echo "stack does not exist"
-            else
-              aws cloudformation describe-stack-events \
-                --stack-name "${stack}" --region "${AWS_REGION}" --max-items 200 \
-                --query "StackEvents[?contains(ResourceStatus, 'FAILED')].[Timestamp, LogicalResourceId, ResourceType, ResourceStatus, ResourceStatusReason]" \
-                --output table 2>/dev/null || echo "could not read events"
-            fi
-            echo "::endgroup::"
-          }
-          echo "Deployment failed. Failed resources, newest first:"
-          dump_failures "${STACK_NAME}"
-          dump_failures "${SHARED_STACK_NAME}"
-          dump_failures "${BEDROCK_AGENTS_STACK_NAME}"
+          python3 scripts/dump_stack_failures.py \
+            "${STACK_NAME}" "${SHARED_STACK_NAME}" "${BEDROCK_AGENTS_STACK_NAME}" \
+            --since "${{ github.run_started_at }}" \
+            --region "${AWS_REGION}"

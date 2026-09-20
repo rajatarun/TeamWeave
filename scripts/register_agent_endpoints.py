@@ -35,7 +35,7 @@ import sys
 from typing import Any, Dict, List, Tuple
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 # EndpointName: [a-zA-Z][a-zA-Z0-9_]{0,47} -- letters, digits, underscores,
 # must start with a letter, 48 characters. The same alphabet that made
@@ -45,6 +45,24 @@ ENDPOINT_NAME_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9_]{0,47}\Z")
 ENDPOINT_NAME_MAX = 48
 
 RUNTIME_KEYS_OWNED_HERE = ("runtimeArn", "qualifier")
+
+
+def announce(level: str, message: str) -> None:
+    """Report where GitHub will surface it.
+
+    Workflow commands are parsed from stdout, so a reason written to stderr is
+    invisible on the run page and readable only by paging the job log -- which
+    is exactly how this step's first real failure cost a whole cycle to
+    diagnose.
+    """
+    print(f"::{level}::{message}", flush=True)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        try:
+            with open(summary, "a", encoding="utf-8") as handle:
+                handle.write(f"**Agent registry — {level}:** {message}\n\n")
+        except OSError:
+            pass
 
 
 def endpoint_name(agent_id: str) -> str:
@@ -222,35 +240,39 @@ def main() -> int:
     if not keys:
         # Registering nothing is not success. A wrong prefix looks exactly
         # like a platform with no teams, and would pass quietly.
-        print(f"No team.json found under s3://{args.bucket}/{args.prefix}/", file=sys.stderr)
+        announce("error", f"No team.json found under s3://{args.bucket}/{args.prefix}/")
         return 1
 
     teams = load_teams(s3, args.bucket, keys)
     names, problems = plan_endpoints(teams)
     if problems:
-        print("Cannot register agents:", file=sys.stderr)
+        announce("error", "Cannot register agents: " + "; ".join(problems)[:600])
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         return 1
     if not names:
-        print("Team configs contain no agents to register.", file=sys.stderr)
+        announce("error", "Team configs contain no agents to register.")
         return 1
 
     print(f"Registering {len(names)} agent(s) on runtime {args.runtime_id} v{args.runtime_version}")
 
-    client = boto3.client("bedrock-agentcore-control", region_name=args.region)
-    existing = {} if args.dry_run else existing_endpoints(client, args.runtime_id)
+    try:
+        client = boto3.client("bedrock-agentcore-control", region_name=args.region)
+        existing = {} if args.dry_run else existing_endpoints(client, args.runtime_id)
 
-    for agent_id in sorted(names):
-        name = names[agent_id]
-        if args.dry_run:
-            print(f"  {agent_id} -> {name} (dry run)")
-            continue
-        action = ensure_endpoint(
-            client, args.runtime_id, name, args.runtime_version,
-            f"TeamWeave agent {agent_id}", existing,
-        )
-        print(f"  {agent_id} -> {name}: {action}")
+        for agent_id in sorted(names):
+            name = names[agent_id]
+            if args.dry_run:
+                print(f"  {agent_id} -> {name} (dry run)")
+                continue
+            action = ensure_endpoint(
+                client, args.runtime_id, name, args.runtime_version,
+                f"TeamWeave agent {agent_id}", existing,
+            )
+            print(f"  {agent_id} -> {name}: {action}")
+    except (ClientError, BotoCoreError) as exc:
+        announce("error", f"AgentCore registry call failed: {exc}")
+        return 1
 
     written = 0
     for key, team in teams.items():
@@ -266,7 +288,11 @@ def main() -> int:
             )
         print(f"  {key}: recorded registry identity for {changed} agent(s)")
 
-    print(f"Registered {len(names)} agent(s); updated {written} agent record(s).")
+    announce(
+        "notice",
+        f"Registered {len(names)} agent(s) on runtime {args.runtime_id} "
+        f"v{args.runtime_version}; updated {written} agent record(s).",
+    )
     return 0
 
 
