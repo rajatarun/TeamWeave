@@ -1555,6 +1555,32 @@ Resources:
                 - !Sub "${TeamConfigBucket.Arn}/*"
                 - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}/*"
 
+  SamAssumeRoleAgentCoreRegistryPermissions:
+    Type: AWS::IAM::RolePolicy
+    Condition: HasSamAssumeRoleName
+    Properties:
+      RoleName: !Ref SamAssumeRoleName
+      PolicyName: !Sub "${AWS::StackName}-agentcore-registry"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # The deploy registers one endpoint per TeamWeave agent against the
+          # shared runtime, so it needs create/update/list on endpoints and
+          # read on the runtime itself. Delete is deliberately absent: the
+          # registry step never removes an endpoint, because an agent dropped
+          # from a team config may still be addressed by a run in flight.
+          - Sid: AllowAgentEndpointRegistry
+            Effect: Allow
+            Action:
+              - bedrock-agentcore:CreateAgentRuntimeEndpoint
+              - bedrock-agentcore:UpdateAgentRuntimeEndpoint
+              - bedrock-agentcore:GetAgentRuntimeEndpoint
+              - bedrock-agentcore:ListAgentRuntimeEndpoints
+              - bedrock-agentcore:GetAgentRuntime
+            Resource:
+              - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*"
+              - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*/runtime-endpoint/*"
+
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -2024,6 +2050,20 @@ Outputs:
     Condition: AgentCoreEnabled
     Description: The runtime AGENT_RUNTIME=agentcore invokes.
     Value: !GetAtt AgentCoreRuntime.AgentRuntimeArn
+  AgentCoreRuntimeId:
+    Condition: AgentCoreEnabled
+    # CreateAgentRuntimeEndpoint takes agentRuntimeId, not the ARN. Publishing
+    # it keeps the registry step from parsing an ARN to recover a field the
+    # stack already knows.
+    Description: Runtime id the agent endpoints are created against.
+    Value: !GetAtt AgentCoreRuntime.AgentRuntimeId
+  AgentCoreRuntimeVersion:
+    Condition: AgentCoreEnabled
+    # Every endpoint pins a version. Without this an endpoint created today
+    # keeps serving today's artifact after the next deploy, and the registry
+    # would drift from the runtime silently.
+    Description: Runtime version the agent endpoints are pinned to.
+    Value: !GetAtt AgentCoreRuntime.AgentRuntimeVersion
   AgentCoreMemoryId:
     Condition: AgentCoreEnabled
     Description: Session memory for agents on AgentCore.

@@ -367,6 +367,42 @@ jobs:
             --prefix "${TEAM_CONFIG_PREFIX}" \
             --region "${AWS_REGION}"
 
+      - name: Register agents in the AgentCore registry
+        # After the config sync, because it writes each agent's qualifier back
+        # into the same S3 object the sync merges -- running it first would
+        # hand the sync a runtime identity it then had to preserve, instead of
+        # one it simply carries.
+        if: env.ENABLE_AGENTCORE == 'true'
+        run: |
+          # One query per output. A single multi-key filter returns values in
+          # the stack's own output order, not the order they are read into, so
+          # the runtime id and the bucket can silently swap places.
+          stack_output() {
+            aws cloudformation describe-stacks \
+              --stack-name "${STACK_NAME}" \
+              --region "${AWS_REGION}" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" \
+              --output text
+          }
+          RUNTIME_ID=$(stack_output AgentCoreRuntimeId)
+          RUNTIME_VERSION=$(stack_output AgentCoreRuntimeVersion)
+          RUNTIME_ARN=$(stack_output AgentCoreRuntimeArn)
+          CONFIG_BUCKET=$(stack_output ConfigBucket)
+          for name in RUNTIME_ID RUNTIME_VERSION RUNTIME_ARN CONFIG_BUCKET; do
+            value="${!name}"
+            if [ -z "${value}" ] || [ "${value}" = "None" ]; then
+              echo "The stack published no value for ${name} -- cannot register agents." >&2
+              exit 1
+            fi
+          done
+          python3 scripts/register_agent_endpoints.py \
+            --runtime-id "${RUNTIME_ID}" \
+            --runtime-arn "${RUNTIME_ARN}" \
+            --runtime-version "${RUNTIME_VERSION}" \
+            --bucket "${CONFIG_BUCKET}" \
+            --prefix "${TEAM_CONFIG_PREFIX}" \
+            --region "${AWS_REGION}"
+
       - name: Sync roles and departments to S3
         run: |
           CONFIG_BUCKET=$(aws cloudformation describe-stacks \
