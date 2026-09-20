@@ -186,6 +186,21 @@ Parameters:
     Description: >
       Model the agent program falls back to when a runtime does not override
       AGENT_MODEL_ID, mirroring a Classic agent's own foundation model.
+  AgentCoreGatewayName:
+    Type: String
+    Default: "teamweave-tools"
+    AllowedPattern: "^([0-9a-zA-Z][-]?){1,48}$"
+    Description: >
+      Gateway name. Unlike Memory, this pattern does allow hyphens -- the two
+      services differ, which is why each default is checked against its own
+      published pattern rather than assumed.
+  ScreenWeaveMcpEndpoint:
+    Type: String
+    Default: ""
+    Description: >
+      ScreenWeave's MCP endpoint (https://.../mcp), published by that stack.
+      Empty means no gateway target is created: a gateway with nothing behind
+      it is infrastructure for nothing.
   AgentCoreMemoryName:
     Type: String
     Default: "teamweave_session_memory"
@@ -214,6 +229,9 @@ Conditions:
   HasSamAssumeRoleName: !Not [!Equals [!Ref SamAssumeRoleName, ""]]
   DeployWAF: !Equals [!Ref EnableWAF, "true"]
   AgentCoreEnabled: !Equals [!Ref EnableAgentCore, "true"]
+  AgentCoreGatewayTargetEnabled: !And
+    - !Condition AgentCoreEnabled
+    - !Not [!Equals [!Ref ScreenWeaveMcpEndpoint, ""]]
   HasSiweAuthorizer: !Not [!Equals [!Ref SiweAuthorizerFunctionArn, ""]]
   HasDPOBucket: !Not [!Equals [!Ref DPOTrainingBucketName, ""]]
 
@@ -1829,6 +1847,64 @@ Resources:
         AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
 
 
+  # ── AgentCore Gateway ──────────────────────────────────────────────────────
+  # Managed tool access for agents. AWS_IAM rather than CUSTOM_JWT: the
+  # authorizer types include one that needs no external identity provider, and
+  # introducing an IdP to reach a service the platform already owns would be
+  # ceremony. The target is ScreenWeave, which already speaks MCP -- that is
+  # the composability the platform was built for.
+
+  AgentCoreGatewayRole:
+    Type: AWS::IAM::Role
+    Condition: AgentCoreEnabled
+    Properties:
+      Description: Role the AgentCore Gateway assumes to reach its targets.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"
+      Policies:
+        - PolicyName: gateway-logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*"
+
+  AgentCoreGateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Condition: AgentCoreEnabled
+    Properties:
+      Name: !Ref AgentCoreGatewayName
+      Description: Tool access for TeamWeave agents running on AgentCore.
+      RoleArn: !GetAtt AgentCoreGatewayRole.Arn
+      AuthorizerType: AWS_IAM
+
+  ScreenWeaveGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Condition: AgentCoreGatewayTargetEnabled
+    Properties:
+      Name: screenweave
+      Description: ScreenWeave's MCP server -- crawl, visual QA and showcase video.
+      GatewayIdentifier: !GetAtt AgentCoreGateway.GatewayIdentifier
+      TargetConfiguration:
+        Mcp:
+          McpServer:
+            Endpoint: !Ref ScreenWeaveMcpEndpoint
+
+
 Outputs:
   HttpApiUrl:
     Value: !Sub "https://${TeamWeaveApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
@@ -1938,3 +2014,12 @@ Outputs:
     Condition: AgentCoreEnabled
     Description: Execution role assumed by agents on AgentCore.
     Value: !GetAtt AgentCoreRuntimeRole.Arn
+
+  AgentCoreGatewayId:
+    Condition: AgentCoreEnabled
+    Description: Gateway through which agents reach external MCP tools.
+    Value: !GetAtt AgentCoreGateway.GatewayIdentifier
+  AgentCoreGatewayUrl:
+    Condition: AgentCoreEnabled
+    Description: MCP endpoint agents call instead of each tool directly.
+    Value: !GetAtt AgentCoreGateway.GatewayUrl
