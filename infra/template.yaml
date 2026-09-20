@@ -1380,6 +1380,16 @@ Resources:
           A2A_AGENT_VERSION: !Ref A2AAgentVersion
           A2A_PROVIDER: !Ref A2AProvider
           A2A_DOCUMENTATION_URL: !Ref A2ADocumentationUrl
+          # The card is generated from the live team configs, so without the
+          # bucket it advertises an agent with no skills -- which is what it
+          # did: the deployed card served "skills": [] while twelve agents
+          # were registered. A client discovering it learned TeamWeave can do
+          # nothing.
+          CONFIG_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+          CONFIG_PREFIX: !Ref TeamConfigPrefix
+          # message:send starts the same execution POST /team/task starts.
+          # Without this the handler returns 500 on every call.
+          STATE_MACHINE_ARN: !Ref StateMachine
       Events:
         # The well-known URI every A2A client fetches first.
         AgentCardEvent:

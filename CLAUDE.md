@@ -274,7 +274,15 @@ a skill id here, `gen_ai.agent.id` on the span. Adding an agent costs a line of
 config.
 
 `GET /.well-known/agent-card.json` is generated from the live team configs in
-S3, so a skill cannot advertise an agent that no longer exists. `src/orchestrator/a2a.py`
+S3, so a skill cannot advertise an agent that no longer exists — which also
+means the function needs `CONFIG_BUCKET`. It shipped without one, and the
+deployed card served `"skills": []` while twelve agents were registered; a
+client discovering TeamWeave learned it could do nothing. `STATE_MACHINE_ARN`
+was missing too, so `message:send` would have returned 500 on every call. The
+stack was valid, cfn-lint clean, the suite green and the deploy successful.
+`tests/test_function_environment.py` now reads each handler's module for the
+variables it takes from the environment and fails when the template does not
+supply one, unless the name is allowlisted there with a reason. `src/orchestrator/a2a.py`
 is pure and holds the shapes; `a2a_handler.py` only translates, because
 `message:send` starts the same Step Functions execution `POST /team/task`
 starts and `tasks/{id}` reads the same one the status handler reads — an A2A
@@ -356,7 +364,7 @@ Every run is async: `POST /team/task` returns a `run_id`, then poll `GET /team/t
 | `CONTEXTWEAVE_URL` | Base URL of the ContextWeave knowledge layer (required by `contextweave` RAG mode) |
 | `CONTEXTWEAVE_API_KEY` | Optional `x-api-key` for ContextWeave (not a template parameter — inject via Secrets Manager) |
 | `CONTEXTWEAVE_FEEDBACK_ON_VALID_OUTPUT` | `1` to up-vote the grounding answer after a schema-valid run (default off) |
-| `TEAM_CONFIG_PREFIX` | S3 prefix for team configs (default: `teams`) |
+| `CONFIG_PREFIX` | S3 prefix for team configs (default: `teams`). The deploy workflow's own shell variable is `TEAM_CONFIG_PREFIX`; both come from the `TeamConfigPrefix` parameter, but this is the name the Lambdas read. |
 | `VECTOR_DB_TABLE` | pgvector table name (default: `rag_chunks`) |
 | `VPC_ID` | VPC for Lambda networking |
 | `LAMBDA_SUBNET_IDS` | Comma-separated private subnet IDs |
