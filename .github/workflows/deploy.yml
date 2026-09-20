@@ -92,6 +92,17 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -q
 
+      # Informational on purpose. The hard gate is in tests/ — offline and
+      # deterministic. This one resolves hostnames, and it reads a DNS outage
+      # as "no service has dual-stack", so failing the deploy on it would turn
+      # a network blip into a red build. What it is here for is the direction
+      # tests cannot see: a pin that has become unnecessary because AWS has
+      # since published a dual-stack endpoint, which is traffic still paying
+      # for NAT that no longer has to.
+      - name: Check IPv4 pins against what AWS serves today
+        continue-on-error: true
+        run: python scripts/check_dualstack_pins.py --region "${AWS_REGION:-us-east-1}"
+
       - name: SAM Build
         run: |
           cd infra
