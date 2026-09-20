@@ -120,11 +120,22 @@ jobs:
 
           # Discover the VPC's actual associated IPv6 CIDR from AWS — source of truth.
           # This avoids hardcoding a CIDR that may differ from what VpcIpv6CidrBlock assigned.
+          #
+          # The state is at Ipv6CidrBlockState.State. There is no top-level
+          # State on a VpcIpv6CidrBlockAssociation, so `[?State==...]` filters
+          # every element away and the whole expression yields None — quietly,
+          # because a JMESPath that matches nothing is not an error. That is
+          # what this function did, on both passes of the two-pass deploy, so
+          # VpcIpv6Block was never passed, the Lambda subnets never got their
+          # /64, and DualStackEnabled reported false while every function
+          # asked for Ipv6AllowedForDualStack. All egress went out the NAT
+          # instance. tests/test_ipv6_discovery.py runs this query against a
+          # response built from botocore's own EC2 service model.
           _discover_ipv6() {
             aws ec2 describe-vpcs \
               --vpc-ids "${VPC_ID}" \
               --region "${AWS_REGION}" \
-              --query 'Vpcs[0].Ipv6CidrBlockAssociationSet[?State==`associated`] | [0].Ipv6CidrBlock' \
+              --query 'Vpcs[0].Ipv6CidrBlockAssociationSet[?Ipv6CidrBlockState.State==`associated`] | [0].Ipv6CidrBlock' \
               --output text 2>/dev/null || echo ""
           }
           EFFECTIVE_IPV6=$(_discover_ipv6)
