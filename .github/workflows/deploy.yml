@@ -26,6 +26,13 @@ env:
   INTERNET_GATEWAY_ID: ""
   LAMBDA_SUBNET_CIDR_AZ1: "172.31.96.0/24"
   LAMBDA_SUBNET_CIDR_AZ2: "172.31.97.0/24"
+# One deploy at a time. Three pushes in quick succession ran three deploys
+# concurrently against a single CloudFormation stack and a single provisioning
+# Lambda; queueing is what that should have done.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -221,6 +228,27 @@ jobs:
           fi
           echo "SIWE_AUTHORIZER_FUNCTION_ARN=${SIWE_AUTHORIZER_FUNCTION_ARN}" >> $GITHUB_ENV
           echo "Fetched SIWE authorizer ARN: ${SIWE_AUTHORIZER_FUNCTION_ARN}"
+
+      - name: Package the AgentCore agent
+        run: |
+          CONFIG_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='ConfigBucket'].OutputValue" \
+            --output text 2>/dev/null || true)
+          if [ -z "$CONFIG_BUCKET" ] || [ "$CONFIG_BUCKET" = "None" ]; then
+            echo "Config bucket not resolvable yet; skipping (first deploy)."
+            exit 0
+          fi
+          # Kept current on every deploy even while EnableAgentCore is false,
+          # so turning the parameter on does not also require a code push.
+          rm -rf .agentcore-build && mkdir -p .agentcore-build/src/agentcore
+          cp src/agentcore/*.py .agentcore-build/src/agentcore/
+          touch .agentcore-build/src/__init__.py
+          pip install --quiet --target .agentcore-build bedrock-agentcore
+          (cd .agentcore-build && zip -qr ../agentcore-app.zip .)
+          aws s3 cp agentcore-app.zip "s3://${CONFIG_BUCKET}/agentcore/app.zip" --region "${AWS_REGION}"
+          echo "Uploaded agent code to s3://${CONFIG_BUCKET}/agentcore/app.zip"
 
       - name: SAM Deploy
         run: |

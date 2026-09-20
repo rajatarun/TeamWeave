@@ -13,3 +13,7 @@ botocore>=1.34
 PyYAML>=6.0
 
 pytest>=8.0
+# Ships the published CloudFormation resource schemas, which
+# tests/test_agentcore_infra.py checks the template against. Without it that
+# test skips, and a skipped test in CI is not a test.
+cfn-lint
