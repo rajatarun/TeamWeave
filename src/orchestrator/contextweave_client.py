@@ -44,6 +44,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from . import a2a_discovery
 from .logger import get_logger
 
 log = get_logger("contextweave_client")
@@ -61,7 +62,26 @@ _MAX_RETRIES = 2
 
 
 def base_url() -> str:
-    return os.environ.get("CONTEXTWEAVE_URL", "").strip().rstrip("/")
+    """Where ContextWeave actually answers.
+
+    CONTEXTWEAVE_URL is the seed -- discovery needs a first address -- but the
+    serving URL now comes from ContextWeave's own A2A Agent Card rather than
+    being assumed to equal the seed. Every path below used to be a constant in
+    *this* repository, so a route moving in ContextWeave surfaced here as a
+    404 the RAG layer degraded past in silence: the run simply lost its
+    grounding and nothing said so.
+
+    Discovery is opt-out (A2A_DISCOVERY=0) and never fatal: a sibling that
+    serves no card falls back to the seed, which is exactly the old behaviour.
+    """
+    seed = os.environ.get("CONTEXTWEAVE_URL", "").strip().rstrip("/")
+    if not seed or os.environ.get("A2A_DISCOVERY", "1").strip() == "0":
+        return seed
+    try:
+        return a2a_discovery.resolve_base_url(seed)
+    except Exception as exc:  # noqa: BLE001 - discovery must never break a run
+        log.warning("contextweave_discovery_failed", extra={"err": str(exc)[:200]})
+        return seed
 
 
 def is_configured() -> bool:
