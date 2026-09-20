@@ -287,33 +287,69 @@ jobs:
       - name: Provision team agents
         env:
           # Provisioning walks every team and creates any missing Bedrock
-          # agents, which takes longer than the CLI's 60s default read
-          # timeout. On timeout botocore retries the invoke, so a single step
-          # fired up to three concurrent 15-minute provisioning runs racing to
-          # create the same agents -- and then failed CI anyway. One attempt,
-          # and wait as long as the function is allowed to run.
+          # agents. It takes minutes, so it is not something to hold an HTTP
+          # connection open for: a 60s CLI read timeout made botocore retry
+          # and fire three concurrent provisioning runs, and simply raising
+          # the timeout then hit "Connection was closed before we received a
+          # valid response" at ~263s when an intermediary dropped the idle
+          # socket. Both are the same mistake -- a long job invoked
+          # synchronously. So: fire it asynchronously and poll for the result,
+          # the way every other long operation on this platform works.
           AWS_MAX_ATTEMPTS: "1"
+          POLL_TIMEOUT_SECONDS: "840"
+          POLL_INTERVAL_SECONDS: "20"
         run: |
           PROVISION_FUNCTION_ARN=$(aws cloudformation describe-stacks \
             --stack-name "${STACK_NAME}" \
             --region "${AWS_REGION}" \
             --query "Stacks[0].Outputs[?OutputKey=='ProvisionTeamFunctionArn'].OutputValue" \
             --output text)
-          echo "Invoking ProvisionTeamFunction: ${PROVISION_FUNCTION_ARN}"
+
+          echo "Invoking ProvisionTeamFunction asynchronously: ${PROVISION_FUNCTION_ARN}"
           aws lambda invoke \
             --function-name "${PROVISION_FUNCTION_ARN}" \
             --region "${AWS_REGION}" \
-            --cli-read-timeout 900 \
-            --cli-connect-timeout 60 \
+            --invocation-type Event \
             --cli-binary-format raw-in-base64-out \
             --payload '{"httpMethod":"POST","path":"/teams","headers":{},"body":"{}","queryStringParameters":null}' \
-            provision_response.json
-          cat provision_response.json
-          STATUS=$(python3 -c "import json; d=json.load(open('provision_response.json')); print(d.get('statusCode', 200))")
-          if [ "$STATUS" != "200" ]; then
-            echo "Provision failed with HTTP status $STATUS"
-            exit 1
-          fi
+            /dev/null
+
+          # GET /teams recomputes `provisioned` per team from the config in
+          # S3, which provisioning writes back as it goes, so it is a real
+          # completion signal rather than a guess about elapsed time.
+          poll_teams() {
+            aws lambda invoke \
+              --function-name "${PROVISION_FUNCTION_ARN}" \
+              --region "${AWS_REGION}" \
+              --cli-read-timeout 60 \
+              --cli-binary-format raw-in-base64-out \
+              --payload '{"httpMethod":"GET","path":"/teams","headers":{},"body":null,"queryStringParameters":null}' \
+              teams_response.json >/dev/null
+          }
+
+          deadline=$(( $(date +%s) + POLL_TIMEOUT_SECONDS ))
+          while :; do
+            if poll_teams; then
+              python3 - <<'PY' && break
+          import json, sys
+          body = json.load(open("teams_response.json")).get("body")
+          teams = json.loads(body).get("teams", []) if body else []
+          pending = [t["name"] for t in teams if not t.get("provisioned")]
+          print(f"provisioned {len(teams) - len(pending)}/{len(teams)}"
+                + (f"; waiting on {pending}" if pending else ""))
+          sys.exit(1 if pending else 0)
+          PY
+            else
+              echo "poll failed; retrying"
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "Provisioning did not finish within ${POLL_TIMEOUT_SECONDS}s."
+              cat teams_response.json 2>/dev/null || true
+              exit 1
+            fi
+            sleep "${POLL_INTERVAL_SECONDS}"
+          done
+          echo "All teams provisioned."
       - name: Dump CloudFormation events on failure
         if: failure()
         run: |
