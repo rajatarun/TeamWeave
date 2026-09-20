@@ -93,3 +93,57 @@ def test_the_workflow_passes_the_run_start(tmp_path):
     text = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "deploy.yml").read_text()
     assert "dump_stack_failures.py" in text
     assert "github.run_started_at" in text, "the dump must be scoped to this run"
+
+
+# ── the dump must never be the thing that fails ────────────────────────────
+
+def test_an_unusable_since_degrades_instead_of_failing(monkeypatch, capsys):
+    """`${{ github.run_started_at }}` expanded to nothing and this returned 2.
+
+    So the one run that most needed a diagnosis got a second red step and no
+    diagnosis at all: reporting became the failure. A window it had to guess
+    at is worth far more than an exit code.
+    """
+    from unittest import mock
+
+    cfn = mock.Mock()
+    cfn.describe_stacks.return_value = {"Stacks": [{"StackStatus": "UPDATE_COMPLETE"}]}
+    cfn.get_paginator.return_value.paginate.return_value = [{"StackEvents": []}]
+    monkeypatch.setattr(dump.boto3, "client", lambda *a, **kw: cfn)
+    monkeypatch.setattr(dump.sys, "argv", ["dump", "some-stack", "--since", ""])
+
+    assert dump.main() == 0
+    out = capsys.readouterr().out
+    assert "::warning::" in out
+    assert "may include an earlier run" in out, "a guessed window has to say it guessed"
+
+
+def test_a_usable_since_does_not_warn(monkeypatch, capsys):
+    from unittest import mock
+
+    cfn = mock.Mock()
+    cfn.describe_stacks.return_value = {"Stacks": [{"StackStatus": "UPDATE_COMPLETE"}]}
+    cfn.get_paginator.return_value.paginate.return_value = [{"StackEvents": []}]
+    monkeypatch.setattr(dump.boto3, "client", lambda *a, **kw: cfn)
+    monkeypatch.setattr(dump.sys, "argv", ["dump", "s", "--since", "2026-09-20T18:00:00Z"])
+
+    assert dump.main() == 0
+    assert "::warning::" not in capsys.readouterr().out
+
+
+def test_the_workflow_takes_its_own_timestamp(): 
+    from pathlib import Path
+    import yaml
+    wf = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "deploy.yml").read_text()
+    )
+    steps = wf["jobs"]["deploy"]["steps"]
+    names = [s.get("name") for s in steps]
+    # Recorded in the job rather than read from a context that expanded empty.
+    assert "Record when this deploy started" in names
+    recorder = next(s for s in steps if s.get("name") == "Record when this deploy started")
+    assert "DEPLOY_STARTED_AT" in recorder["run"] and "GITHUB_ENV" in recorder["run"]
+    dump_step = next(s for s in steps if s.get("name") == "Dump CloudFormation events on failure")
+    assert "${DEPLOY_STARTED_AT}" in dump_step["run"]
+    assert "github.run_started_at" not in dump_step["run"]
+    assert names.index("Record when this deploy started") < names.index("SAM Deploy")
