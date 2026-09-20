@@ -216,6 +216,19 @@ wrong and reporting it as a pass would be worse.
 `AGENT_RUNTIME=agentcore` is the default, and an agent needs no `runtimeArn`
 of its own — the stack runtime serves it.
 
+**`EnableAgentCore` must be in `--parameter-overrides`, and the workflow
+passes it.** `sam deploy` sends `UsePreviousValue=true` for every parameter it
+is not given, so a template `Default:` governs only the *first* deploy of a
+stack. Changing the default to `"true"` therefore did nothing: the stack kept
+the `"false"` it was created with across three green deploys, no AgentCore
+resource was ever created, and the functions kept `AGENT_RUNTIME=classic` with
+an empty `AGENTCORE_RUNTIME_ARN` — while the workflow, reading its own
+`env.ENABLE_AGENTCORE`, skipped Classic provisioning on the strength of a
+switch the stack had never seen. Two sources of truth disagreeing in silence.
+`tests/test_deploy_parameters.py` holds the workflow to sending every feature
+switch it also branches on, and fails when a new `if: env.X` gate appears
+without a decision about whether the stack needs telling.
+
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them downstream (`schema_validate.py`, `structured_transform.py`).
 
