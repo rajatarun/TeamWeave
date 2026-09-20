@@ -1388,6 +1388,16 @@ Resources:
             RestApiId: !Ref TeamWeaveApi
             Path: /.well-known/agent-card.json
             Method: get
+            # Public, and it has to be. The card is how a client learns this
+            # API exists and how to authenticate against it, so putting it
+            # behind that authentication makes it undiscoverable: TeamWeave's
+            # own a2a_discovery fetches sibling cards with no credentials, so
+            # TeamWeave could not be found by the mechanism it uses on others.
+            # The card carries names and descriptions, never a secret, and
+            # every operation it advertises stays authorized -- it declares
+            # the bearer scheme so a client knows that before it calls.
+            Auth:
+              Authorizer: NONE
         A2ASendMessageEvent:
           Type: Api
           Properties:

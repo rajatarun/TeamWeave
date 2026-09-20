@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import pytest
 
@@ -236,6 +237,77 @@ REPO = Path(__file__).resolve().parents[1]
 @pytest.fixture(scope="module")
 def spec():
     return yaml.safe_load((REPO / "openapi" / "teamweave.yaml").read_text())
+
+
+def test_the_card_route_is_not_behind_the_authorizer():
+    """A card you need a token to read cannot be used to discover anything.
+
+    The API sets DefaultAuthorizer: SiweAuthorizer, which applies to every
+    route unless a route opts out — so the card shipped behind the very
+    authentication it exists to describe, and the live URL returned 401.
+    TeamWeave's own a2a_discovery fetches sibling cards with no credentials,
+    so TeamWeave could not be discovered by the mechanism it uses on others.
+    """
+    template = (REPO / "infra" / "template.yaml").read_text()
+    block = template.split("AgentCardEvent:", 1)[1].split("A2ASendMessageEvent:", 1)[0]
+    assert "Authorizer: NONE" in block, (
+        "the agent card route must opt out of the default authorizer"
+    )
+
+
+def test_only_the_card_opts_out_of_authentication():
+    # Discovery is public; invocation is not. An opt-out that leaked onto
+    # message:send would let anyone start a pipeline run.
+    template = (REPO / "infra" / "template.yaml").read_text()
+    a2a_events = template.split("A2AFunction:", 1)[1].split("\n  GeminiResearchRole:", 1)[0]
+    for event in ("A2ASendMessageEvent:", "A2AGetTaskEvent:"):
+        block = a2a_events.split(event, 1)[1][:600]
+        assert "Authorizer: NONE" not in block, f"{event} must stay authenticated"
+
+
+def test_the_card_says_how_to_authenticate(card):
+    # A public card whose operations all 401 has to explain that, or every
+    # client that discovers it learns only that something is broken.
+    schemes = card["securitySchemes"]
+    assert a2a.SECURITY_SCHEME_NAME in schemes
+    scheme = schemes[a2a.SECURITY_SCHEME_NAME]
+    assert scheme["type"] == "http"
+    assert scheme["scheme"] == "bearer"
+
+
+def test_the_security_requirement_names_a_scheme_the_card_defines(card):
+    # A requirement pointing at an undefined scheme is one no client can meet.
+    for requirement in card["security"]:
+        for name in requirement:
+            assert name in card["securitySchemes"], f"security names undefined scheme {name}"
+    assert card["security"], "a card with schemes but no requirement asks for nothing"
+
+
+def test_the_card_carries_no_credential(card):
+    """It names a scheme; it must never carry a value.
+
+    Naming the header ("Authorization: Bearer <token>") is what a security
+    scheme is *for* and is not a leak — so this looks for credential-shaped
+    values rather than for the words that describe them.
+    """
+    def values(node):
+        if isinstance(node, dict):
+            for v in node.values():
+                yield from values(v)
+        elif isinstance(node, list):
+            for v in node:
+                yield from values(v)
+        elif isinstance(node, str):
+            yield node
+
+    for value in values(card):
+        assert not value.startswith("eyJ"), f"a JWT is embedded in the public card: {value[:16]}..."
+        assert not re.fullmatch(r"[A-Za-z0-9_\-]{32,}", value), (
+            f"an opaque token-shaped value is in the public card: {value[:16]}..."
+        )
+        low = value.lower()
+        for word in ("password", "api_key", "apikey"):
+            assert word not in low, f"the public card mentions {word!r}: {value[:60]}"
 
 
 def test_the_spec_documents_the_well_known_card(spec):
