@@ -261,6 +261,21 @@ flight — and the CI role is not granted delete.
 The step runs **after** the config sync, since it writes into the same S3
 object the sync merges.
 
+**AgentCore caps endpoints per runtime, and this account's limit is below the
+agent count.** `CreateAgentRuntimeEndpoint` returns
+`ServiceQuotaExceededException: maxEndpointsPerAgent limit exceeded`. The
+decision taken was to **raise the quota via AWS Support** rather than move to a
+runtime per agent, so until that lands the step registers as many agents as
+fit, writes `qualifier` back only for those, and warns — naming the agents that
+missed out and the exact request to file (quota, account, region, number).
+
+That is deliberately a warning and not a failed deploy. An agent with no
+`qualifier` falls back to the runtime's default endpoint, which is exactly how
+every agent ran before this step existed: the platform is **degraded, not
+broken**, and failing every deploy over a fixed account quota would help
+nobody. A non-quota error still fails the step — degrading on a quota must not
+turn every AWS error into a warning.
+
 **`EnableAgentCore` must be in `--parameter-overrides`, and the workflow
 passes it.** `sam deploy` sends `UsePreviousValue=true` for every parameter it
 is not given, so a template `Default:` governs only the *first* deploy of a
