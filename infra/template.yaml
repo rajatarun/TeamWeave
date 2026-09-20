@@ -167,6 +167,32 @@ Parameters:
     Default: "0.4"
     Description: Minimum composite_risk_score delta between two invocations to trigger DPO pair upload.
 
+  EnableAgentCore:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Provision the AgentCore substrate (Memory, execution role, and the
+      runtime that hosts src/agentcore/app.py). Off by default: these are
+      billable resources, and the runtime needs its code artifact uploaded to
+      the config bucket first. Turning it on is the whole of phases 2 and 5.
+  AgentCoreRuntimeCodePrefix:
+    Type: String
+    Default: "agentcore/app.zip"
+    Description: Key of the agent code artifact within the config bucket.
+  AgentCoreDefaultModelId:
+    Type: String
+    Default: "us.amazon.nova-micro-v1:0"
+    Description: >
+      Model the agent program falls back to when a runtime does not override
+      AGENT_MODEL_ID, mirroring a Classic agent's own foundation model.
+  AgentCoreMemoryExpiryDays:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    MaxValue: 365
+    Description: How long AgentCore keeps conversational events.
+
 Conditions:
   CreateConfigBucket: !Equals [!Ref ConfigBucketName, ""]
   CreateArtifactBucket: !Equals [!Ref ArtifactBucketName, ""]
@@ -179,6 +205,7 @@ Conditions:
   HasSamDeployerRoleName: !Not [!Equals [!Ref SamDeployerRoleName, ""]]
   HasSamAssumeRoleName: !Not [!Equals [!Ref SamAssumeRoleName, ""]]
   DeployWAF: !Equals [!Ref EnableWAF, "true"]
+  AgentCoreEnabled: !Equals [!Ref EnableAgentCore, "true"]
   HasSiweAuthorizer: !Not [!Equals [!Ref SiweAuthorizerFunctionArn, ""]]
   HasDPOBucket: !Not [!Equals [!Ref DPOTrainingBucketName, ""]]
 
@@ -1712,6 +1739,88 @@ Resources:
           DataTraceEnabled: false
           MetricsEnabled: true
 
+  # ── AgentCore substrate ────────────────────────────────────────────────────
+  # Declared here rather than created by a script so the substrate is reviewed
+  # and versioned like the rest of the stack. All of it is behind
+  # EnableAgentCore, which defaults to false: these are billable, and the
+  # runtime cannot create until its code artifact exists in the config bucket.
+  # Flipping the parameter is what turns phases 2 and 5 on.
+
+  AgentCoreRuntimeRole:
+    Type: AWS::IAM::Role
+    Condition: AgentCoreEnabled
+    Properties:
+      Description: Execution role for TeamWeave agents hosted on AgentCore Runtime.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"
+      Policies:
+        - PolicyName: invoke-models-and-log
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # The agent program's only job is to call a model, so this is
+              # the whole of what it needs beyond writing its own logs.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock:Converse
+                  - bedrock:ConverseStream
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*"
+
+  AgentCoreMemory:
+    Type: AWS::BedrockAgentCore::Memory
+    Condition: AgentCoreEnabled
+    Properties:
+      Name: !Sub "${AWS::StackName}-teamweave-memory"
+      Description: >
+        Session memory for agents on AgentCore. Deliberately separate from
+        ContextWeave, which stays the knowledge layer: this holds what was
+        said in a conversation, not what the platform knows.
+      EventExpiryDuration: !Ref AgentCoreMemoryExpiryDays
+
+  AgentCoreRuntime:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: AgentCoreEnabled
+    Properties:
+      AgentRuntimeName: !Sub "${AWS::StackName}_teamweave_agent"
+      Description: Hosts src/agentcore/app.py, the program one agent turn runs in.
+      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          # A zip, not a container: CreateAgentRuntime accepts either, and the
+          # agent program is small enough that an ECR image would be overhead.
+          Code:
+            S3:
+              Bucket: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+              Prefix: !Ref AgentCoreRuntimeCodePrefix
+          Runtime: PYTHON_3_12
+          EntryPoint:
+            - src.agentcore.app
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      EnvironmentVariables:
+        # Per-agent values are set per runtime; these are the defaults the
+        # program falls back to, mirroring a Classic agent's own configuration.
+        AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
+
+
 Outputs:
   HttpApiUrl:
     Value: !Sub "https://${TeamWeaveApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
@@ -1808,3 +1917,16 @@ Outputs:
       Repo-relative path to the OpenAPI description of this API. Its `servers`
       block is templated on HttpApiUrl above, so a harness resolves the stack
       first and the spec second rather than hardcoding a URL.
+
+  AgentCoreRuntimeArn:
+    Condition: AgentCoreEnabled
+    Description: The runtime AGENT_RUNTIME=agentcore invokes.
+    Value: !GetAtt AgentCoreRuntime.AgentRuntimeArn
+  AgentCoreMemoryId:
+    Condition: AgentCoreEnabled
+    Description: Session memory for agents on AgentCore.
+    Value: !GetAtt AgentCoreMemory.MemoryId
+  AgentCoreRuntimeRoleArn:
+    Condition: AgentCoreEnabled
+    Description: Execution role assumed by agents on AgentCore.
+    Value: !GetAtt AgentCoreRuntimeRole.Arn

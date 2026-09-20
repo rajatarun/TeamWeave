@@ -1,0 +1,145 @@
+"""The AgentCore resources in the SAM template, against the published schemas.
+
+A CloudFormation property name that does not exist is not caught by YAML
+parsing or by `sam validate` alone -- it surfaces as a failed stack update,
+which on an existing stack means a rollback of everything else in the deploy.
+Checking the declarations against cfn-lint's resource schemas catches that
+here, at no cost.
+"""
+from __future__ import annotations
+
+import glob
+import json
+import os
+from pathlib import Path
+
+import pytest
+import yaml
+
+REPO = Path(__file__).resolve().parents[1]
+TEMPLATE = REPO / "infra" / "template.yaml"
+
+
+class CfnLoader(yaml.SafeLoader):
+    """CloudFormation short forms (!Ref, !Sub, ...) are not plain YAML."""
+
+
+CfnLoader.add_multi_constructor("!", lambda loader, suffix, node: {"__fn__": suffix})
+
+
+@pytest.fixture(scope="module")
+def template():
+    return yaml.load(TEMPLATE.read_text(), Loader=CfnLoader)
+
+
+@pytest.fixture(scope="module")
+def schemas():
+    cfnlint_data = pytest.importorskip("cfnlint.data")
+    base = os.path.dirname(cfnlint_data.__file__)
+    out = {}
+    for path in glob.glob(os.path.join(base, "schemas", "resources", "*.json")):
+        try:
+            doc = json.load(open(path))
+        except Exception:
+            continue
+        name = doc.get("typeName", "")
+        if name.startswith("AWS::BedrockAgentCore::"):
+            out[name] = doc
+    if not out:
+        pytest.skip("cfn-lint ships no AgentCore schemas in this version")
+    return out
+
+
+def agentcore_resources(template):
+    return {
+        name: res
+        for name, res in template["Resources"].items()
+        if str(res.get("Type", "")).startswith("AWS::BedrockAgentCore::")
+    }
+
+
+def test_the_template_declares_the_agentcore_substrate(template):
+    assert set(agentcore_resources(template)) == {"AgentCoreMemory", "AgentCoreRuntime"}
+
+
+def test_every_agentcore_resource_matches_its_schema(template, schemas):
+    for name, res in agentcore_resources(template).items():
+        schema = schemas.get(res["Type"])
+        assert schema, f"{name}: no published schema for {res['Type']}"
+        props = res.get("Properties", {})
+
+        missing = [r for r in schema.get("required", []) if r not in props]
+        assert not missing, f"{name}: missing required {missing}"
+
+        allowed = set(schema.get("properties", {}))
+        unknown = [k for k in props if k not in allowed]
+        assert not unknown, f"{name}: {unknown} are not properties of {res['Type']}"
+
+        read_only = {c.split("/")[-1] for c in schema.get("readOnlyProperties", [])}
+        assigned = [k for k in props if k in read_only]
+        assert not assigned, f"{name}: {assigned} are read-only"
+
+
+def test_the_runtime_code_configuration_is_complete(template, schemas):
+    props = template["Resources"]["AgentCoreRuntime"]["Properties"]
+    code = props["AgentRuntimeArtifact"]["CodeConfiguration"]
+    required = schemas["AWS::BedrockAgentCore::Runtime"]["definitions"]["CodeConfiguration"]["required"]
+    for key in required:
+        assert key in code, f"CodeConfiguration missing {key}"
+
+
+def test_enum_values_are_ones_the_schema_accepts(template, schemas):
+    defs = schemas["AWS::BedrockAgentCore::Runtime"]["definitions"]
+    props = template["Resources"]["AgentCoreRuntime"]["Properties"]
+    runtime = props["AgentRuntimeArtifact"]["CodeConfiguration"]["Runtime"]
+    assert runtime in defs["AgentManagedRuntimeType"]["enum"]
+    assert props["NetworkConfiguration"]["NetworkMode"] in defs["NetworkMode"]["enum"]
+
+
+def test_the_entrypoint_matches_a_module_that_exists(template):
+    entry = template["Resources"]["AgentCoreRuntime"]["Properties"]["AgentRuntimeArtifact"]["CodeConfiguration"]["EntryPoint"]
+    assert isinstance(entry, list) and entry, "EntryPoint must be a non-empty list"
+    # A runtime pointing at a module that is not packaged fails at first
+    # invocation, long after the deploy reports success.
+    module_path = REPO / (entry[0].replace(".", "/") + ".py")
+    assert module_path.is_file(), f"{entry[0]} does not resolve to a file ({module_path})"
+
+
+def test_everything_is_behind_the_feature_condition(template):
+    # These are billable, and the runtime cannot create until its code
+    # artifact is in the bucket. Nothing should appear on an ordinary deploy.
+    for name in ("AgentCoreMemory", "AgentCoreRuntime", "AgentCoreRuntimeRole"):
+        assert template["Resources"][name].get("Condition") == "AgentCoreEnabled", name
+
+
+def test_the_feature_is_off_by_default(template):
+    assert template["Parameters"]["EnableAgentCore"]["Default"] == "false"
+    assert set(template["Parameters"]["EnableAgentCore"]["AllowedValues"]) == {"true", "false"}
+
+
+def test_the_conditional_outputs_are_guarded(template):
+    for name in ("AgentCoreRuntimeArn", "AgentCoreMemoryId", "AgentCoreRuntimeRoleArn"):
+        assert template["Outputs"][name].get("Condition") == "AgentCoreEnabled", name
+
+
+def test_the_execution_role_is_assumable_only_by_agentcore(template):
+    stmt = template["Resources"]["AgentCoreRuntimeRole"]["Properties"]["AssumeRolePolicyDocument"]["Statement"][0]
+    assert stmt["Principal"]["Service"] == "bedrock-agentcore.amazonaws.com"
+    # Confused-deputy guards: without these any account could have AgentCore
+    # assume this role on their behalf.
+    assert "aws:SourceAccount" in json.dumps(stmt["Condition"])
+    assert "aws:SourceArn" in json.dumps(stmt["Condition"])
+
+
+def test_the_workflow_packages_the_agent_before_deploying(template):
+    workflow = yaml.safe_load((REPO / ".github" / "workflows" / "deploy.yml").read_text())
+    names = [s.get("name") for s in workflow["jobs"]["deploy"]["steps"]]
+    assert names.index("Package the AgentCore agent") < names.index("SAM Deploy")
+
+
+def test_the_workflow_serialises_deploys():
+    # Three pushes in quick succession ran three deploys at once against one
+    # stack and one provisioning Lambda.
+    workflow = yaml.safe_load((REPO / ".github" / "workflows" / "deploy.yml").read_text())
+    assert workflow["concurrency"]["group"]
+    assert workflow["concurrency"]["cancel-in-progress"] is False
