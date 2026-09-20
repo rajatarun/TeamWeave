@@ -375,11 +375,17 @@ jobs:
             --prefix "${TEAM_CONFIG_PREFIX}" \
             --region "${AWS_REGION}"
 
-      - name: Register agents in the AgentCore registry
-        # After the config sync, because it writes each agent's qualifier back
-        # into the same S3 object the sync merges -- running it first would
-        # hand the sync a runtime identity it then had to preserve, instead of
-        # one it simply carries.
+      - name: Register agents and AgentCore release channels
+        # After the config sync, because it writes the runtime ARN back into
+        # the same S3 object the sync merges -- running it first would hand the
+        # sync a runtime identity it then had to preserve, instead of one it
+        # simply carries.
+        #
+        # Endpoints created here are release channels, a fixed handful. Agent
+        # identity rides on the span (gen_ai.agent.id), not on an endpoint
+        # each: AgentCore's ten-per-runtime quota is a release budget, and
+        # spending it on identity does not scale and leaves nothing for the
+        # shadow channel the DPO flywheel needs.
         if: env.ENABLE_AGENTCORE == 'true'
         run: |
           # One query per output. A single multi-key filter returns values in
@@ -403,7 +409,7 @@ jobs:
               exit 1
             fi
           done
-          python3 scripts/register_agent_endpoints.py \
+          python3 scripts/register_agents.py \
             --runtime-id "${RUNTIME_ID}" \
             --runtime-arn "${RUNTIME_ARN}" \
             --runtime-version "${RUNTIME_VERSION}" \

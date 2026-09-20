@@ -1,29 +1,35 @@
-#!/usr/bin/env python3
-"""Give every TeamWeave agent its own identity in the AgentCore registry.
+"""Register TeamWeave's agents, and keep AgentCore's endpoints for releases.
 
-AgentCore has no separate "agent" resource. Its registry is a runtime plus
-named **endpoints** on that runtime, and InvokeAgentRuntime's `qualifier` is
-an endpoint name: "an endpoint name that points to a specific version". So an
-agent's registry identity is an endpoint, and its `qualifier` in team.json is
-what addresses it.
+**This deliberately does not create one endpoint per agent**, which is what it
+did first and what Bedrock Agents Classic taught. AgentCore endpoints are a
+*release* mechanism, not an identity one: AWS documents them as the way to
+keep production on a stable version while a staging endpoint tests a newer one,
+and the DEFAULT endpoint always tracks the latest version. The default quota is
+ten per runtime, which is a budget for release channels, not for tenants.
 
-One runtime, one endpoint per agent -- not a runtime per agent. A runtime is a
-whole code artifact: twelve of them would mean twelve builds, twelve uploads
-and twelve startup validations per deploy, which is precisely the shape of the
-Classic provisioning step that grew past the CLI timeout and orphaned agents.
-An endpoint is a name and a version pin, so the platform gets per-agent
-identity, per-agent telemetry and per-agent version pinning at a fraction of
-the cost. Per-agent behaviour is unaffected either way: prompt_builder already
-composes ROLE, STEP_GOAL and the output contract, and the per-turn instruction
-travels in the payload.
+Spending that budget on agent identity is wrong in three ways, and the service
+said so before the design did:
 
-What this buys beyond tidiness: two endpoints on one runtime is also the
-AgentCore shape of shadow invocation, which the DPO flywheel needs and which
-AgentCoreRuntime currently warns is unimplemented.
+- It does not scale. Twelve agents already exceeded ten, and raising the quota
+  only moves the wall.
+- It is self-defeating. The justification for per-agent endpoints was that two
+  endpoints on one runtime is how shadow invocation works on AgentCore -- but
+  consuming every endpoint for identity is precisely what leaves no endpoint
+  for a shadow. The design removed the capability it was argued for.
+- Identity does not belong in infrastructure. The OpenTelemetry GenAI semantic
+  conventions put it on the span: `invoke_agent` carries `gen_ai.agent.id` and
+  `gen_ai.agent.name`, and an orchestrator coordinating several agents reports
+  an `invoke_workflow` span around them. That is what TeamWeave's Step
+  Functions pipeline is, and mcp_observatory already records every field
+  needed -- under bespoke names.
 
-Registration is idempotent. Existing endpoints are re-pointed at the current
-runtime version rather than recreated, and nothing is ever deleted: an agent
-removed from a team config may still be addressed by a run in flight.
+So: every agent runs on the shared runtime and is identified in telemetry;
+endpoints are created only for release channels. Per-agent behaviour is
+unchanged either way, because prompt_builder composes ROLE, STEP_GOAL and the
+output contract and the per-turn instruction travels in the payload.
+
+Registration is idempotent and nothing is ever deleted -- an endpoint from the
+earlier per-agent scheme may still be addressed by a run in flight.
 """
 from __future__ import annotations
 
@@ -45,6 +51,12 @@ ENDPOINT_NAME_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9_]{0,47}\Z")
 ENDPOINT_NAME_MAX = 48
 
 RUNTIME_KEYS_OWNED_HERE = ("runtimeArn", "qualifier")
+
+# Release channels, not agents. DEFAULT is created by AgentCore itself and
+# always tracks the newest version; `shadow` is the second endpoint the DPO
+# flywheel needs to compare two versions of the same agent on live traffic.
+# Keeping this list short is the point: it is a release budget of ten.
+DEFAULT_CHANNELS = ("shadow",)
 
 
 # AgentCore caps endpoints per runtime. The cap is an account quota, so it is
@@ -229,8 +241,13 @@ def write_back(team: Dict[str, Any], names: Dict[str, str], runtime_arn: str) ->
         if not name:
             continue
         bedrock = dict(agent.get("bedrock") or {})
-        wanted = {"runtimeArn": runtime_arn, "qualifier": name}
-        if all(str(bedrock.get(k) or "") == v for k, v in wanted.items()):
+        # No per-agent qualifier: every agent runs on the runtime's DEFAULT
+        # endpoint. A qualifier left here from the per-agent scheme is cleared,
+        # because it names an endpoint that is no longer this agent's.
+        bedrock.pop("qualifier", None)
+        wanted = {"runtimeArn": runtime_arn}
+        if all(str(bedrock.get(k) or "") == v for k, v in wanted.items()) and \
+                not (agent.get("bedrock") or {}).get("qualifier"):
             continue
         bedrock.update(wanted)
         agent["bedrock"] = bedrock
@@ -246,6 +263,10 @@ def main() -> int:
     parser.add_argument("--bucket", default=os.environ.get("CONFIG_BUCKET", ""))
     parser.add_argument("--prefix", default=os.environ.get("TEAM_CONFIG_PREFIX", "teams"))
     parser.add_argument("--region", default=os.environ.get("AWS_REGION", "us-east-1"))
+    parser.add_argument(
+        "--channels", default=",".join(DEFAULT_CHANNELS),
+        help="Release-channel endpoints to ensure (comma separated). Not agents.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -274,45 +295,46 @@ def main() -> int:
 
     print(f"Registering {len(names)} agent(s) on runtime {args.runtime_id} v{args.runtime_version}")
 
-    registered: Dict[str, str] = {}
-    unregistered: List[str] = []
-    quota_message = ""
+    # Release channels, a fixed handful, independent of how many agents there
+    # are. This is what the endpoint quota is for.
+    channels = [c.strip() for c in (args.channels or "").split(",") if c.strip()]
     try:
         client = boto3.client("bedrock-agentcore-control", region_name=args.region)
         existing = {} if args.dry_run else existing_endpoints(client, args.runtime_id)
-
-        for agent_id in sorted(names):
-            name = names[agent_id]
+        for channel in channels:
+            if not ENDPOINT_NAME_PATTERN.match(channel):
+                announce("error", f"{channel!r} is not a legal endpoint name")
+                return 1
             if args.dry_run:
-                print(f"  {agent_id} -> {name} (dry run)")
-                registered[agent_id] = name
-                continue
-            if quota_message:
-                # The quota is per runtime, so once it is reached every
-                # remaining create fails the same way. Asking eleven more
-                # times would only be slower.
-                unregistered.append(agent_id)
+                print(f"  channel {channel} (dry run)")
                 continue
             try:
                 action = ensure_endpoint(
-                    client, args.runtime_id, name, args.runtime_version,
-                    f"TeamWeave agent {agent_id}", existing,
+                    client, args.runtime_id, channel, args.runtime_version,
+                    f"TeamWeave release channel {channel}", existing,
                 )
             except ClientError as exc:
                 if not is_quota_error(exc):
                     raise
-                quota_message = str(exc)
-                unregistered.append(agent_id)
+                # Now a genuine signal rather than an expected outcome: the
+                # release budget is full, which means endpoints are being used
+                # for something other than releases.
+                announce(
+                    "warning",
+                    f"Could not create release channel {channel!r}: the runtime's "
+                    f"endpoint quota is full. Endpoints left over from the "
+                    f"per-agent scheme are the likely cause; they are safe to "
+                    f"delete once no run addresses them. ({exc})",
+                )
                 continue
-            registered[agent_id] = name
-            print(f"  {agent_id} -> {name}: {action}")
+            print(f"  channel {channel}: {action}")
     except (ClientError, BotoCoreError) as exc:
         announce("error", f"AgentCore registry call failed: {exc}")
         return 1
 
     written = 0
     for key, team in teams.items():
-        changed = write_back(team, registered, args.runtime_arn)
+        changed = write_back(team, names, args.runtime_arn)
         if not changed:
             continue
         written += changed
@@ -324,31 +346,12 @@ def main() -> int:
             )
         print(f"  {key}: recorded registry identity for {changed} agent(s)")
 
-    if unregistered:
-        # Not an error, and deliberately not a failed deploy. An agent with no
-        # qualifier falls back to the runtime's default endpoint, which is
-        # exactly how every agent ran before this step existed -- so the
-        # platform is degraded, not broken, and failing every deploy over a
-        # fixed account quota would help nobody. It must still be impossible
-        # to miss.
-        announce(
-            "warning",
-            f"Registered {len(registered)} of {len(names)} agent(s). "
-            f"AgentCore's per-runtime endpoint quota is reached, so these "
-            f"{len(unregistered)} fall back to the runtime's default endpoint: "
-            f"{', '.join(sorted(unregistered))}. "
-            f"Remedy: raise the maxEndpointsPerAgent quota for account "
-            f"{account_of(args.runtime_arn) or 'this account'} in {args.region} to at "
-            f"least {len(names)} via AWS Support. Until it is raised this warning "
-            f"repeats every deploy and the platform runs degraded, not broken. "
-            f"({quota_message[:160]})",
-        )
-        return 0
-
     announce(
         "notice",
-        f"Registered {len(registered)} agent(s) on runtime {args.runtime_id} "
-        f"v{args.runtime_version}; updated {written} agent record(s).",
+        f"{len(names)} agent(s) on runtime {args.runtime_id} v{args.runtime_version}; "
+        f"updated {written} agent record(s); release channels: "
+        f"{', '.join(channels) or 'DEFAULT only'}. Agent identity is carried on "
+        f"spans (gen_ai.agent.id/name), not by an endpoint each.",
     )
     return 0
 
