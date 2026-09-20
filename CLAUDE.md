@@ -391,6 +391,29 @@ instead of ossifying. It runs in CI as an informational step, never a gate: it
 reads a DNS outage as "nothing has dual-stack", and a network blip must not
 redden a deploy.
 
+None of the above did anything until September 2026, for a reason worth
+knowing. The EOIGW, the dual-stack setting, `Ipv6AllowedForDualStack` on every
+function and `AssignIpv6AddressOnCreation` on both subnets were all in place —
+but a subnet only gets an IPv6 /64 if the stack is told the /56 that AWS
+assigned the VPC, and the deploy discovers that with
+
+    Vpcs[0].Ipv6CidrBlockAssociationSet[?State==`associated`]
+
+A `VpcIpv6CidrBlockAssociation` has no top-level `State`; it is at
+`Ipv6CidrBlockState.State`. The filter matched nothing, the expression
+returned None, `VpcIpv6Block` was never passed, and the shared stack reported
+`DualStackEnabled: false` on every deploy while every log line said IPv6 was
+on. All egress went out the NAT instance.
+
+Nothing failed. A JMESPath matching nothing is not an error, the `|| echo ""`
+fallback never fired because the CLI call succeeded, and the two-pass deploy —
+which exists precisely to activate dual-stack in the same run that requests
+the block — used the same function for its second look and concluded the block
+still had not been assigned. `tests/test_ipv6_discovery.py` evaluates the
+workflow's own query against a response built from botocore's EC2 service
+model, so the shape is checked against the data the CLI itself validates
+against rather than against recollection.
+
 No VPC endpoints were added for any of this.
 
 ---

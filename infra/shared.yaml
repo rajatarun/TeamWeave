@@ -54,11 +54,18 @@ Parameters:
     Default: ""
     Description: >
       Amazon-provided IPv6 /56 CIDR block assigned to the VPC (e.g. 2600:1f18:abcd:ef00::/56).
-      On the first deploy this is left empty — the VpcIpv6CidrBlock resource below requests
-      the /56 from AWS. After that deploy, run:
-        aws ec2 describe-vpcs --vpc-ids <VPC_ID> --query 'Vpcs[0].Ipv6CidrBlockAssociationSet'
-      to find the assigned CIDR, then pass it here on the next deploy so that Lambda subnets
-      automatically receive /64 CIDRs and dual-stack is fully enabled.
+      Left empty on the very first deploy — the VpcIpv6CidrBlock resource below requests the
+      /56 from AWS — and supplied by CI from then on. The deploy workflow discovers the
+      assigned block itself and re-deploys with it in the same run, so the Lambda subnets get
+      their /64 CIDRs without a human step. No value is hardcoded anywhere: AWS chooses the
+      block, and the stack is told what AWS chose.
+
+      Until September 2026 that discovery filtered on a top-level `State`, which a
+      VpcIpv6CidrBlockAssociation does not have (it is Ipv6CidrBlockState.State), so it
+      always returned nothing and this parameter stayed empty through every deploy —
+      DualStackEnabled false, no /64 on either subnet, and all egress out the NAT instance
+      while everything downstream was configured for IPv6. tests/test_ipv6_discovery.py runs
+      the workflow's own query against a response built from botocore's EC2 service model.
 
 Conditions:
   HasAmpWorkspaceAlias: !Not [!Equals [!Ref AmpWorkspaceAlias, ""]]
