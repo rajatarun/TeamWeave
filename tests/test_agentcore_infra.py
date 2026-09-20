@@ -59,7 +59,9 @@ def agentcore_resources(template):
 
 
 def test_the_template_declares_the_agentcore_substrate(template):
-    assert set(agentcore_resources(template)) == {"AgentCoreMemory", "AgentCoreRuntime"}
+    assert set(agentcore_resources(template)) == {
+        "AgentCoreMemory", "AgentCoreRuntime", "AgentCoreGateway", "ScreenWeaveGatewayTarget",
+    }
 
 
 def test_every_agentcore_resource_matches_its_schema(template, schemas):
@@ -108,8 +110,12 @@ def test_the_entrypoint_matches_a_module_that_exists(template):
 def test_everything_is_behind_the_feature_condition(template):
     # These are billable, and the runtime cannot create until its code
     # artifact is in the bucket. Nothing should appear on an ordinary deploy.
-    for name in ("AgentCoreMemory", "AgentCoreRuntime", "AgentCoreRuntimeRole"):
+    for name in ("AgentCoreMemory", "AgentCoreRuntime", "AgentCoreRuntimeRole",
+                 "AgentCoreGateway", "AgentCoreGatewayRole"):
         assert template["Resources"][name].get("Condition") == "AgentCoreEnabled", name
+    # The target is narrower still: a gateway with no endpoint behind it is
+    # infrastructure for nothing.
+    assert template["Resources"]["ScreenWeaveGatewayTarget"]["Condition"] == "AgentCoreGatewayTargetEnabled"
 
 
 def test_the_feature_is_off_by_default(template):
@@ -178,3 +184,50 @@ def test_the_expiry_default_and_bound_respect_the_service_minimum(template, sche
     param = template["Parameters"]["AgentCoreMemoryExpiryDays"]
     assert param["MinValue"] >= schema_min, "parameter allows a value the service rejects"
     assert param["Default"] >= schema_min
+
+
+def test_the_gateway_name_default_matches_its_own_pattern(template, schemas):
+    # Memory forbids hyphens, Gateway allows them. The two services differ, so
+    # each default is checked against its own published pattern rather than
+    # one assumption applied to both.
+    import re
+
+    schema = schemas["AWS::BedrockAgentCore::Gateway"]
+    prop = schema["properties"]["Name"]
+    if "$ref" in prop:
+        prop = schema["definitions"][prop["$ref"].rsplit("/", 1)[-1]]
+    pattern = prop.get("pattern")
+    assert pattern
+    assert re.match(pattern, template["Parameters"]["AgentCoreGatewayName"]["Default"])
+
+
+def test_the_gateway_needs_no_external_identity_provider(template):
+    # CUSTOM_JWT would mean introducing an IdP to reach a service the platform
+    # already owns.
+    assert template["Resources"]["AgentCoreGateway"]["Properties"]["AuthorizerType"] == "AWS_IAM"
+
+
+def test_the_target_points_at_an_https_mcp_endpoint(template, schemas):
+    import re
+
+    cfg = template["Resources"]["ScreenWeaveGatewayTarget"]["Properties"]["TargetConfiguration"]
+    endpoint_schema = schemas["AWS::BedrockAgentCore::GatewayTarget"]["definitions"]["McpServerTargetConfiguration"]
+    assert "Endpoint" in endpoint_schema.get("required", []), "schema no longer requires Endpoint"
+    assert "McpServer" in cfg["Mcp"]
+    assert "Endpoint" in cfg["Mcp"]["McpServer"]
+
+
+def test_no_gateway_target_without_an_endpoint(template):
+    # ScreenWeaveMcpEndpoint defaults to empty, so an ordinary enable does not
+    # create a target pointing nowhere.
+    assert template["Parameters"]["ScreenWeaveMcpEndpoint"]["Default"] == ""
+    cond = template["Conditions"]["AgentCoreGatewayTargetEnabled"]
+    assert "AgentCoreGatewayTargetEnabled" in template["Conditions"]
+    assert cond is not None
+
+
+def test_the_gateway_role_keeps_the_confused_deputy_guards(template):
+    stmt = template["Resources"]["AgentCoreGatewayRole"]["Properties"]["AssumeRolePolicyDocument"]["Statement"][0]
+    assert stmt["Principal"]["Service"] == "bedrock-agentcore.amazonaws.com"
+    assert "aws:SourceAccount" in json.dumps(stmt["Condition"])
+    assert "aws:SourceArn" in json.dumps(stmt["Condition"])
