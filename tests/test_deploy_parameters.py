@@ -98,19 +98,26 @@ def test_the_workflow_value_is_one_the_parameter_accepts(workflow, parameter, en
     assert str(workflow["env"][env_name]) in [str(v) for v in allowed]
 
 
-def test_the_failure_dump_shows_the_failure(workflow):
-    """A failed deploy has to say what failed, in the log, without paging.
+def test_the_failure_dump_shows_this_runs_failure(workflow):
+    """A failed deploy has to say what failed *in this run*, without paging.
 
-    The dump printed 50 raw events per stack with their full
-    ResourceProperties -- thousands of lines of JSON, almost all of it statuses
-    the deploy passed through rather than the one it died on. The actual error
-    scrolled out of view entirely, which turned reading a failed run into
-    guesswork. Only *_FAILED events carry a ResourceStatusReason, and that
-    reason is the answer.
+    Two rounds of this. First the dump printed 50 raw events per stack with
+    their full ResourceProperties -- thousands of lines, the one event with a
+    ResourceStatusReason pushed out of the readable tail. Filtering to
+    failures fixed that and introduced the second: it then printed the
+    previous three deploys' rollbacks into a log whose own deploy had
+    succeeded, which reads exactly like the current run failing.
+
+    The filtering now lives in scripts/dump_stack_failures.py, where
+    tests/test_stack_failure_dump.py exercises it on real event shapes rather
+    than by matching strings in a shell block. What is left to pin here is
+    that the workflow calls it and scopes it to this run.
     """
     steps = workflow["jobs"]["deploy"]["steps"]
     step = next(s for s in steps if s.get("name") == "Dump CloudFormation events on failure")
     run = step["run"]
-    assert "FAILED" in run, "the dump must filter to failed resources"
-    assert "ResourceStatusReason" in run, "the reason is the whole point of the dump"
-    assert "ResourceProperties" not in run
+    assert "dump_stack_failures.py" in run, "the dump must go through the script"
+    assert "github.run_started_at" in run, "an unscoped dump reports old runs' failures"
+    assert step.get("if") == "failure()"
+    # The raw form is what buried the answer; it must not come back.
+    assert "describe-stack-events" not in run

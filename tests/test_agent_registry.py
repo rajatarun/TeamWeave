@@ -280,3 +280,97 @@ def test_the_ci_role_may_manage_endpoints_but_not_delete_them():
     assert "bedrock-agentcore:UpdateAgentRuntimeEndpoint" in actions
     assert "bedrock-agentcore:ListAgentRuntimeEndpoints" in actions
     assert not any("Delete" in a for a in actions)
+
+
+# ── how a failure is reported ──────────────────────────────────────────────
+#
+# Mutation testing found these untested: putting the reason back on stderr,
+# and letting an AWS error escape as a bare traceback, both passed. That is
+# the same defect the smoke test had -- a step whose job is to explain itself,
+# unable to.
+
+import io  # noqa: E402
+from botocore.exceptions import BotoCoreError, ClientError  # noqa: E402
+
+
+def run_main(monkeypatch, s3, control, argv_extra=()):
+    argv = ["register_agent_endpoints.py", "--runtime-id", "rt-1",
+            "--runtime-arn", "arn:rt", "--runtime-version", "7",
+            "--bucket", "b", "--prefix", "teams", *argv_extra]
+    clients = {"s3": s3, "bedrock-agentcore-control": control}
+    monkeypatch.setattr(reg.boto3, "client", lambda name, **kw: clients[name])
+    monkeypatch.setattr(reg.sys, "argv", argv)
+    return reg.main()
+
+
+def fake_s3(teams):
+    client = mock.Mock()
+    client.list_objects_v2.return_value = {
+        "Contents": [{"Key": k} for k in teams], "IsTruncated": False
+    }
+    client.get_object.side_effect = lambda Bucket, Key: {
+        "Body": io.BytesIO(json.dumps(teams[Key]).encode())
+    }
+    return client
+
+
+def test_a_successful_run_announces_what_it_registered(monkeypatch, capsys):
+    control = FakeControl()
+    control.list_agent_runtime_endpoints = lambda **kw: {"runtimeEndpoints": []}
+    rc = run_main(monkeypatch, fake_s3({"teams/a/v1/team.json": team("writer")}), control)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "::notice::" in out and "Registered 1 agent" in out
+
+
+def test_an_aws_failure_is_announced_rather_than_raised(monkeypatch, capsys):
+    # A traceback in a log nobody can page to is not a diagnosis.
+    control = mock.Mock()
+    control.list_agent_runtime_endpoints.side_effect = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "nope"}},
+        "ListAgentRuntimeEndpoints",
+    )
+    rc = run_main(monkeypatch, fake_s3({"teams/a/v1/team.json": team("writer")}), control)
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "::error::" in out and "AccessDeniedException" in out
+
+
+def test_a_botocore_failure_is_announced_too(monkeypatch, capsys):
+    control = mock.Mock()
+    control.list_agent_runtime_endpoints.side_effect = BotoCoreError()
+    assert run_main(monkeypatch, fake_s3({"teams/a/v1/team.json": team("writer")}), control) == 1
+    assert "::error::" in capsys.readouterr().out
+
+
+def test_an_empty_prefix_is_announced_as_an_error(monkeypatch, capsys):
+    # A wrong prefix looks exactly like a platform with no teams.
+    s3 = mock.Mock()
+    s3.list_objects_v2.return_value = {"Contents": [], "IsTruncated": False}
+    assert run_main(monkeypatch, s3, FakeControl()) == 1
+    out = capsys.readouterr().out
+    assert "::error::" in out and "No team.json" in out
+
+
+def test_a_name_collision_is_announced_as_an_error(monkeypatch, capsys):
+    teams = {"teams/a/v1/team.json": team("a-b", "a_b")}
+    assert run_main(monkeypatch, fake_s3(teams), FakeControl()) == 1
+    out = capsys.readouterr().out
+    assert "::error::" in out and "share one registry identity" in out
+
+
+def test_the_reason_reaches_the_step_summary(monkeypatch, tmp_path):
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "s.md"))
+    s3 = mock.Mock()
+    s3.list_objects_v2.return_value = {"Contents": [], "IsTruncated": False}
+    run_main(monkeypatch, s3, FakeControl())
+    assert "No team.json" in (tmp_path / "s.md").read_text()
+
+
+def test_an_unwritable_summary_never_masks_the_real_result(monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", "/proc/nonexistent/s.md")
+    control = FakeControl()
+    control.list_agent_runtime_endpoints = lambda **kw: {"runtimeEndpoints": []}
+    rc = run_main(monkeypatch, fake_s3({"teams/a/v1/team.json": team("writer")}), control)
+    assert rc == 0
+    assert "::notice::" in capsys.readouterr().out
