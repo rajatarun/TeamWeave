@@ -268,3 +268,135 @@ def test_classic_provisioning_is_skipped_on_the_agentcore_path():
     assert "ENABLE_AGENTCORE" in step["if"]
     # The flag it branches on has to exist, or the condition is always true.
     assert workflow["env"]["ENABLE_AGENTCORE"] is not None
+
+
+# ── Every AgentCore name, against its own published pattern ────────────────
+#
+# Two resources have now failed to create on exactly this: AWS::BedrockAgentCore
+# ::Memory's Name and ::Runtime's AgentRuntimeName both forbid hyphens, and both
+# were built from ${AWS::StackName} -- which is `tarun-content-team`. Neither
+# name could ever have been created, and neither `sam validate` nor cfn-lint
+# says so, because the template is valid: the value is only wrong once the
+# stack name is substituted into it.
+#
+# The first was fixed with a parameter and a test written for that one
+# property. That left the second, which is why this walks every AgentCore
+# resource and checks every property the schema constrains, resolving !Ref and
+# !Sub against the parameter defaults and the workflow's real STACK_NAME. A
+# third resource added later is covered without anyone remembering to add a
+# test.
+
+class ResolvingLoader(yaml.SafeLoader):
+    """Keeps the *value* of a CloudFormation short form, not just its name."""
+
+
+def _keep(loader, suffix, node):
+    if isinstance(node, yaml.ScalarNode):
+        value = loader.construct_scalar(node)
+    elif isinstance(node, yaml.SequenceNode):
+        value = loader.construct_sequence(node, deep=True)
+    else:
+        value = loader.construct_mapping(node, deep=True)
+    return {"__fn__": suffix, "__value__": value}
+
+
+ResolvingLoader.add_multi_constructor("!", _keep)
+
+
+def _workflow_stack_name() -> str:
+    workflow = yaml.safe_load((REPO / ".github" / "workflows" / "deploy.yml").read_text())
+    return workflow["env"]["STACK_NAME"]
+
+
+def _resolve(value, parameters, stack_name):
+    """The string CloudFormation will actually send, or None if unknowable."""
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict) or "__fn__" not in value:
+        return None
+    fn, inner = value["__fn__"], value.get("__value__")
+    if fn == "Ref" and isinstance(inner, str):
+        param = parameters.get(inner)
+        return str(param["Default"]) if param and "Default" in param else None
+    if fn == "Sub" and isinstance(inner, str):
+        out = inner.replace("${AWS::StackName}", stack_name)
+        for name, spec in parameters.items():
+            if "Default" in spec:
+                out = out.replace("${" + name + "}", str(spec["Default"]))
+        # Anything still unresolved (${AWS::Region}, a GetAtt) is not a name
+        # this test can judge.
+        return None if "${" in out else out
+    return None
+
+
+def _constraint(schema, prop_name):
+    prop = schema.get("properties", {}).get(prop_name)
+    if not isinstance(prop, dict):
+        return None
+    if "$ref" in prop:
+        prop = schema.get("definitions", {}).get(prop["$ref"].rsplit("/", 1)[-1], {})
+    return prop if prop.get("pattern") else None
+
+
+@pytest.fixture(scope="module")
+def resolving_template():
+    return yaml.load(TEMPLATE.read_text(), Loader=ResolvingLoader)
+
+
+def test_every_agentcore_name_can_actually_be_created(resolving_template, schemas):
+    import re
+
+    stack_name = _workflow_stack_name()
+    parameters = resolving_template.get("Parameters", {})
+    checked = []
+    problems = []
+
+    for logical_id, resource in agentcore_resources(resolving_template).items():
+        schema = schemas.get(resource["Type"])
+        if not schema:
+            continue
+        for prop_name, raw in (resource.get("Properties") or {}).items():
+            constraint = _constraint(schema, prop_name)
+            if not constraint:
+                continue
+            resolved = _resolve(raw, parameters, stack_name)
+            if resolved is None:
+                continue
+            checked.append(f"{logical_id}.{prop_name}")
+            pattern = constraint["pattern"]
+            if not re.fullmatch(pattern, resolved):
+                problems.append(
+                    f"{logical_id}.{prop_name} resolves to {resolved!r}, which does not "
+                    f"match the service pattern {pattern!r}"
+                )
+            maximum = constraint.get("maxLength")
+            if maximum and len(resolved) > maximum:
+                problems.append(
+                    f"{logical_id}.{prop_name} resolves to {len(resolved)} characters, "
+                    f"over the {maximum} the service accepts"
+                )
+
+    assert not problems, "\n".join(problems)
+    # A test that silently checked nothing would pass for the wrong reason --
+    # and the two names that failed in production are exactly what it must see.
+    assert "AgentCoreRuntime.AgentRuntimeName" in checked, checked
+    assert "AgentCoreMemory.Name" in checked, checked
+
+
+def test_no_agentcore_name_is_built_from_the_stack_name(resolving_template, schemas):
+    # The root cause rather than the symptom. These names forbid hyphens,
+    # stack names routinely contain them, and the result is a template that
+    # validates cleanly and cannot deploy. Naming them by parameter keeps the
+    # allowed alphabet visible where the value is written.
+    for logical_id, resource in agentcore_resources(resolving_template).items():
+        schema = schemas.get(resource["Type"])
+        if not schema:
+            continue
+        for prop_name, raw in (resource.get("Properties") or {}).items():
+            if not _constraint(schema, prop_name):
+                continue
+            if isinstance(raw, dict) and raw.get("__fn__") == "Sub":
+                assert "${AWS::StackName}" not in str(raw.get("__value__")), (
+                    f"{logical_id}.{prop_name} is built from the stack name, whose "
+                    f"hyphens this property does not allow"
+                )
