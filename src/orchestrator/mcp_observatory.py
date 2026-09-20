@@ -452,3 +452,78 @@ def observe_model_request(
     )
 
     return result.output
+
+
+def observe_agentcore_request(
+    runtime_client,
+    *,
+    runtime_arn: str,
+    qualifier: str,
+    session_id: str,
+    runtime_session_id: str,
+    input_text: str,
+    payload: bytes,
+) -> Tuple[dict, dict]:
+    """Invoke an AgentCore runtime through the same mcp-observatory wrapper.
+
+    The substrate changes; the telemetry must not. Without this an agent moved
+    to AgentCore would stop producing spans and risk decisions, and the gate
+    would silently cover less of the platform than the dashboards claim. The
+    operation name stays ``invoke_agent`` so a migrated agent's spans remain
+    comparable with its own history; ``model`` carries the substrate.
+    """
+    kwargs = {
+        "agentRuntimeArn": runtime_arn,
+        "runtimeSessionId": runtime_session_id,
+        "payload": payload,
+        "contentType": "application/json",
+        "accept": "application/json",
+    }
+    if qualifier:
+        kwargs["qualifier"] = qualifier
+
+    result = asyncio.run(
+        _wrapper.invoke(
+            source="agent",
+            model="agentcore-runtime",
+            prompt=input_text,
+            input_payload={
+                "runtime_arn": runtime_arn,
+                "qualifier": qualifier,
+                "session_id": session_id,
+            },
+            call=lambda: runtime_client.invoke_agent_runtime(**kwargs),
+        )
+    )
+
+    log.info(
+        "mcp_observatory",
+        extra={
+            "operation": "invoke_agent",
+            "runtime": "agentcore",
+            "runtime_arn": runtime_arn,
+            "qualifier": qualifier,
+            "session_id": session_id,
+            "input_len": len(input_text),
+            "trace_id": result.span.trace_id,
+            "prompt_tokens": result.span.prompt_tokens,
+            "completion_tokens": result.span.completion_tokens,
+            "cost_usd": result.span.cost_usd,
+            "decision": result.decision.action,
+            "decision_reason": result.decision.reason,
+        },
+    )
+
+    _push_metric(
+        "invoke_agent",
+        result.span,
+        result.decision,
+        {
+            "runtime_arn": runtime_arn,
+            "session_id": session_id,
+            "input_len": Decimal(len(input_text)),
+            **({"qualifier": qualifier} if qualifier else {}),
+        },
+    )
+
+    return result.output, _get_plain_span_metrics(result.span)

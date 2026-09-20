@@ -263,10 +263,13 @@ jobs:
             --region "${AWS_REGION}" \
             --query "Stacks[0].Outputs[?OutputKey=='ConfigBucket'].OutputValue" \
             --output text)
-          echo "Syncing config/examples/teams/ → s3://${CONFIG_BUCKET}/${TEAM_CONFIG_PREFIX}/"
-          aws s3 sync config/examples/teams/ \
-            "s3://${CONFIG_BUCKET}/${TEAM_CONFIG_PREFIX}/" \
-            --exclude "*.md" \
+          # Not `aws s3 sync`: that overwrote the same key provisioning writes
+          # agentId/aliasId back into, so every deploy wiped the ids and forced
+          # a full rebuild of every agent. The repository owns definitions; S3
+          # owns the runtime identifiers.
+          CONFIG_BUCKET="$CONFIG_BUCKET" python3 scripts/sync_team_configs.py \
+            --root config/examples/teams \
+            --prefix "${TEAM_CONFIG_PREFIX}" \
             --region "${AWS_REGION}"
 
       - name: Sync roles and departments to S3
