@@ -17,3 +17,9 @@ pytest>=8.0
 # tests/test_agentcore_infra.py checks the template against. Without it that
 # test skips, and a skipped test in CI is not a test.
 cfn-lint
+
+# tests/test_agentcore_entrypoint.py boots the real AgentCore entrypoint over
+# its HTTP surface. Without these it skips -- and a skipped test would mean
+# nothing verifies that the runtime can start until it fails in production.
+bedrock-agentcore
+httpx

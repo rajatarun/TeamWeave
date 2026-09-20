@@ -1843,7 +1843,7 @@ Resources:
               Prefix: !Ref AgentCoreRuntimeCodePrefix
           Runtime: PYTHON_3_12
           EntryPoint:
-            - src.agentcore.app
+            - app.py
       NetworkConfiguration:
         NetworkMode: PUBLIC
       EnvironmentVariables:

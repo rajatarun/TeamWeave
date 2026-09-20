@@ -232,10 +232,9 @@ jobs:
           echo "Fetched SIWE authorizer ARN: ${SIWE_AUTHORIZER_FUNCTION_ARN}"
 
       - name: Package the AgentCore agent
-        # Optional artifact for a feature that is off by default, so it must
-        # never take the deploy down with it. A failure here is visible in the
-        # run and costs only the ability to flip EnableAgentCore until fixed.
-        continue-on-error: true
+        # No longer optional: AgentCore is the substrate, and the Runtime
+        # resource cannot create without this artifact. Failing here stops the
+        # deploy before CloudFormation tries and rolls back.
         run: |
           CONFIG_BUCKET=$(aws cloudformation describe-stacks \
             --stack-name "${STACK_NAME}" \
@@ -248,10 +247,16 @@ jobs:
           fi
           # Kept current on every deploy even while EnableAgentCore is false,
           # so turning the parameter on does not also require a code push.
-          rm -rf .agentcore-build && mkdir -p .agentcore-build/src/agentcore
-          cp src/agentcore/*.py .agentcore-build/src/agentcore/
-          touch .agentcore-build/src/__init__.py
+          # Flat at the zip root: the entrypoint is a file the runtime
+          # imports, so app.py and agent.py sit beside their dependencies
+          # rather than inside a package the runtime has no reason to know.
+          rm -rf .agentcore-build && mkdir -p .agentcore-build
+          cp src/agentcore/app.py src/agentcore/agent.py .agentcore-build/
           pip install --quiet --target .agentcore-build bedrock-agentcore
+          # Prove the artifact imports and exposes the ASGI app before it is
+          # uploaded. A runtime that cannot boot is otherwise only discovered
+          # at the first invocation, long after the deploy reports success.
+          (cd .agentcore-build && python3 -c "import app; assert hasattr(app,'app'), 'entrypoint exposes no ASGI app'; assert callable(getattr(app,'invoke',None)), 'entrypoint has no invoke'; print('entrypoint imports and exposes app')")
           (cd .agentcore-build && zip -qr ../agentcore-app.zip .)
           aws s3 cp agentcore-app.zip "s3://${CONFIG_BUCKET}/agentcore/app.zip" --region "${AWS_REGION}"
           echo "Uploaded agent code to s3://${CONFIG_BUCKET}/agentcore/app.zip"

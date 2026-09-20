@@ -187,6 +187,19 @@ applies the instruction as a system prompt and calls Converse. Per-agent
 settings (`AGENT_INSTRUCTION`, `AGENT_MODEL_ID`, `AGENT_MAX_TOKENS`) arrive as
 environment variables set at `CreateAgentRuntime` time.
 
+**`app.py` must expose `app` at module scope.** `BedrockAgentCoreApp` extends
+Starlette: the platform imports the entrypoint file and serves what it finds,
+so building the application inside a function leaves it nothing to serve and
+the runtime never boots — a failure that surfaces at the first invocation,
+long after the deploy reports success. The logic therefore lives in
+`src/agentcore/agent.py` (no SDK import) and `app.py` holds only the
+module-level `app` and the `@app.entrypoint` function. The zip is **flat**:
+both files sit at its root, which is why `EntryPoint` is `app.py` and the
+import in `app.py` is `from agent import run_turn`. The packaging step builds
+that zip and imports it before uploading, and
+`tests/test_agentcore_entrypoint.py` boots the real artifact over `GET /ping`
+and `POST /invocations`.
+
 **None of the AgentCore path is verified against live AWS yet.** It is
 exercised against the declared service model and stubs. Nothing selects it
 until `AGENT_RUNTIME=agentcore`, and no agent carries a `runtimeArn` until
