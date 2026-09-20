@@ -294,6 +294,19 @@ machine-readable document is one a machine acts on:
   task returns in a working state to poll rather than the request timing out
   and losing the run id.
 
+**The card is public; the operations are not.** The API sets
+`DefaultAuthorizer: SiweAuthorizer`, which covers every route unless one opts
+out — so the card first shipped behind the very authentication it exists to
+describe, and the live URL answered `401 Unauthorized`. A card you need a
+token to read cannot be used to discover anything, and TeamWeave's own
+`a2a_discovery` fetches sibling cards with no credentials, so TeamWeave could
+not be found by the mechanism it uses on others. The card route is now
+`Authorizer: NONE`; `message:send` and `tasks/{id}` stay authenticated, and
+the card declares the bearer scheme (`securitySchemes` + `security`) so a
+client knows that before it calls rather than inferring it from a 401. It
+names the scheme and never a credential — a test walks every value in the
+served card for anything token-shaped.
+
 A Step Functions status with no A2A equivalent maps to
 `TASK_STATE_UNSPECIFIED`, never a guess: reporting a timed-out run as
 completed would be worse than reporting it as unknown. `tests/test_a2a.py`

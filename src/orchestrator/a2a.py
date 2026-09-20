@@ -42,6 +42,11 @@ AGENT_CARD_PATH = "/.well-known/agent-card.json"
 # collide as either grows.
 A2A_BASE_PATH = "/a2a"
 
+# Named once so the scheme and the requirement that references it cannot
+# drift apart -- a `security` entry naming a scheme the card does not define
+# is a requirement no client can satisfy.
+SECURITY_SCHEME_NAME = "siweBearer"
+
 DEFAULT_INPUT_MODES = ["application/json", "text/plain"]
 DEFAULT_OUTPUT_MODES = ["application/json", "text/plain"]
 
@@ -168,6 +173,24 @@ def build_agent_card(
         "defaultInputModes": list(DEFAULT_INPUT_MODES),
         "defaultOutputModes": list(DEFAULT_OUTPUT_MODES),
         "skills": skills_from_teams(teams),
+        # The card is public; the operations are not. A client that discovers
+        # this document and calls message:send without a token gets a 401 from
+        # the authorizer, and the card is the only place that can tell it why
+        # -- so it says so, rather than leaving the client to guess from a
+        # status code. The token is the SIWE-issued JWT the rest of the API
+        # takes; the card names the scheme, never a credential.
+        "securitySchemes": {
+            SECURITY_SCHEME_NAME: {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+                "description": (
+                    "SIWE-issued session JWT, sent as 'Authorization: Bearer <token>'. "
+                    "Obtain one from the SIWE endpoints; see documentationUrl."
+                ),
+            }
+        },
+        "security": [{SECURITY_SCHEME_NAME: []}],
     }
     if provider:
         card["provider"] = dict(provider)

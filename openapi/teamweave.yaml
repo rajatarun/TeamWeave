@@ -903,6 +903,31 @@ components:
         defaultOutputModes: { type: array, items: { type: string } }
         provider: { type: object }
         documentationUrl: { type: string }
+        securitySchemes:
+          type: object
+          description: >
+            How to authenticate the operations this card advertises. The card
+            itself is public — it is how a client learns this API exists — but
+            every operation on it requires the bearer token described here, so
+            the card says so rather than leaving a client to infer it from a
+            401. Names a scheme, never a credential.
+          additionalProperties:
+            type: object
+            required: [type]
+            properties:
+              type: { type: string, enum: [http] }
+              scheme: { type: string, enum: [bearer] }
+              bearerFormat: { type: string, example: JWT }
+              description: { type: string }
+        security:
+          type: array
+          description: >
+            Which of the schemes above apply. Each entry names a key of
+            securitySchemes; a requirement naming a scheme the card does not
+            define is one no client can satisfy.
+          items:
+            type: object
+            additionalProperties: { type: array, items: { type: string } }
         skills:
           type: array
           items:
