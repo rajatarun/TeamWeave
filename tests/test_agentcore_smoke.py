@@ -140,7 +140,12 @@ def test_a_ci_permission_gap_does_not_fail_the_deploy(code, capsys):
     assert run(client) == 0
     output = capsys.readouterr()
     assert "served a turn" not in output.out
-    assert "NOT VERIFIED" in output.err
+    # On stdout, and with the ::warning:: prefix. GitHub parses workflow
+    # commands from stdout only, so writing this to stderr produced no
+    # annotation at all -- in a step that exits 0. A passing step with no
+    # visible result is exactly what this script exists to prevent.
+    assert "::warning::" in output.out
+    assert "NOT VERIFIED" in output.out
 
 
 def test_a_permission_gap_is_not_retried():
@@ -151,7 +156,37 @@ def test_a_permission_gap_is_not_retried():
 
 def test_a_permission_gap_says_so_loudly(capsys):
     run(FakeClient(client_error("AccessDeniedException")))
-    assert "NOT VERIFIED" in capsys.readouterr().err
+    assert "::warning::" in capsys.readouterr().out
+
+
+def test_a_pass_is_announced_so_the_run_page_can_be_read_without_the_log(capsys):
+    # The success path needs an annotation too, or "did it actually invoke?"
+    # is only answerable by paging through the job log.
+    client = FakeClient(ok_response({"result": "ok", "modelId": "us.amazon.nova-micro-v1:0"}))
+    assert run(client) == 0
+    out = capsys.readouterr().out
+    assert "::notice::" in out
+    assert "served a turn" in out
+
+
+def test_a_broken_runtime_is_announced_as_an_error(capsys):
+    client = FakeClient(ok_response({"error": "boom", "result": "text"}))
+    assert run(client) != 0
+    assert "::error::" in capsys.readouterr().out
+
+
+def test_the_outcome_reaches_the_step_summary(tmp_path, monkeypatch):
+    # So the run page states the result without anyone opening the log.
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    run(FakeClient(ok_response({"result": "ok"})))
+    assert "served a turn" in summary.read_text()
+
+
+def test_an_unwritable_summary_never_fails_the_deploy(monkeypatch):
+    # Reporting must not become the thing that breaks the build.
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", "/proc/nonexistent/summary.md")
+    assert run(FakeClient(ok_response({"result": "ok"}))) == 0
 
 
 def test_a_botocore_without_the_service_cannot_verify():
