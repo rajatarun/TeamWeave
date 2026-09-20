@@ -227,8 +227,39 @@ rather than the runtime — it warns loudly with `NOT VERIFIED` and does not
 fail the deploy, because failing every deploy on a permissions gap would be
 wrong and reporting it as a pass would be worse.
 
-`AGENT_RUNTIME=agentcore` is the default, and an agent needs no `runtimeArn`
-of its own — the stack runtime serves it.
+`AGENT_RUNTIME=agentcore` is the default. An agent works with no `runtimeArn`
+of its own — the stack runtime serves it — but every deploy now gives each one
+a registry identity anyway.
+
+**Every agent is registered in the AgentCore registry during deploy.**
+AgentCore has no "agent" resource: its registry is a runtime plus named
+**endpoints**, and `InvokeAgentRuntime`'s `qualifier` *is* an endpoint name
+("an endpoint name that points to a specific version", per the service model).
+So `scripts/register_agent_endpoints.py` creates one endpoint per agent on the
+shared runtime and writes `runtimeArn` + `qualifier` back into each agent's
+`bedrock` block in S3 — which `config_loader` already reads and
+`AgentCoreRuntime` already sends.
+
+One runtime, one endpoint per agent — **not a runtime per agent**. A runtime is
+a whole code artifact; twelve would mean twelve builds, uploads and startup
+validations per deploy, the exact shape of the Classic provisioning step that
+outgrew the CLI timeout and orphaned agents each run. An endpoint is a name and
+a version pin, so the platform gets per-agent identity, telemetry and version
+pinning cheaply. It is also how shadow invocation works on AgentCore — two
+qualifiers on one runtime — which the DPO flywheel needs.
+
+Three things that fail quietly and are therefore tested: `EndpointName` is
+`[a-zA-Z][a-zA-Z0-9_]{0,47}` (the alphabet that made `AgentRuntimeName` fail,
+and agent ids are hyphenated far more often than stack names); two agent ids
+sanitising to one endpoint name is a **hard error**, never a silent alias,
+because a shared identity merges telemetry and moves version pins; and an
+endpoint left on an older version keeps serving the previous deploy's artifact,
+so existing endpoints are re-pointed rather than skipped. Nothing is ever
+deleted — an agent dropped from a config may still be addressed by a run in
+flight — and the CI role is not granted delete.
+
+The step runs **after** the config sync, since it writes into the same S3
+object the sync merges.
 
 **`EnableAgentCore` must be in `--parameter-overrides`, and the workflow
 passes it.** `sam deploy` sends `UsePreviousValue=true` for every parameter it
