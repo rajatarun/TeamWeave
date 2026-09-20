@@ -390,6 +390,110 @@ paths:
         "200": { $ref: "#/components/responses/ProvisionRead" }
         "500": { $ref: "#/components/responses/ProvisionUnconfigured" }
 
+  /.well-known/agent-card.json:
+    get:
+      tags: [a2a]
+      operationId: getAgentCard
+      summary: A2A Agent Card — what every A2A client fetches first
+      description: |
+        TeamWeave as an [A2A](https://github.com/a2aproject/A2A) agent, written
+        against the v1.0 specification. Each TeamWeave agent is an
+        `AgentSkill`, so a sibling service discovers what this deployment can
+        do without a hardcoded URL or private knowledge of the payload shape.
+
+        Generated from the live team configs in S3, so a skill cannot
+        advertise an agent that no longer exists.
+
+        It declares exactly one interface, `HTTP+JSON`, because that is the
+        one TeamWeave serves, and `capabilities.streaming` is false because
+        `message:stream` is not implemented. Declaring a transport that is not
+        there is a lie a machine acts on.
+      responses:
+        "200":
+          description: The AgentCard
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/A2AAgentCard" }
+
+  /a2a/message:send:
+    post:
+      tags: [a2a]
+      operationId: a2aSendMessage
+      summary: Start a run from an A2A message
+      description: |
+        Starts the same Step Functions execution `POST /team/task` starts, and
+        returns an A2A `Task` to poll.
+
+        **Non-blocking.** A2A's default is to block until the task is
+        terminal; a TeamWeave pipeline outlives any API Gateway request, so
+        the task comes back in a working state rather than the request timing
+        out and losing the run id. The card declares no streaming for the same
+        reason.
+      requestBody:
+        required: true
+        content:
+          application/a2a+json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: object
+                  properties:
+                    role: { type: string, example: ROLE_USER }
+                    messageId: { type: string }
+                    parts:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          text: { type: string }
+                skillId:
+                  type: string
+                  description: Which skill (TeamWeave agent) to run; the team's workflow decides when omitted.
+      responses:
+        "200":
+          description: The created task
+          content:
+            application/a2a+json:
+              schema: { $ref: "#/components/schemas/A2ATask" }
+        "400":
+          description: The message carried no text part
+          content:
+            application/a2a+json:
+              schema: { $ref: "#/components/schemas/A2AError" }
+        "502":
+          description: The execution could not be started
+          content:
+            application/a2a+json:
+              schema: { $ref: "#/components/schemas/A2AError" }
+
+  /a2a/tasks/{task_id}:
+    get:
+      tags: [a2a]
+      operationId: a2aGetTask
+      summary: Read a run as an A2A task
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: |
+            The task. A Step Functions status with no A2A equivalent maps to
+            `TASK_STATE_UNSPECIFIED` rather than being guessed — reporting a
+            timed-out run as completed would be worse than reporting it as
+            unknown.
+          content:
+            application/a2a+json:
+              schema: { $ref: "#/components/schemas/A2ATask" }
+        "404":
+          description: No such task
+          content:
+            application/a2a+json:
+              schema: { $ref: "#/components/schemas/A2AError" }
+
   /agent/converse:
     post:
       tags: [provisioning]
@@ -772,6 +876,84 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
+
+    A2AAgentCard:
+      type: object
+      required: [name, description, version, supportedInterfaces, skills]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        version: { type: string }
+        supportedInterfaces:
+          type: array
+          description: v1.0 replaced the top-level `url`/`preferredTransport` with this.
+          items:
+            type: object
+            required: [url, protocolBinding, protocolVersion]
+            properties:
+              url: { type: string }
+              protocolBinding: { type: string, enum: ["HTTP+JSON"] }
+              protocolVersion: { type: string }
+        capabilities:
+          type: object
+          properties:
+            streaming: { type: boolean }
+            pushNotifications: { type: boolean }
+        defaultInputModes: { type: array, items: { type: string } }
+        defaultOutputModes: { type: array, items: { type: string } }
+        provider: { type: object }
+        documentationUrl: { type: string }
+        skills:
+          type: array
+          items:
+            type: object
+            required: [id, name, description, tags]
+            properties:
+              id:
+                type: string
+                description: "`{team}.{agent}` — unique within the card."
+              name: { type: string }
+              description: { type: string }
+              tags: { type: array, items: { type: string } }
+              inputModes: { type: array, items: { type: string } }
+              outputModes: { type: array, items: { type: string } }
+
+    A2ATask:
+      type: object
+      required: [task]
+      properties:
+        task:
+          type: object
+          required: [id, contextId, status]
+          properties:
+            id: { type: string }
+            contextId: { type: string }
+            status:
+              type: object
+              properties:
+                state:
+                  type: string
+                  enum:
+                    - TASK_STATE_SUBMITTED
+                    - TASK_STATE_WORKING
+                    - TASK_STATE_COMPLETED
+                    - TASK_STATE_FAILED
+                    - TASK_STATE_CANCELED
+                    - TASK_STATE_UNSPECIFIED
+                message: { type: object }
+            artifacts:
+              type: array
+              description: Present only on a completed task; artifacts on an unfinished one read as a final result.
+              items: { type: object }
+
+    A2AError:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
     Error:
       type: object
       required: [error]
