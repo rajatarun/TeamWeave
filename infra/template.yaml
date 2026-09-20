@@ -169,7 +169,7 @@ Parameters:
 
   EnableAgentCore:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues: ["true", "false"]
     Description: >
       Provision the AgentCore substrate (Memory, execution role, and the
@@ -242,6 +242,11 @@ Globals:
     Environment:
       Variables:
         LOG_LEVEL: DEBUG
+        # Which substrate runs an agent turn, and where. Without the ARN the
+        # agentcore runtime rejects every call before attempting it, so these
+        # two travel together.
+        AGENT_RUNTIME: !If [AgentCoreEnabled, "agentcore", "classic"]
+        AGENTCORE_RUNTIME_ARN: !If [AgentCoreEnabled, !GetAtt AgentCoreRuntime.AgentRuntimeArn, ""]
         # Route all AWS SDK calls through dual-stack endpoints so boto3 resolves
         # {service}.{region}.api.aws (returns AAAA records). Lambda ENIs with IPv6
         # addresses send this traffic via the Egress-Only Internet Gateway.

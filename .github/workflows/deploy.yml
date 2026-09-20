@@ -11,6 +11,8 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
+  # Mirrors the EnableAgentCore template parameter; see the provisioning step.
+  ENABLE_AGENTCORE: "true"
   STACK_NAME: tarun-content-team
   SHARED_STACK_NAME: tarun-teamweave-shared
   BEDROCK_AGENTS_STACK_NAME: tarun-bedrock-agents
@@ -320,6 +322,14 @@ jobs:
             --region "${AWS_REGION}"
 
       - name: Provision team agents
+        # Classic only. This invokes ProvisionTeamFunction, which calls
+        # Bedrock CreateAgent and writes agentId/aliasId back into team.json.
+        # An agent on AgentCore has no equivalent step: its runtime is an
+        # AWS::BedrockAgentCore::Runtime created by this same template, and
+        # its runtimeArn is a stack output rather than something a Lambda
+        # provisions. So this step is skipped once the substrate flips, and
+        # leaving it running would rebuild Classic agents nothing invokes.
+        if: env.ENABLE_AGENTCORE != 'true'
         env:
           # Provisioning walks every team and creates any missing Bedrock
           # agents. It takes minutes, so it is not something to hold an HTTP

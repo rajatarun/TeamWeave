@@ -62,10 +62,20 @@ def _invoke(
     max_retries: int,
     shadow_alias_id: Optional[str],
     reraise_step_failed: bool,
+    runtime_arn: str = "",
+    qualifier: str = "",
 ) -> Tuple[str, dict]:
     """The retry loop both public functions share."""
     runtime = get_runtime()
-    ref = AgentRef(agent_id=agent_id, alias_id=alias_id)
+    # Both substrates' coordinates travel together. Building a Classic-only
+    # ref here is what made AGENT_RUNTIME=agentcore unreachable: every call
+    # arrived without a runtimeArn and was rejected before it was attempted.
+    ref = AgentRef(
+        agent_id=agent_id,
+        alias_id=alias_id,
+        runtime_arn=runtime_arn,
+        qualifier=qualifier,
+    )
 
     problem = runtime.missing_fields(ref)
     if problem:
@@ -124,6 +134,8 @@ def invoke_agent(
     input_text: str,
     max_retries: int = 2,
     shadow_alias_id: Optional[str] = None,
+    runtime_arn: str = "",
+    qualifier: str = "",
 ) -> str:
     text, _ = _invoke(
         "invoke_agent",
@@ -134,6 +146,8 @@ def invoke_agent(
         max_retries,
         shadow_alias_id,
         reraise_step_failed=False,
+        runtime_arn=runtime_arn,
+        qualifier=qualifier,
     )
     return text
 
@@ -145,6 +159,8 @@ def invoke_agent_with_metrics(
     input_text: str,
     max_retries: int = 2,
     shadow_alias_id: Optional[str] = None,
+    runtime_arn: str = "",
+    qualifier: str = "",
 ) -> tuple:
     """Invoke an agent and return (response_text, span_metrics_dict).
 
@@ -161,4 +177,6 @@ def invoke_agent_with_metrics(
         max_retries,
         shadow_alias_id,
         reraise_step_failed=True,
+        runtime_arn=runtime_arn,
+        qualifier=qualifier,
     )

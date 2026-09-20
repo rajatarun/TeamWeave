@@ -142,10 +142,21 @@ Client: `src/orchestrator/contextweave_client.py`; mode dispatch: `src/orchestra
 
 `bedrock_invoke.py` owns the retry policy, the Observatory gate and the
 `StepFailed` contract; `agent_runtime.py` owns only "how do I turn a prompt
-into text on this platform". `AGENT_RUNTIME` selects the substrate and
-defaults to `classic`, so nothing changes until someone opts in; an
-unrecognised value warns and falls back rather than taking the orchestrator
-down.
+into text on this platform". **`AGENT_RUNTIME` defaults to `agentcore`.**
+Bedrock Agents Classic is deprecated here: it is in maintenance mode, takes no
+new features and its model catalogue is frozen at 30 July 2026. It stays
+reachable as `AGENT_RUNTIME=classic` because it still runs agents deployed
+before the switch and is a one-variable rollback — it is not where new work
+goes.
+
+**One runtime serves every agent.** Classic needed one Bedrock agent per
+TeamWeave agent, because identity lived in the agent resource. On AgentCore it
+does not: `prompt_builder` already composes `ROLE`, `STEP_GOAL` and the output
+contract into the prompt, so the runtime is generic and its ARN is a
+stack-level value (`AGENTCORE_RUNTIME_ARN`, wired from the stack output). A
+per-agent `runtimeArn` in `team.json` still wins if an agent needs its own.
+Without either, the call is rejected before it is attempted, and the message
+names both ways to fix it.
 
 This exists because Bedrock Agents Classic closed to new customers on
 30 July 2026, takes no further features, and its model catalogue is frozen as

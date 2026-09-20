@@ -11,11 +11,20 @@ RAG_MODES = frozenset({"kb", "none", "explicit", "history", CONTEXTWEAVE_MODE})
 
 @dataclass
 class BedrockRef:
+    """Where an agent lives, on whichever substrate runs it.
+
+    agentId/aliasId address Bedrock Agents Classic; runtimeArn/qualifier
+    address an AgentCore runtime. Both live here so one team.json can describe
+    either, and a team can be moved a step at a time rather than all at once.
+    """
+
     agentId: str
     aliasId: str
     model_id: str = "us.amazon.nova-micro-v1:0"
     shadow_model_id: str = ""
     model_aliases: Dict[str, str] = field(default_factory=dict)
+    runtimeArn: str = ""
+    qualifier: str = ""
 
 @dataclass
 class AgentConfig:

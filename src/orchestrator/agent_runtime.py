@@ -227,19 +227,36 @@ class AgentCoreRuntime:
             )
         return self._client
 
+    @staticmethod
+    def resolve_arn(ref: AgentRef) -> str:
+        """The runtime this turn runs on.
+
+        Classic needed one Bedrock agent per TeamWeave agent, because the
+        agent's identity lived in the agent resource. On AgentCore it does
+        not: prompt_builder already puts ROLE, STEP_GOAL and the output
+        contract in the prompt, so one generic runtime serves every agent and
+        the ARN is a stack-level value. A per-agent runtimeArn in team.json
+        still wins, for an agent that needs its own runtime.
+        """
+        return ref.runtime_arn or (os.environ.get("AGENTCORE_RUNTIME_ARN") or "").strip()
+
     def missing_fields(self, ref: AgentRef) -> str:
-        if not ref.runtime_arn:
-            return "Missing runtimeArn in config for the agentcore runtime"
+        if not self.resolve_arn(ref):
+            return (
+                "No AgentCore runtime: set AGENTCORE_RUNTIME_ARN, or give the "
+                "agent its own runtimeArn in team.json"
+            )
         return ""
 
-    def build_payload(self, session_id: str, input_text: str) -> bytes:
+    def build_payload(self, session_id: str, input_text: str, instruction: str = "") -> bytes:
         # The entrypoint receives this unchanged, so the shape is TeamWeave's
-        # to define. `prompt` is what the agent reads; the rest is context an
-        # agent may use and can otherwise ignore.
-        return json.dumps(
-            {"prompt": input_text, "sessionId": session_id},
-            ensure_ascii=False,
-        ).encode("utf-8")
+        # to define. `prompt` is what the agent reads; `instruction` is the
+        # system prompt for this turn, which is what lets one runtime serve
+        # every agent instead of one runtime per agent.
+        body = {"prompt": input_text, "sessionId": session_id}
+        if instruction:
+            body["instruction"] = instruction
+        return json.dumps(body, ensure_ascii=False).encode("utf-8")
 
     def invoke(
         self,
@@ -262,7 +279,7 @@ class AgentCoreRuntime:
 
         resp, span_metrics = observe_agentcore_request(
             self._runtime_client(),
-            runtime_arn=ref.runtime_arn,
+            runtime_arn=self.resolve_arn(ref),
             qualifier=ref.qualifier,
             session_id=session_id,
             runtime_session_id=agentcore_session_id(session_id),
@@ -286,7 +303,11 @@ _RUNTIMES = {
     AgentCoreRuntime.name: AgentCoreRuntime,
 }
 
-DEFAULT_RUNTIME = BedrockAgentsClassicRuntime.name
+# AgentCore is the platform's substrate. Classic remains selectable --
+# AGENT_RUNTIME=classic -- because it still runs the agents deployed before
+# the switch, and a one-variable rollback is worth keeping until AgentCore has
+# served real traffic. It takes no new work.
+DEFAULT_RUNTIME = AgentCoreRuntime.name
 
 
 def runtime_name() -> str:
