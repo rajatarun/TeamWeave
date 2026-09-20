@@ -269,6 +269,16 @@ jobs:
           # Build parameter overrides — omit optional params when empty so SAM
           # doesn't receive "Key=" which it rejects as invalid.
           PARAM_OVERRIDES=(
+            # Must be passed explicitly. `sam deploy` sends UsePreviousValue=true
+            # for any parameter absent from --parameter-overrides, so changing
+            # the template Default does nothing to a stack that already exists:
+            # EnableAgentCore stayed at the old "false" through three green
+            # deploys, the AgentCoreEnabled condition never fired, and the
+            # functions kept AGENT_RUNTIME=classic with an empty
+            # AGENTCORE_RUNTIME_ARN -- while the workflow, reading its own env,
+            # skipped Classic provisioning. Nothing failed, because nothing was
+            # attempted.
+            "EnableAgentCore=${ENABLE_AGENTCORE}"
             "TeamConfigPrefix=${TEAM_CONFIG_PREFIX}"
             "VectorDbTable=${VECTOR_DB_TABLE}"
             "GeminiSecretArn=${GEMINI_SECRET_ARN}"
