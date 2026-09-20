@@ -1,36 +1,83 @@
-import json
-import time
-from typing import Optional
+"""Run one agent turn, with retries, against whichever substrate is selected.
 
+The two public functions are unchanged in name, signature and behaviour.
+What moved out is the part that knows it is talking to Bedrock Agents
+Classic -- that now lives behind ``agent_runtime.AgentRuntime``, so the
+substrate can be swapped without touching the retry policy, the Observatory
+gate, or the StepFailed contract that ``worker_handler`` depends on.
+"""
 import os
+import time
+from typing import Optional, Tuple
 
-import boto3
-from botocore.config import Config
 from botocore.exceptions import ClientError, ConnectTimeoutError, ReadTimeoutError
 
+from .agent_runtime import AgentRef, brt, get_runtime  # noqa: F401  (brt re-exported)
 from .logger import get_logger
-from .mcp_observatory import observe_agent_request
 from .models import StepFailed
 
 log = get_logger("bedrock_invoke")
-brt = boto3.client(
-    "bedrock-agent-runtime",
-    config=Config(
-        read_timeout=1800,
-        connect_timeout=60,
-        retries={"max_attempts": 0},
-    ),
-)
-def invoke_agent(agent_id: str, alias_id: str, session_id: str, input_text: str, max_retries: int = 2, shadow_alias_id: Optional[str] = None) -> str:
-    if not agent_id or not alias_id:
-        raise StepFailed("invoke_agent", "Missing agentId/aliasId in config")
+
+_AUTH_ERROR_CODES = {"AccessDeniedException", "UnrecognizedClientException", "ExpiredTokenException"}
+
+
+def _log_transport_failure(e: Exception, agent_id: str, alias_id: str, attempt: int) -> None:
+    if isinstance(e, ConnectTimeoutError):
+        log.error(
+            "InvokeAgent connect timeout — possible VPC endpoint routing issue",
+            extra={
+                "agent_id": agent_id,
+                "alias_id": alias_id,
+                "endpoint_url": os.environ.get("AWS_ENDPOINT_URL_BEDROCK_AGENT_RUNTIME", "<sdk-default>"),
+                "err": str(e)[:400],
+            },
+        )
+    elif isinstance(e, ReadTimeoutError):
+        log.error(
+            "InvokeAgent read timeout",
+            extra={"agent_id": agent_id, "alias_id": alias_id, "attempt": attempt, "err": str(e)[:400]},
+        )
+
+
+def _auth_failure_message(e: Exception) -> str:
+    """The message for an auth/permission ClientError, or "" if it is not one."""
+    if not isinstance(e, ClientError):
+        return ""
+    error_code = ((e.response or {}).get("Error") or {}).get("Code", "")
+    if error_code not in _AUTH_ERROR_CODES:
+        return ""
+    return (
+        f"InvokeAgent permission/auth failure: {error_code}. "
+        "Verify IAM permissions for bedrock:InvokeAgent and "
+        "that credentials are valid in this runtime."
+    )
+
+
+def _invoke(
+    op: str,
+    agent_id: str,
+    alias_id: str,
+    session_id: str,
+    input_text: str,
+    max_retries: int,
+    shadow_alias_id: Optional[str],
+    reraise_step_failed: bool,
+) -> Tuple[str, dict]:
+    """The retry loop both public functions share."""
+    runtime = get_runtime()
+    ref = AgentRef(agent_id=agent_id, alias_id=alias_id)
+
+    problem = runtime.missing_fields(ref)
+    if problem:
+        raise StepFailed(op, problem)
 
     last_err: Optional[Exception] = None
     for attempt in range(0, max_retries + 1):
         try:
             log.info(
-                "Invoking Bedrock agent",
+                "Invoking agent",
                 extra={
+                    "runtime": runtime.name,
                     "agent_id": agent_id,
                     "alias_id": alias_id,
                     "session_id": session_id,
@@ -38,81 +85,57 @@ def invoke_agent(agent_id: str, alias_id: str, session_id: str, input_text: str,
                     "input_text": input_text[:1000],
                 },
             )
-            resp, _ = observe_agent_request(
-                brt,
-                agent_id=agent_id,
-                alias_id=alias_id,
+            return runtime.invoke(
+                ref,
                 session_id=session_id,
                 input_text=input_text,
                 shadow_alias_id=shadow_alias_id,
             )
-
-            guardrail_action = resp.get("amazon-bedrock-guardrailAction")
-            guardrail_trace = resp.get("amazon-bedrock-trace")
-            if guardrail_action == "INTERVENED" or guardrail_trace:
-                log.info(
-                    "Bedrock guardrail trace",
-                    extra={
-                        "amazon-bedrock-guardrailAction": guardrail_action,
-                        "amazon-bedrock-trace": json.dumps(guardrail_trace, default=str)[:4000],
-                    },
-                )
-
-            out_chunks = []
-            stream = resp.get("completion")
-            if stream is None:
-                raise RuntimeError("InvokeAgent missing 'completion' stream")
-            for event in stream:
-                chunk = event.get("chunk")
-                if chunk and chunk.get("bytes"):
-                    out_chunks.append(chunk["bytes"].decode("utf-8", errors="ignore"))
-
-                event_guardrail_action = event.get("amazon-bedrock-guardrailAction")
-                event_guardrail_trace = event.get("amazon-bedrock-trace")
-                if event_guardrail_action == "INTERVENED" or event_guardrail_trace:
-                    log.info(
-                        "Bedrock guardrail trace event",
-                        extra={
-                            "amazon-bedrock-guardrailAction": event_guardrail_action,
-                            "amazon-bedrock-trace": json.dumps(event_guardrail_trace, default=str)[:4000],
-                        },
-                    )
-            return "".join(out_chunks).strip()
-        except Exception as e:
-            if isinstance(e, ConnectTimeoutError):
-                log.error(
-                    "InvokeAgent connect timeout — possible VPC endpoint routing issue",
-                    extra={
-                        "agent_id": agent_id,
-                        "alias_id": alias_id,
-                        "endpoint_url": os.environ.get("AWS_ENDPOINT_URL_BEDROCK_AGENT_RUNTIME", "<sdk-default>"),
-                        "err": str(e)[:400],
-                    },
-                )
-            elif isinstance(e, ReadTimeoutError):
-                log.error(
-                    "InvokeAgent read timeout",
-                    extra={
-                        "agent_id": agent_id,
-                        "alias_id": alias_id,
-                        "attempt": attempt,
-                        "err": str(e)[:400],
-                    },
-                )
-            elif isinstance(e, ClientError):
-                error_code = ((e.response or {}).get("Error") or {}).get("Code", "")
-                if error_code in {"AccessDeniedException", "UnrecognizedClientException", "ExpiredTokenException"}:
-                    message = (
-                        "InvokeAgent permission/auth failure: "
-                        f"{error_code}. Verify IAM permissions for bedrock:InvokeAgent and "
-                        "that credentials are valid in this runtime."
-                    )
-                    log.error(message, extra={"agent_id": agent_id, "alias_id": alias_id, "session_id": session_id})
-                    raise StepFailed("invoke_agent", message) from e
+        except StepFailed as e:
+            # Only invoke_agent_with_metrics did this before the two loops were
+            # merged: invoke_agent swallowed a StepFailed and retried it. That
+            # difference looks accidental rather than intended, but changing it
+            # is a behaviour change, so the caller still chooses.
+            if reraise_step_failed:
+                raise
+            # Keep the cause: the final message reports it, and dropping it
+            # turned the give-up line into "failed after retries: None".
             last_err = e
-            log.warning("InvokeAgent failed", extra={"attempt": attempt, "err": str(e)[:240]})
+            log.warning("Invoke failed", extra={"attempt": attempt, "err": str(e)[:240]})
             time.sleep(1.3 * (attempt + 1))
-    raise StepFailed("invoke_agent", f"InvokeAgent failed after retries: {last_err}")
+            continue
+        except Exception as e:
+            _log_transport_failure(e, agent_id, alias_id, attempt)
+            message = _auth_failure_message(e)
+            if message:
+                log.error(message, extra={"agent_id": agent_id, "alias_id": alias_id, "session_id": session_id})
+                raise StepFailed(op, message) from e
+            last_err = e
+            log.warning("Invoke failed", extra={"attempt": attempt, "err": str(e)[:240]})
+            time.sleep(1.3 * (attempt + 1))
+
+    raise StepFailed(op, f"InvokeAgent failed after retries: {last_err}")
+
+
+def invoke_agent(
+    agent_id: str,
+    alias_id: str,
+    session_id: str,
+    input_text: str,
+    max_retries: int = 2,
+    shadow_alias_id: Optional[str] = None,
+) -> str:
+    text, _ = _invoke(
+        "invoke_agent",
+        agent_id,
+        alias_id,
+        session_id,
+        input_text,
+        max_retries,
+        shadow_alias_id,
+        reraise_step_failed=False,
+    )
+    return text
 
 
 def invoke_agent_with_metrics(
@@ -123,102 +146,19 @@ def invoke_agent_with_metrics(
     max_retries: int = 2,
     shadow_alias_id: Optional[str] = None,
 ) -> tuple:
-    """Invoke a Bedrock agent and return (response_text, span_metrics_dict).
+    """Invoke an agent and return (response_text, span_metrics_dict).
 
     Identical retry behaviour to invoke_agent but surfaces the mcp-observatory
     span metrics (including composite_risk_score) so callers can rank responses
     for DPO training data collection.
     """
-    if not agent_id or not alias_id:
-        raise StepFailed("invoke_agent_with_metrics", "Missing agentId/aliasId in config")
-
-    last_err: Optional[Exception] = None
-    for attempt in range(0, max_retries + 1):
-        try:
-            log.info(
-                "Invoking Bedrock agent (with metrics)",
-                extra={
-                    "agent_id": agent_id,
-                    "alias_id": alias_id,
-                    "session_id": session_id,
-                    "attempt": attempt,
-                    "input_text": input_text[:1000],
-                },
-            )
-            resp, span_metrics = observe_agent_request(
-                brt,
-                agent_id=agent_id,
-                alias_id=alias_id,
-                session_id=session_id,
-                input_text=input_text,
-                shadow_alias_id=shadow_alias_id,
-            )
-
-            guardrail_action = resp.get("amazon-bedrock-guardrailAction")
-            guardrail_trace = resp.get("amazon-bedrock-trace")
-            if guardrail_action == "INTERVENED" or guardrail_trace:
-                log.info(
-                    "Bedrock guardrail trace",
-                    extra={
-                        "amazon-bedrock-guardrailAction": guardrail_action,
-                        "amazon-bedrock-trace": json.dumps(guardrail_trace, default=str)[:4000],
-                    },
-                )
-
-            out_chunks = []
-            stream = resp.get("completion")
-            if stream is None:
-                raise RuntimeError("InvokeAgent missing 'completion' stream")
-            for event in stream:
-                chunk = event.get("chunk")
-                if chunk and chunk.get("bytes"):
-                    out_chunks.append(chunk["bytes"].decode("utf-8", errors="ignore"))
-
-                event_guardrail_action = event.get("amazon-bedrock-guardrailAction")
-                event_guardrail_trace = event.get("amazon-bedrock-trace")
-                if event_guardrail_action == "INTERVENED" or event_guardrail_trace:
-                    log.info(
-                        "Bedrock guardrail trace event",
-                        extra={
-                            "amazon-bedrock-guardrailAction": event_guardrail_action,
-                            "amazon-bedrock-trace": json.dumps(event_guardrail_trace, default=str)[:4000],
-                        },
-                    )
-            return "".join(out_chunks).strip(), span_metrics
-        except StepFailed:
-            raise
-        except Exception as e:
-            if isinstance(e, ConnectTimeoutError):
-                log.error(
-                    "InvokeAgent connect timeout — possible VPC endpoint routing issue",
-                    extra={
-                        "agent_id": agent_id,
-                        "alias_id": alias_id,
-                        "endpoint_url": os.environ.get("AWS_ENDPOINT_URL_BEDROCK_AGENT_RUNTIME", "<sdk-default>"),
-                        "err": str(e)[:400],
-                    },
-                )
-            elif isinstance(e, ReadTimeoutError):
-                log.error(
-                    "InvokeAgent read timeout",
-                    extra={
-                        "agent_id": agent_id,
-                        "alias_id": alias_id,
-                        "attempt": attempt,
-                        "err": str(e)[:400],
-                    },
-                )
-            elif isinstance(e, ClientError):
-                error_code = ((e.response or {}).get("Error") or {}).get("Code", "")
-                if error_code in {"AccessDeniedException", "UnrecognizedClientException", "ExpiredTokenException"}:
-                    message = (
-                        "InvokeAgent permission/auth failure: "
-                        f"{error_code}. Verify IAM permissions for bedrock:InvokeAgent and "
-                        "that credentials are valid in this runtime."
-                    )
-                    log.error(message, extra={"agent_id": agent_id, "alias_id": alias_id, "session_id": session_id})
-                    raise StepFailed("invoke_agent_with_metrics", message) from e
-            last_err = e
-            log.warning("InvokeAgentWithMetrics failed", extra={"attempt": attempt, "err": str(e)[:240]})
-            time.sleep(1.3 * (attempt + 1))
-    raise StepFailed("invoke_agent_with_metrics", f"InvokeAgent failed after retries: {last_err}")
+    return _invoke(
+        "invoke_agent_with_metrics",
+        agent_id,
+        alias_id,
+        session_id,
+        input_text,
+        max_retries,
+        shadow_alias_id,
+        reraise_step_failed=True,
+    )

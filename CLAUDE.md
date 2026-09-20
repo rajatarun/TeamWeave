@@ -32,7 +32,8 @@ src/orchestrator/     # Core Lambda handlers and business logic
   worker_handler.py   # Pipeline engine → executes workflow steps
   status_handler.py   # Polls Step Functions DescribeExecution
   config_loader.py    # Loads team.json from S3
-  bedrock_invoke.py   # Bedrock agent invocation
+  bedrock_invoke.py   # One agent turn: retries, gate, StepFailed contract
+  agent_runtime.py    # Which substrate runs it (classic | agentcore)
   rag.py              # RAG mode dispatch (contextweave + explicit + history)
   contextweave_client.py  # ContextWeave knowledge-layer HTTP client
   db.py               # DynamoDB DAO
@@ -136,6 +137,24 @@ their backing store is unreachable.
 - **`kb` / `none`** — no retrieval
 
 Client: `src/orchestrator/contextweave_client.py`; mode dispatch: `src/orchestrator/rag.py`.
+
+### Agent Runtime (substrate seam)
+
+`bedrock_invoke.py` owns the retry policy, the Observatory gate and the
+`StepFailed` contract; `agent_runtime.py` owns only "how do I turn a prompt
+into text on this platform". `AGENT_RUNTIME` selects the substrate and
+defaults to `classic`, so nothing changes until someone opts in; an
+unrecognised value warns and falls back rather than taking the orchestrator
+down.
+
+This exists because Bedrock Agents Classic closed to new customers on
+30 July 2026, takes no further features, and its model catalogue is frozen as
+of that date — a model released after it is reachable only through AgentCore.
+Existing workloads keep running, so the seam is preparation, not a migration.
+`AgentCoreRuntime` is declared and deliberately raises `NotImplementedError`:
+the `InvokeAgentRuntime` request/response envelope is not confirmed yet, and a
+plausible implementation written from memory would fail in production instead
+of at the seam.
 
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them downstream (`schema_validate.py`, `structured_transform.py`).
