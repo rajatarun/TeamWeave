@@ -143,3 +143,13 @@ def test_the_workflow_serialises_deploys():
     workflow = yaml.safe_load((REPO / ".github" / "workflows" / "deploy.yml").read_text())
     assert workflow["concurrency"]["group"]
     assert workflow["concurrency"]["cancel-in-progress"] is False
+
+
+def test_packaging_cannot_take_the_deploy_down():
+    # The agent zip is an optional artifact for a feature that defaults to
+    # off. If pip or the upload fails, that must cost the ability to flip
+    # EnableAgentCore -- not the whole production deploy.
+    workflow = yaml.safe_load((REPO / ".github" / "workflows" / "deploy.yml").read_text())
+    step = next(s for s in workflow["jobs"]["deploy"]["steps"]
+                if s.get("name") == "Package the AgentCore agent")
+    assert step.get("continue-on-error") is True

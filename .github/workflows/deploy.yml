@@ -230,6 +230,10 @@ jobs:
           echo "Fetched SIWE authorizer ARN: ${SIWE_AUTHORIZER_FUNCTION_ARN}"
 
       - name: Package the AgentCore agent
+        # Optional artifact for a feature that is off by default, so it must
+        # never take the deploy down with it. A failure here is visible in the
+        # run and costs only the ability to flip EnableAgentCore until fixed.
+        continue-on-error: true
         run: |
           CONFIG_BUCKET=$(aws cloudformation describe-stacks \
             --stack-name "${STACK_NAME}" \
