@@ -47,6 +47,18 @@ ENDPOINT_NAME_MAX = 48
 RUNTIME_KEYS_OWNED_HERE = ("runtimeArn", "qualifier")
 
 
+# AgentCore caps endpoints per runtime. The cap is an account quota, so it is
+# not something a deploy can route around -- but it must be told apart from a
+# real error, because hitting it leaves a working platform and a permissions
+# failure does not.
+QUOTA_ERROR_CODES = {"ServiceQuotaExceededException", "LimitExceededException"}
+
+
+def is_quota_error(exc: ClientError) -> bool:
+    code = ((exc.response or {}).get("Error") or {}).get("Code", "")
+    return code in QUOTA_ERROR_CODES
+
+
 def announce(level: str, message: str) -> None:
     """Report where GitHub will surface it.
 
@@ -256,6 +268,9 @@ def main() -> int:
 
     print(f"Registering {len(names)} agent(s) on runtime {args.runtime_id} v{args.runtime_version}")
 
+    registered: Dict[str, str] = {}
+    unregistered: List[str] = []
+    quota_message = ""
     try:
         client = boto3.client("bedrock-agentcore-control", region_name=args.region)
         existing = {} if args.dry_run else existing_endpoints(client, args.runtime_id)
@@ -264,11 +279,26 @@ def main() -> int:
             name = names[agent_id]
             if args.dry_run:
                 print(f"  {agent_id} -> {name} (dry run)")
+                registered[agent_id] = name
                 continue
-            action = ensure_endpoint(
-                client, args.runtime_id, name, args.runtime_version,
-                f"TeamWeave agent {agent_id}", existing,
-            )
+            if quota_message:
+                # The quota is per runtime, so once it is reached every
+                # remaining create fails the same way. Asking eleven more
+                # times would only be slower.
+                unregistered.append(agent_id)
+                continue
+            try:
+                action = ensure_endpoint(
+                    client, args.runtime_id, name, args.runtime_version,
+                    f"TeamWeave agent {agent_id}", existing,
+                )
+            except ClientError as exc:
+                if not is_quota_error(exc):
+                    raise
+                quota_message = str(exc)
+                unregistered.append(agent_id)
+                continue
+            registered[agent_id] = name
             print(f"  {agent_id} -> {name}: {action}")
     except (ClientError, BotoCoreError) as exc:
         announce("error", f"AgentCore registry call failed: {exc}")
@@ -276,7 +306,7 @@ def main() -> int:
 
     written = 0
     for key, team in teams.items():
-        changed = write_back(team, names, args.runtime_arn)
+        changed = write_back(team, registered, args.runtime_arn)
         if not changed:
             continue
         written += changed
@@ -288,9 +318,27 @@ def main() -> int:
             )
         print(f"  {key}: recorded registry identity for {changed} agent(s)")
 
+    if unregistered:
+        # Not an error, and deliberately not a failed deploy. An agent with no
+        # qualifier falls back to the runtime's default endpoint, which is
+        # exactly how every agent ran before this step existed -- so the
+        # platform is degraded, not broken, and failing every deploy over a
+        # fixed account quota would help nobody. It must still be impossible
+        # to miss.
+        announce(
+            "warning",
+            f"Registered {len(registered)} of {len(names)} agent(s); "
+            f"{len(unregistered)} could not be registered and fall back to the "
+            f"runtime's default endpoint: {', '.join(sorted(unregistered))}. "
+            f"AgentCore's per-runtime endpoint quota was reached ({quota_message[:200]}). "
+            "Raise maxEndpointsPerAgent for this account, or give the remaining "
+            "agents their own runtimes.",
+        )
+        return 0
+
     announce(
         "notice",
-        f"Registered {len(names)} agent(s) on runtime {args.runtime_id} "
+        f"Registered {len(registered)} agent(s) on runtime {args.runtime_id} "
         f"v{args.runtime_version}; updated {written} agent record(s).",
     )
     return 0

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 import boto3
@@ -31,6 +31,11 @@ from botocore.exceptions import ClientError
 
 FAILED = "FAILED"
 MAX_EVENTS = 400
+
+
+# How far back to look when the caller could not say. Long enough to cover a
+# slow deploy, short enough not to drag in the previous one.
+FALLBACK_WINDOW = timedelta(hours=2)
 
 
 def parse_since(value: str) -> datetime:
@@ -117,8 +122,16 @@ def main() -> int:
     try:
         since = parse_since(args.since)
     except ValueError as exc:
-        print(f"bad --since: {exc}", file=sys.stderr)
-        return 2
+        # Never exit non-zero from the step whose only job is to explain a
+        # failure. `${{ github.run_started_at }}` expanded to nothing and this
+        # returned 2, so the one run that most needed a diagnosis got a second
+        # red step and no diagnosis at all -- reporting became the failure.
+        since = datetime.now(timezone.utc) - FALLBACK_WINDOW
+        print(
+            f"::warning::--since was unusable ({exc}); showing failures from the "
+            f"last {FALLBACK_WINDOW}, which may include an earlier run",
+            flush=True,
+        )
 
     cfn = boto3.client("cloudformation", region_name=args.region)
     for stack in args.stacks:

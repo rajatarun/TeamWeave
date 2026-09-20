@@ -42,6 +42,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Record when this deploy started
+        # The on-failure dump reports only failures at or after this. It used
+        # `${{ github.run_started_at }}`, which expanded to an empty string
+        # here -- so the dump exited 2 and the run that needed a diagnosis got
+        # a second red step instead of one. A timestamp taken in the job is
+        # self-contained and always in a form Python can parse.
+        run: echo "DEPLOY_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -503,5 +511,5 @@ jobs:
         run: |
           python3 scripts/dump_stack_failures.py \
             "${STACK_NAME}" "${SHARED_STACK_NAME}" "${BEDROCK_AGENTS_STACK_NAME}" \
-            --since "${{ github.run_started_at }}" \
+            --since "${DEPLOY_STARTED_AT}" \
             --region "${AWS_REGION}"

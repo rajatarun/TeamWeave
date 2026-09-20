@@ -117,7 +117,10 @@ def test_the_failure_dump_shows_this_runs_failure(workflow):
     step = next(s for s in steps if s.get("name") == "Dump CloudFormation events on failure")
     run = step["run"]
     assert "dump_stack_failures.py" in run, "the dump must go through the script"
-    assert "github.run_started_at" in run, "an unscoped dump reports old runs' failures"
+    # Scoped to this run. The timestamp is recorded in the job rather than
+    # read from ${{ github.run_started_at }}, which expanded to an empty
+    # string and made the dump itself the second failing step.
+    assert "${DEPLOY_STARTED_AT}" in run, "an unscoped dump reports old runs' failures"
     assert step.get("if") == "failure()"
     # The raw form is what buried the answer; it must not come back.
     assert "describe-stack-events" not in run

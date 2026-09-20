@@ -374,3 +374,120 @@ def test_an_unwritable_summary_never_masks_the_real_result(monkeypatch, capsys):
     rc = run_main(monkeypatch, fake_s3({"teams/a/v1/team.json": team("writer")}), control)
     assert rc == 0
     assert "::notice::" in capsys.readouterr().out
+
+
+# ── the per-runtime endpoint quota ─────────────────────────────────────────
+#
+# AgentCore caps endpoints per runtime, and twelve agents exceeded it on the
+# first real run: ServiceQuotaExceededException, "maxEndpointsPerAgent limit
+# exceeded". That is an account quota, not something a deploy can route
+# around, so what matters is that it degrades honestly rather than either
+# failing every deploy or passing quietly.
+
+
+def quota_error():
+    return ClientError(
+        {"Error": {"Code": "ServiceQuotaExceededException",
+                   "Message": "maxEndpointsPerAgent limit exceeded"}},
+        "CreateAgentRuntimeEndpoint",
+    )
+
+
+class QuotaLimitedControl:
+    """Accepts `limit` endpoints, then refuses like the real service."""
+
+    def __init__(self, limit):
+        self.limit = limit
+        self.created = []
+
+    def list_agent_runtime_endpoints(self, **kw):
+        return {"runtimeEndpoints": []}
+
+    def create_agent_runtime_endpoint(self, **kw):
+        if len(self.created) >= self.limit:
+            raise quota_error()
+        self.created.append(kw["name"])
+        return {}
+
+    def update_agent_runtime_endpoint(self, **kw):
+        return {}
+
+
+def test_a_quota_error_is_told_apart_from_a_real_error():
+    assert reg.is_quota_error(quota_error())
+    assert not reg.is_quota_error(ClientError(
+        {"Error": {"Code": "AccessDeniedException"}}, "CreateAgentRuntimeEndpoint"))
+
+
+def test_hitting_the_quota_does_not_fail_the_deploy(monkeypatch, capsys):
+    # An agent with no qualifier falls back to the runtime's default endpoint
+    # -- exactly how every agent ran before this step existed. The platform is
+    # degraded, not broken, and failing every deploy over a fixed account
+    # quota would help nobody.
+    control = QuotaLimitedControl(limit=2)
+    teams = {"teams/a/v1/team.json": team("aa", "bb", "cc", "dd")}
+    assert run_main(monkeypatch, fake_s3(teams), control) == 0
+
+
+def test_hitting_the_quota_is_impossible_to_miss(monkeypatch, capsys):
+    control = QuotaLimitedControl(limit=2)
+    teams = {"teams/a/v1/team.json": team("aa", "bb", "cc", "dd")}
+    run_main(monkeypatch, fake_s3(teams), control)
+    out = capsys.readouterr().out
+    assert "::warning::" in out
+    assert "Registered 2 of 4" in out
+    # The two ways out, named where the failure is read.
+    assert "maxEndpointsPerAgent" in out
+    assert "their own runtimes" in out
+
+
+def test_the_agents_that_did_register_are_named(monkeypatch, capsys):
+    control = QuotaLimitedControl(limit=2)
+    teams = {"teams/a/v1/team.json": team("aa", "bb", "cc", "dd")}
+    run_main(monkeypatch, fake_s3(teams), control)
+    out = capsys.readouterr().out
+    assert "cc, dd" in out, "the unregistered agents must be listed by name"
+
+
+def test_only_registered_agents_get_a_qualifier_written_back(monkeypatch):
+    # Writing a qualifier for an endpoint that does not exist would point the
+    # agent at nothing, which is worse than the default-endpoint fallback.
+    control = QuotaLimitedControl(limit=2)
+    doc = team("aa", "bb", "cc", "dd")
+    s3 = fake_s3({"teams/a/v1/team.json": doc})
+    puts = []
+    s3.put_object.side_effect = lambda **kw: puts.append(json.loads(kw["Body"]))
+    run_main(monkeypatch, s3, control)
+    written = puts[-1]["agents"]
+    assert written[0]["bedrock"]["qualifier"] == "aa"
+    assert written[1]["bedrock"]["qualifier"] == "bb"
+    assert "qualifier" not in written[2].get("bedrock", {})
+    assert "qualifier" not in written[3].get("bedrock", {})
+
+
+def test_the_quota_is_not_re_probed_for_every_remaining_agent(monkeypatch):
+    # The cap is per runtime, so once reached every remaining create fails the
+    # same way; asking again is only slower.
+    control = QuotaLimitedControl(limit=1)
+    control.calls = 0
+    inner = control.create_agent_runtime_endpoint
+
+    def counting(**kw):
+        control.calls += 1
+        return inner(**kw)
+
+    control.create_agent_runtime_endpoint = counting
+    teams = {"teams/a/v1/team.json": team("aa", "bb", "cc", "dd")}
+    run_main(monkeypatch, fake_s3(teams), control)
+    assert control.calls == 2, "one success, one refusal, then stop"
+
+
+def test_a_non_quota_error_still_fails_the_deploy(monkeypatch, capsys):
+    # Degrading on a quota must not turn every AWS error into a warning.
+    control = QuotaLimitedControl(limit=99)
+    control.create_agent_runtime_endpoint = mock.Mock(side_effect=ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "nope"}},
+        "CreateAgentRuntimeEndpoint"))
+    teams = {"teams/a/v1/team.json": team("aa")}
+    assert run_main(monkeypatch, fake_s3(teams), control) == 1
+    assert "::error::" in capsys.readouterr().out
