@@ -186,10 +186,18 @@ Parameters:
     Description: >
       Model the agent program falls back to when a runtime does not override
       AGENT_MODEL_ID, mirroring a Classic agent's own foundation model.
+  AgentCoreMemoryName:
+    Type: String
+    Default: "teamweave_session_memory"
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]{0,47}$"
+    Description: >
+      Memory resource name. The service pattern allows only letters, digits
+      and underscores and must start with a letter -- notably no hyphens, so
+      it cannot be derived from a stack name like tarun-content-team.
   AgentCoreMemoryExpiryDays:
     Type: Number
     Default: 30
-    MinValue: 1
+    MinValue: 3
     MaxValue: 365
     Description: How long AgentCore keeps conversational events.
 
@@ -1788,7 +1796,7 @@ Resources:
     Type: AWS::BedrockAgentCore::Memory
     Condition: AgentCoreEnabled
     Properties:
-      Name: !Sub "${AWS::StackName}-teamweave-memory"
+      Name: !Ref AgentCoreMemoryName
       Description: >
         Session memory for agents on AgentCore. Deliberately separate from
         ContextWeave, which stays the knowledge layer: this holds what was

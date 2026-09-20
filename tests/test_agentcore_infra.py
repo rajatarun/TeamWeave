@@ -153,3 +153,28 @@ def test_packaging_cannot_take_the_deploy_down():
     step = next(s for s in workflow["jobs"]["deploy"]["steps"]
                 if s.get("name") == "Package the AgentCore agent")
     assert step.get("continue-on-error") is True
+
+
+def test_the_memory_name_default_matches_the_service_pattern(template, schemas):
+    # Hyphens are not allowed, which is why this cannot be built from a stack
+    # name. Asserting the default against the published pattern keeps that
+    # from being rediscovered in CI.
+    import re
+
+    schema = schemas["AWS::BedrockAgentCore::Memory"]
+    prop = schema["properties"]["Name"]
+    # The constraint lives behind a $ref, not inline on the property.
+    if "$ref" in prop:
+        prop = schema["definitions"][prop["$ref"].rsplit("/", 1)[-1]]
+    pattern = prop.get("pattern")
+    assert pattern, "schema no longer publishes a Name pattern"
+    default = template["Parameters"]["AgentCoreMemoryName"]["Default"]
+    assert re.match(pattern, default), f"{default!r} does not match {pattern}"
+
+
+def test_the_expiry_default_and_bound_respect_the_service_minimum(template, schemas):
+    schema_min = schemas["AWS::BedrockAgentCore::Memory"]["properties"]["EventExpiryDuration"].get("minimum")
+    assert schema_min is not None
+    param = template["Parameters"]["AgentCoreMemoryExpiryDays"]
+    assert param["MinValue"] >= schema_min, "parameter allows a value the service rejects"
+    assert param["Default"] >= schema_min
