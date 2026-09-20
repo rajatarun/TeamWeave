@@ -231,63 +231,31 @@ wrong and reporting it as a pass would be worse.
 of its own — the stack runtime serves it — but every deploy now gives each one
 a registry identity anyway.
 
-**Every agent is registered in the AgentCore registry during deploy.**
-AgentCore has no "agent" resource: its registry is a runtime plus named
-**endpoints**, and `InvokeAgentRuntime`'s `qualifier` *is* an endpoint name
-("an endpoint name that points to a specific version", per the service model).
-So `scripts/register_agent_endpoints.py` creates one endpoint per agent on the
-shared runtime and writes `runtimeArn` + `qualifier` back into each agent's
-`bedrock` block in S3 — which `config_loader` already reads and
-`AgentCoreRuntime` already sends.
+**Agent identity is a span attribute, not an AWS resource.** The first
+attempt gave each agent its own AgentCore endpoint. AWS's quota refused at
+twelve, and it was right to: endpoints are a *release* mechanism — production
+on a stable version while staging tests a newer one — and the default of ten
+per runtime is a budget for channels, not tenants. Spending it on identity
+does not scale, and it consumed the very endpoints shadow invocation needs,
+which was the argument for doing it.
 
-One runtime, one endpoint per agent — **not a runtime per agent**. A runtime is
-a whole code artifact; twelve would mean twelve builds, uploads and startup
-validations per deploy, the exact shape of the Classic provisioning step that
-outgrew the CLI timeout and orphaned agents each run. An endpoint is a name and
-a version pin, so the platform gets per-agent identity, telemetry and version
-pinning cheaply. It is also how shadow invocation works on AgentCore — two
-qualifiers on one runtime — which the DPO flywheel needs.
+The [OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)
+put identity on the span: `invoke_agent` carries `gen_ai.agent.id` and
+`gen_ai.agent.name`, `gen_ai.conversation.id` identifies the session, and an
+orchestrator coordinating several agents reports `invoke_workflow` around them
+— which is what the Step Functions pipeline is. `mcp_observatory.genai_attributes()`
+emits those names **alongside** the originals, never instead of them: the
+Observatory GSIs and every dashboard query `agent_id`/`operation`, and
+renaming them to make a point about naming would blind all of it. An absent
+value is omitted rather than written blank, because the conventions mark these
+"when available" and on AgentCore every `alias_id` is empty.
 
-Three things that fail quietly and are therefore tested: `EndpointName` is
-`[a-zA-Z][a-zA-Z0-9_]{0,47}` (the alphabet that made `AgentRuntimeName` fail,
-and agent ids are hyphenated far more often than stack names); two agent ids
-sanitising to one endpoint name is a **hard error**, never a silent alias,
-because a shared identity merges telemetry and moves version pins; and an
-endpoint left on an older version keeps serving the previous deploy's artifact,
-so existing endpoints are re-pointed rather than skipped. Nothing is ever
-deleted — an agent dropped from a config may still be addressed by a run in
-flight — and the CI role is not granted delete.
-
-The step runs **after** the config sync, since it writes into the same S3
-object the sync merges.
-
-**AgentCore caps endpoints per runtime, and this account's limit is below the
-agent count.** `CreateAgentRuntimeEndpoint` returns
-`ServiceQuotaExceededException: maxEndpointsPerAgent limit exceeded`. The
-decision taken was to **raise the quota via AWS Support** rather than move to a
-runtime per agent, so until that lands the step registers as many agents as
-fit, writes `qualifier` back only for those, and warns — naming the agents that
-missed out and the exact request to file (quota, account, region, number).
-
-That is deliberately a warning and not a failed deploy. An agent with no
-`qualifier` falls back to the runtime's default endpoint, which is exactly how
-every agent ran before this step existed: the platform is **degraded, not
-broken**, and failing every deploy over a fixed account quota would help
-nobody. A non-quota error still fails the step — degrading on a quota must not
-turn every AWS error into a warning.
-
-**`EnableAgentCore` must be in `--parameter-overrides`, and the workflow
-passes it.** `sam deploy` sends `UsePreviousValue=true` for every parameter it
-is not given, so a template `Default:` governs only the *first* deploy of a
-stack. Changing the default to `"true"` therefore did nothing: the stack kept
-the `"false"` it was created with across three green deploys, no AgentCore
-resource was ever created, and the functions kept `AGENT_RUNTIME=classic` with
-an empty `AGENTCORE_RUNTIME_ARN` — while the workflow, reading its own
-`env.ENABLE_AGENTCORE`, skipped Classic provisioning on the strength of a
-switch the stack had never seen. Two sources of truth disagreeing in silence.
-`tests/test_deploy_parameters.py` holds the workflow to sending every feature
-switch it also branches on, and fails when a new `if: env.X` gate appears
-without a decision about whether the stack needs telling.
+So `scripts/register_agents.py` records the shared `runtimeArn` on every agent,
+clears any per-agent `qualifier` left by the old scheme (it names an endpoint
+that is no longer that agent's), and creates only **release-channel**
+endpoints — `shadow` by default, with `DEFAULT` created by AgentCore itself.
+The endpoint count no longer grows with the agent count. A full quota is now a
+real signal rather than an expected outcome.
 
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them downstream (`schema_validate.py`, `structured_transform.py`).

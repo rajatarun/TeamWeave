@@ -99,6 +99,53 @@ def _to_decimal(value: float) -> Decimal:
         return Decimal("0")
 
 
+# OpenTelemetry GenAI semantic conventions. Agent identity belongs on the
+# span, not in a separate AWS resource per agent -- `invoke_agent` carries
+# `gen_ai.agent.id` and `gen_ai.agent.name`, and an orchestrator coordinating
+# several agents reports `invoke_workflow` around them, which is exactly what
+# the Step Functions pipeline is.
+#
+# TeamWeave has recorded all of this since before the conventions settled, but
+# under names only TeamWeave knows (`agent_id`, `operation`, `session_id`).
+# The conventional names are written *alongside* the originals rather than
+# instead of them: the Observatory dashboards and the GSIs query the old keys,
+# and renaming them would blind every dashboard to make a point about naming.
+# What the standard names buy is that any OTel-aware backend can read these
+# spans without a TeamWeave-specific mapping.
+GEN_AI_SYSTEM = "aws.bedrock"
+
+_OPERATION_TO_GEN_AI = {
+    "invoke_agent": "invoke_agent",
+    "invoke_agent_with_metrics": "invoke_agent",
+    "converse": "chat",
+}
+
+
+def genai_attributes(operation: str, extra: dict) -> dict:
+    """The conventional names for what `extra` already carries.
+
+    Only attributes with a value are emitted: the conventions mark agent id and
+    name "conditionally required (when available)", and an empty string is not
+    an identity -- on AgentCore every agent's `alias_id` is blank, so writing
+    the key regardless would fill dashboards with rows that claim an identity
+    they do not have.
+    """
+    attributes = {
+        "gen_ai.system": GEN_AI_SYSTEM,
+        "gen_ai.operation.name": _OPERATION_TO_GEN_AI.get(operation, operation),
+    }
+    for attribute, source in (
+        ("gen_ai.agent.id", "agent_id"),
+        ("gen_ai.agent.name", "agent_name"),
+        ("gen_ai.conversation.id", "session_id"),
+        ("gen_ai.request.model", "model_id"),
+    ):
+        value = str(extra.get(source) or "").strip()
+        if value:
+            attributes[attribute] = value
+    return attributes
+
+
 def _extract_span_fields(span) -> dict:
     """Extract all TraceContext fields from an mcp-observatory span into a DynamoDB-ready dict.
 
@@ -289,6 +336,10 @@ def _push_metric(operation: str, span, decision, extra: dict) -> None:
             _enrich_risk_fields(item, decision)
 
             item.update({k: str(v) if isinstance(v, float) else v for k, v in extra.items()})
+
+            # Written last so the conventional names reflect what the item
+            # actually ended up carrying, and never overwritten by `extra`.
+            item.update(genai_attributes(operation, extra))
 
             table.put_item(Item=item)
         except Exception as exc:  # noqa: BLE001
