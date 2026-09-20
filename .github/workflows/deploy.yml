@@ -142,6 +142,36 @@ jobs:
           [ "${EFFECTIVE_IPV6}" = "None" ] && EFFECTIVE_IPV6=""
           echo "VPC IPv6 CIDR: ${EFFECTIVE_IPV6:-<none yet — VpcIpv6CidrBlock will request one>}"
 
+          # What the Lambda subnets already have. A subnet takes exactly one
+          # IPv6 CIDR, so if one is associated, that is the only value this
+          # template can carry for it -- proposing the /64 we would compute
+          # is a *second* association, and EC2 refuses with "has reached the
+          # limit of associated IPV6 CIDRs", rolling the stack back. Found by
+          # tag rather than by stack output, so it works before the outputs
+          # for this run exist.
+          _subnet_ipv6() {
+            aws ec2 describe-subnets \
+              --region "${AWS_REGION}" \
+              --filters "Name=vpc-id,Values=${VPC_ID}" "Name=tag:Name,Values=$1" \
+              --query 'Subnets[0].Ipv6CidrBlockAssociationSet[?Ipv6CidrBlockState.State==`associated`] | [0].Ipv6CidrBlock' \
+              --output text 2>/dev/null || echo ""
+          }
+          SUBNET_IPV6_AZ1=$(_subnet_ipv6 "${SHARED_STACK_NAME}-lambda-az1")
+          SUBNET_IPV6_AZ2=$(_subnet_ipv6 "${SHARED_STACK_NAME}-lambda-az2")
+          [ "${SUBNET_IPV6_AZ1}" = "None" ] && SUBNET_IPV6_AZ1=""
+          [ "${SUBNET_IPV6_AZ2}" = "None" ] && SUBNET_IPV6_AZ2=""
+
+          # Print the whole IPv6 picture. Every failure in this area so far has
+          # been a mismatch between what the template assumed and what the VPC
+          # actually holds, and none of it was visible in any log.
+          echo "IPv6 state before deploy:"
+          echo "  VPC /56 associations:"
+          aws ec2 describe-vpcs --vpc-ids "${VPC_ID}" --region "${AWS_REGION}" \
+            --query 'Vpcs[0].Ipv6CidrBlockAssociationSet[].[Ipv6CidrBlock,Ipv6CidrBlockState.State]' \
+            --output text 2>/dev/null | sed 's/^/    /' || echo "    <none>"
+          echo "  AZ1 subnet /64: ${SUBNET_IPV6_AZ1:-<none>}"
+          echo "  AZ2 subnet /64: ${SUBNET_IPV6_AZ2:-<none>}"
+
           EFFECTIVE_IGW="${INTERNET_GATEWAY_ID}"
           if [ -z "${EFFECTIVE_IGW}" ]; then
             EFFECTIVE_IGW=$(aws ec2 describe-internet-gateways \
@@ -157,6 +187,8 @@ jobs:
           [ -n "${LAMBDA_SUBNET_CIDR_AZ1}" ] && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz1=${LAMBDA_SUBNET_CIDR_AZ1}"
           [ -n "${LAMBDA_SUBNET_CIDR_AZ2}" ] && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetCidrAz2=${LAMBDA_SUBNET_CIDR_AZ2}"
           [ -n "${EFFECTIVE_IPV6}" ]         && PARAM_OVERRIDES="${PARAM_OVERRIDES} VpcIpv6Block=${EFFECTIVE_IPV6}"
+          [ -n "${SUBNET_IPV6_AZ1}" ]        && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetIpv6CidrAz1=${SUBNET_IPV6_AZ1}"
+          [ -n "${SUBNET_IPV6_AZ2}" ]        && PARAM_OVERRIDES="${PARAM_OVERRIDES} LambdaSubnetIpv6CidrAz2=${SUBNET_IPV6_AZ2}"
           [ -n "${EFFECTIVE_IGW}" ]          && PARAM_OVERRIDES="${PARAM_OVERRIDES} InternetGatewayId=${EFFECTIVE_IGW}"
 
           sam deploy \

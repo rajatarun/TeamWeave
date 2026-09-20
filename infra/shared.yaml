@@ -49,6 +49,20 @@ Parameters:
     Description: >
       IPv4 CIDR for the second Lambda private subnet (AZ index 1). Must be within the VPC
       CIDR and must not overlap with existing subnets.
+  LambdaSubnetIpv6CidrAz1:
+    Type: String
+    Default: ""
+    Description: >
+      The /64 already associated with the AZ1 Lambda subnet, discovered by CI and passed
+      back so the template matches reality. A subnet accepts exactly one IPv6 CIDR, so a
+      template that computes a /64 the subnet does not already have cannot be applied to a
+      subnet that has one — EC2 answers "has reached the limit of associated IPV6 CIDRs"
+      and the stack rolls back. Left empty for a subnet with no association yet, in which
+      case the /64 is derived from VpcIpv6Block below.
+  LambdaSubnetIpv6CidrAz2:
+    Type: String
+    Default: ""
+    Description: As LambdaSubnetIpv6CidrAz1, for the AZ2 subnet.
   VpcIpv6Block:
     Type: String
     Default: ""
@@ -80,6 +94,8 @@ Conditions:
   HasVpcIpv6Block: !And
     - !Not [!Equals [!Ref VpcId, ""]]
     - !Not [!Equals [!Ref VpcIpv6Block, ""]]
+  HasDiscoveredIpv6Az1: !Not [!Equals [!Ref LambdaSubnetIpv6CidrAz1, ""]]
+  HasDiscoveredIpv6Az2: !Not [!Equals [!Ref LambdaSubnetIpv6CidrAz2, ""]]
   HasVpcAndInternetGateway: !And
     - !Not [!Equals [!Ref VpcId, ""]]
     - !Not [!Equals [!Ref InternetGatewayId, ""]]
@@ -261,11 +277,20 @@ Resources:
     Properties:
       VpcId: !Ref VpcId
       CidrBlock: !Ref LambdaSubnetCidrAz1
+      # What the subnet already has wins over what we would compute. A subnet
+      # takes exactly one IPv6 CIDR, so proposing a different one is not an
+      # update -- it is a second association, which EC2 refuses.
       Ipv6CidrBlock: !If
-        - HasVpcIpv6Block
-        - !Select [8, !Cidr [!Ref VpcIpv6Block, 256, 64]]
-        - !Ref "AWS::NoValue"
-      AssignIpv6AddressOnCreation: !If [HasVpcIpv6Block, true, !Ref "AWS::NoValue"]
+        - HasDiscoveredIpv6Az1
+        - !Ref LambdaSubnetIpv6CidrAz1
+        - !If
+          - HasVpcIpv6Block
+          - !Select [8, !Cidr [!Ref VpcIpv6Block, 256, 64]]
+          - !Ref "AWS::NoValue"
+      AssignIpv6AddressOnCreation: !If
+        - HasDiscoveredIpv6Az1
+        - true
+        - !If [HasVpcIpv6Block, true, !Ref "AWS::NoValue"]
       AvailabilityZone: !Select
         - 0
         - !GetAZs ""
@@ -284,10 +309,16 @@ Resources:
       VpcId: !Ref VpcId
       CidrBlock: !Ref LambdaSubnetCidrAz2
       Ipv6CidrBlock: !If
-        - HasVpcIpv6Block
-        - !Select [9, !Cidr [!Ref VpcIpv6Block, 256, 64]]
-        - !Ref "AWS::NoValue"
-      AssignIpv6AddressOnCreation: !If [HasVpcIpv6Block, true, !Ref "AWS::NoValue"]
+        - HasDiscoveredIpv6Az2
+        - !Ref LambdaSubnetIpv6CidrAz2
+        - !If
+          - HasVpcIpv6Block
+          - !Select [9, !Cidr [!Ref VpcIpv6Block, 256, 64]]
+          - !Ref "AWS::NoValue"
+      AssignIpv6AddressOnCreation: !If
+        - HasDiscoveredIpv6Az2
+        - true
+        - !If [HasVpcIpv6Block, true, !Ref "AWS::NoValue"]
       AvailabilityZone: !Select
         - 1
         - !GetAZs ""

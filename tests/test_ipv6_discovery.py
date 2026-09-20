@@ -101,6 +101,82 @@ def test_the_deploy_feeds_the_discovered_cidr_back_as_a_parameter():
     assert "VpcIpv6Block=${NEWLY_ASSIGNED}" in WORKFLOW
 
 
+# ── The subnet's own /64 ─────────────────────────────────────────────────────
+# A subnet accepts exactly one IPv6 CIDR. Once the VPC-level discovery above
+# started working, the stack proposed the /64 it computes (index 8 and 9 of
+# the /56) for subnets that already held one, and EC2 refused:
+#
+#   Subnet ID 'subnet-01714c...' has reached the limit of associated IPV6 CIDRs
+#
+# That is not an update EC2 can make — a different value is a *second*
+# association. So the deploy discovers what each subnet already has and passes
+# it, and the template prefers it over anything it would compute.
+
+
+def subnet_query() -> str:
+    match = re.search(r"--query '(Subnets\[0\]\.Ipv6CidrBlockAssociationSet[^']*)'", WORKFLOW)
+    assert match, "the workflow no longer discovers the subnets' existing IPv6 CIDR"
+    return match.group(1)
+
+
+def describe_subnets_response(state: str = "associated", associations: int = 1) -> dict:
+    assoc = [{
+        "AssociationId": "subnet-cidr-assoc-0abc123",
+        "Ipv6CidrBlock": "2600:1f18:abcd:ef08::/64",
+        "Ipv6CidrBlockState": {"State": state},
+    }][:associations]
+    return {"Subnets": [{"SubnetId": "subnet-01714c0c1b4590e4e",
+                         "Ipv6CidrBlockAssociationSet": assoc}]}
+
+
+def test_the_subnet_association_state_is_nested_too():
+    model = botocore.session.get_session().get_service_model("ec2")
+    subnet = model.operation_model("DescribeSubnets").output_shape.members["Subnets"].member
+    members = set(subnet.members["Ipv6CidrBlockAssociationSet"].member.members)
+    assert "Ipv6CidrBlockState" in members
+    assert "State" not in members
+
+
+def test_the_deploy_finds_the_subnets_existing_cidr():
+    assert jmespath.search(subnet_query(), describe_subnets_response()) == "2600:1f18:abcd:ef08::/64"
+
+
+def test_a_subnet_with_no_association_yields_nothing():
+    # The genuine first-deploy case: the template then computes the /64.
+    assert jmespath.search(subnet_query(), describe_subnets_response(associations=0)) is None
+
+
+def test_the_deploy_passes_both_subnet_cidrs_as_parameters():
+    assert "LambdaSubnetIpv6CidrAz1=${SUBNET_IPV6_AZ1}" in WORKFLOW
+    assert "LambdaSubnetIpv6CidrAz2=${SUBNET_IPV6_AZ2}" in WORKFLOW
+
+
+def test_the_template_prefers_the_discovered_cidr_over_the_computed_one():
+    """Order matters: computing first would re-introduce the failure.
+
+    The discovered value has to win. A template that falls back to !Select
+    whenever VpcIpv6Block is set would keep proposing a /64 the subnet does
+    not have, which is the second association EC2 refuses.
+    """
+    shared = (REPO / "infra" / "shared.yaml").read_text()
+    for condition, index in (("HasDiscoveredIpv6Az1", "8"), ("HasDiscoveredIpv6Az2", "9")):
+        block = shared.split(f"- {condition}", 1)[1][:400]
+        assert "LambdaSubnetIpv6Cidr" in block.split("HasVpcIpv6Block")[0], (
+            f"{condition} must resolve to the discovered CIDR before any computed one"
+        )
+        assert f"!Select [{index}," in block
+
+
+def test_a_discovered_cidr_alone_makes_the_subnet_dual_stack():
+    # AssignIpv6AddressOnCreation gated only on VpcIpv6Block would leave a
+    # subnet that has a /64 handing out ENIs with no IPv6 address.
+    shared = (REPO / "infra" / "shared.yaml").read_text()
+    for condition in ("HasDiscoveredIpv6Az1", "HasDiscoveredIpv6Az2"):
+        assert shared.count(f"- {condition}") >= 2, (
+            f"{condition} should gate both Ipv6CidrBlock and AssignIpv6AddressOnCreation"
+        )
+
+
 def test_the_second_pass_reuses_the_same_discovery():
     """The two-pass deploy has to look again with a query that works.
 
