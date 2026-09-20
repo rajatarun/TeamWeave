@@ -201,6 +201,18 @@ Parameters:
       ScreenWeave's MCP endpoint (https://.../mcp), published by that stack.
       Empty means no gateway target is created: a gateway with nothing behind
       it is infrastructure for nothing.
+  A2AAgentVersion:
+    Type: String
+    Default: "1.0.0"
+    Description: Version reported in the A2A Agent Card.
+  A2AProvider:
+    Type: String
+    Default: "TeamWeave"
+    Description: Provider organization reported in the A2A Agent Card.
+  A2ADocumentationUrl:
+    Type: String
+    Default: ""
+    Description: Optional documentationUrl for the A2A Agent Card.
   AgentCoreRuntimeName:
     Type: String
     Default: "teamweave_agent"
@@ -651,6 +663,54 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent-alias/*"
 
+  A2ARole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-a2a-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: a2a-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              # The card is generated from the live team configs, so a skill
+              # cannot advertise an agent that no longer exists.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !If
+                    - CreateConfigBucket
+                    - !GetAtt TeamConfigBucket.Arn
+                    - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}"
+                  - !If
+                    - CreateConfigBucket
+                    - !Sub "${TeamConfigBucket.Arn}/*"
+                    - !Sub "arn:${AWS::Partition}:s3:::${ConfigBucketName}/*"
+              # message:send starts the same execution POST /team/task starts;
+              # tasks/{id} reads the same one the status handler reads.
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-state-machine"
+              - Effect: Allow
+                Action:
+                  - states:DescribeExecution
+                Resource: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-state-machine:*"
+
   ProvisionTeamRole:
     Type: AWS::IAM::Role
     Properties:
@@ -932,6 +992,12 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-ConversationFunction"
+      RetentionInDays: 30
+
+  A2AFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-A2AFunction"
       RetentionInDays: 30
 
   AgentMetricsDashboardFunctionLogGroup:
@@ -1244,6 +1310,52 @@ Resources:
             RestApiId: !Ref TeamWeaveApi
             Path: /agent/converse
             Method: post
+      VpcConfig: !If
+        - HasVpcConfig
+        - SecurityGroupIds:
+            - !Ref OrchestratorSecurityGroup
+          SubnetIds: !Split [",", !Ref LambdaSubnetIds]
+          Ipv6AllowedForDualStack: true
+        - !Ref AWS::NoValue
+
+  A2AFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: A2AFunctionLogGroup
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../
+      Handler: src/orchestrator/a2a_handler.handler
+      Role: !GetAtt A2ARole.Arn
+      Architectures:
+        - arm64
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          A2A_AGENT_VERSION: !Ref A2AAgentVersion
+          A2A_PROVIDER: !Ref A2AProvider
+          A2A_DOCUMENTATION_URL: !Ref A2ADocumentationUrl
+      Events:
+        # The well-known URI every A2A client fetches first.
+        AgentCardEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /.well-known/agent-card.json
+            Method: get
+        A2ASendMessageEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /a2a/message:send
+            Method: post
+        A2AGetTaskEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamWeaveApi
+            Path: /a2a/tasks/{task_id}
+            Method: get
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:
@@ -2050,6 +2162,9 @@ Outputs:
     Condition: AgentCoreEnabled
     Description: The runtime AGENT_RUNTIME=agentcore invokes.
     Value: !GetAtt AgentCoreRuntime.AgentRuntimeArn
+  AgentCardUrl:
+    Description: The A2A Agent Card every client fetches first.
+    Value: !Sub "https://${TeamWeaveApi}.execute-api.${AWS::Region}.amazonaws.com/prod/.well-known/agent-card.json"
   AgentCoreRuntimeId:
     Condition: AgentCoreEnabled
     # CreateAgentRuntimeEndpoint takes agentRuntimeId, not the ARN. Publishing

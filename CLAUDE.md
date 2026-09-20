@@ -257,6 +257,49 @@ endpoints — `shadow` by default, with `DEFAULT` created by AgentCore itself.
 The endpoint count no longer grows with the agent count. A full quota is now a
 real signal rather than an expected outcome.
 
+### A2A — how the rest of the platform reaches these agents
+
+[A2A](https://github.com/a2aproject/A2A) reached 1.0.0 in January 2026 under
+the Linux Foundation and is how agents built on different stacks discover and
+call each other. That is the weave platform's premise, and until now a sibling
+service reached TeamWeave through a hardcoded URL and private knowledge of its
+payload shape.
+
+**One card, many skills.** TeamWeave is one A2A agent; each TeamWeave agent is
+an `AgentSkill` on it, id `{team}.{agent}`. This is the third time the platform
+has had to answer "what identifies an agent" and the third time the answer is
+not a piece of infrastructure — Classic made one Bedrock agent each, AgentCore
+was nearly given one endpoint each, and what holds is a name in a document:
+a skill id here, `gen_ai.agent.id` on the span. Adding an agent costs a line of
+config.
+
+`GET /.well-known/agent-card.json` is generated from the live team configs in
+S3, so a skill cannot advertise an agent that no longer exists. `src/orchestrator/a2a.py`
+is pure and holds the shapes; `a2a_handler.py` only translates, because
+`message:send` starts the same Step Functions execution `POST /team/task`
+starts and `tasks/{id}` reads the same one the status handler reads — an A2A
+client and a native client must not drift into different behaviour.
+
+Three things it deliberately does not claim, because a lie in a
+machine-readable document is one a machine acts on:
+
+- **One interface, `HTTP+JSON`** — the one actually served. v1.0 replaced the
+  top-level `url`/`preferredTransport` with `supportedInterfaces`, each entry
+  carrying its own `protocolBinding` and `protocolVersion`; a 0.3-shaped card
+  parses fine and means nothing to a 1.0 client.
+- **`capabilities.streaming: false`** — `message:stream` is not implemented,
+  and a client that believed otherwise would wait on a stream that never opens.
+- **`message:send` is non-blocking.** A2A's default is to block until the task
+  is terminal; a TeamWeave pipeline outlives any API Gateway request, so the
+  task returns in a working state to poll rather than the request timing out
+  and losing the run id.
+
+A Step Functions status with no A2A equivalent maps to
+`TASK_STATE_UNSPECIFIED`, never a guess: reporting a timed-out run as
+completed would be worse than reporting it as unknown. `tests/test_a2a.py`
+holds the served card and `openapi/teamweave.yaml` to each other in both
+directions, so neither can grow a field the other does not know.
+
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them downstream (`schema_validate.py`, `structured_transform.py`).
 
