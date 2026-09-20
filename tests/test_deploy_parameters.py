@@ -96,3 +96,21 @@ def test_the_workflow_value_is_one_the_parameter_accepts(workflow, parameter, en
     if allowed is None:
         pytest.skip(f"{parameter} constrains no values")
     assert str(workflow["env"][env_name]) in [str(v) for v in allowed]
+
+
+def test_the_failure_dump_shows_the_failure(workflow):
+    """A failed deploy has to say what failed, in the log, without paging.
+
+    The dump printed 50 raw events per stack with their full
+    ResourceProperties -- thousands of lines of JSON, almost all of it statuses
+    the deploy passed through rather than the one it died on. The actual error
+    scrolled out of view entirely, which turned reading a failed run into
+    guesswork. Only *_FAILED events carry a ResourceStatusReason, and that
+    reason is the answer.
+    """
+    steps = workflow["jobs"]["deploy"]["steps"]
+    step = next(s for s in steps if s.get("name") == "Dump CloudFormation events on failure")
+    run = step["run"]
+    assert "FAILED" in run, "the dump must filter to failed resources"
+    assert "ResourceStatusReason" in run, "the reason is the whole point of the dump"
+    assert "ResourceProperties" not in run
