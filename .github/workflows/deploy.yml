@@ -295,6 +295,26 @@ jobs:
             --no-fail-on-empty-changeset \
             --parameter-overrides "${PARAM_OVERRIDES[@]}"
 
+      - name: Smoke-test the AgentCore runtime
+        # A green deploy says CloudFormation created the runtime. It does not
+        # say the program inside it boots, so this invokes it once for real.
+        # Every way the artifact can be wrong -- no ASGI app, missing SDK, an
+        # execution role that cannot reach Bedrock -- fails at the first
+        # invocation and nowhere earlier.
+        if: env.ENABLE_AGENTCORE == 'true'
+        run: |
+          RUNTIME_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='AgentCoreRuntimeArn'].OutputValue" \
+            --output text)
+          if [ -z "${RUNTIME_ARN}" ] || [ "${RUNTIME_ARN}" = "None" ]; then
+            echo "AgentCore is enabled but the stack published no AgentCoreRuntimeArn." >&2
+            exit 1
+          fi
+          echo "Invoking ${RUNTIME_ARN}"
+          python3 scripts/agentcore_smoke.py --runtime-arn "${RUNTIME_ARN}" --region "${AWS_REGION}"
+
       - name: Sync team configs to S3
         run: |
           CONFIG_BUCKET=$(aws cloudformation describe-stacks \

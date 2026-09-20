@@ -200,10 +200,21 @@ that zip and imports it before uploading, and
 `tests/test_agentcore_entrypoint.py` boots the real artifact over `GET /ping`
 and `POST /invocations`.
 
-**None of the AgentCore path is verified against live AWS yet.** It is
-exercised against the declared service model and stubs. Nothing selects it
-until `AGENT_RUNTIME=agentcore`, and no agent carries a `runtimeArn` until
-something provisions one — which is the next phase.
+**Every deploy invokes the runtime for real.** A green `sam deploy` says
+CloudFormation created the resource; it says nothing about whether the program
+inside it boots, and every way the artifact can be wrong — no ASGI app, a zip
+missing the SDK, an execution role that cannot reach Bedrock — fails at the
+first invocation and nowhere earlier. `scripts/agentcore_smoke.py` runs after
+the deploy and sends one real turn. Three outcomes, kept distinct on purpose:
+a runtime that answers passes; a runtime that errors, returns nothing or
+returns HTTP ≥ 400 **fails the deploy**; and a CI role that is not allowed to
+invoke (or a botocore that does not know the service) is the *check* failing
+rather than the runtime — it warns loudly with `NOT VERIFIED` and does not
+fail the deploy, because failing every deploy on a permissions gap would be
+wrong and reporting it as a pass would be worse.
+
+`AGENT_RUNTIME=agentcore` is the default, and an agent needs no `runtimeArn`
+of its own — the stack runtime serves it.
 
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them downstream (`schema_validate.py`, `structured_transform.py`).
