@@ -349,6 +349,50 @@ Every run is async: `POST /team/task` returns a `run_id`, then poll `GET /team/t
 | `LAMBDA_SUBNET_IDS` | Comma-separated private subnet IDs |
 | `RDS_SECURITY_GROUP_ID` | RDS security group for Lambda ingress |
 
+### Egress: IPv6 where AWS serves it
+
+Lambda runs in the VPC with no NAT Gateway. Egress is an Egress-Only Internet
+Gateway, which is IPv6-only, so `AWS_USE_DUALSTACK_ENDPOINT=true` is set
+globally and every SDK call that can go over IPv6 does.
+
+That setting is a *blanket* instruction, and that is the trap. Every boto3
+client builds `{service}.{region}.api.aws` unless an `AWS_ENDPOINT_URL_*`
+variable overrides it, and where AWS publishes no dual-stack endpoint that
+hostname does not exist — the call dies resolving DNS. **Inside the VPC, at
+run time.** Not at deploy, not in CI, because the runner has no dual-stack
+setting of its own. Three services were in that state: `bedrock-agentcore`
+(the substrate *every* agent turn runs on, which is why the AgentCore smoke
+test passed on the runner and a real pipeline step would not have),
+`bedrock-agentcore-control`, and `secretsmanager` — the last being the worst,
+because `rag.py` swallows the failure and degrades to no RAG context, so runs
+get quietly worse rather than failing.
+
+So the template pins two different things, for two different reasons:
+
+- **No dual-stack endpoint exists** — the six Bedrock services and Secrets
+  Manager. The pin is the only thing making the call work.
+- **A dual-stack endpoint exists and IPv4 is still right** — S3 and DynamoDB.
+  Their Gateway VPC endpoints are free and keep the traffic off the internet;
+  a dual-stack hostname would push it out through the Egress-Only Internet
+  Gateway instead, worse on both cost and exposure. IPv6 is the goal where it
+  replaces NAT, not where it replaces a private path.
+
+The variable name comes from the service's **serviceId**, not its client
+name — Secrets Manager is `AWS_ENDPOINT_URL_SECRETS_MANAGER`, Step Functions
+is `AWS_ENDPOINT_URL_SFN`. A misspelled variable is read by nothing and pins
+nothing while looking exactly like a pin that works.
+
+`tests/test_dualstack_endpoints.py` is the gate: offline, and it fails if a
+new `boto3.client(...)` names a service that is neither known to have IPv6 nor
+pinned. `scripts/check_dualstack_pins.py` covers the other direction, which
+tests cannot see — it resolves each hostname and reports pins that have become
+unnecessary because AWS has since shipped dual-stack, so the list shrinks
+instead of ossifying. It runs in CI as an informational step, never a gate: it
+reads a DNS outage as "nothing has dual-stack", and a network blip must not
+redden a deploy.
+
+No VPC endpoints were added for any of this.
+
 ---
 
 ## API Endpoints

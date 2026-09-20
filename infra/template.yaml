@@ -279,15 +279,44 @@ Globals:
         # Explicit dual-stack endpoint for Step Functions so boto3 resolves
         # AAAA records and connects via the Egress-Only Internet Gateway.
         STEPFUNCTIONS_ENDPOINT_URL: !Sub "https://states.${AWS::Region}.api.aws"
-        # Bedrock does not return AAAA records, so it cannot use the dual-stack
-        # api.aws hostname. Pin all Bedrock clients to the standard amazonaws.com
-        # hostnames so the Interface VPC Endpoint private DNS intercepts them.
-        # These env vars are auto-read by botocore (>= 1.29) and take precedence
-        # over AWS_USE_DUALSTACK_ENDPOINT.
+        # ── IPv4 pins: services with no dual-stack endpoint ──────────────────
+        #
+        # AWS_USE_DUALSTACK_ENDPOINT above is a blanket instruction, so every
+        # client builds {service}.{region}.api.aws unless pinned here. For a
+        # service AWS does not publish a dual-stack endpoint for, that hostname
+        # does not exist and the call dies in DNS resolution -- not at deploy,
+        # not in CI (no dual-stack there), only inside the VPC at run time.
+        #
+        # These env vars are read by botocore and take precedence over
+        # AWS_USE_DUALSTACK_ENDPOINT. The variable name is derived from the
+        # service's own serviceId, not its client name, which is why Secrets
+        # Manager is SECRETS_MANAGER and not SECRETSMANAGER.
+        #
+        # scripts/check_dualstack_pins.py re-tests every pin against DNS and
+        # reports the ones that can be removed, so this list shrinks as AWS
+        # ships dual-stack rather than ossifying.
         AWS_ENDPOINT_URL_BEDROCK: !Sub "https://bedrock.${AWS::Region}.amazonaws.com"
         AWS_ENDPOINT_URL_BEDROCK_RUNTIME: !Sub "https://bedrock-runtime.${AWS::Region}.amazonaws.com"
         AWS_ENDPOINT_URL_BEDROCK_AGENT: !Sub "https://bedrock-agent.${AWS::Region}.amazonaws.com"
         AWS_ENDPOINT_URL_BEDROCK_AGENT_RUNTIME: !Sub "https://bedrock-agent-runtime.${AWS::Region}.amazonaws.com"
+        # AgentCore is the substrate every agent turn runs on and it was never
+        # pinned: bedrock-agentcore.{region}.api.aws does not resolve, so every
+        # invoke from inside the VPC failed in DNS. CI never saw it because the
+        # runner has no AWS_USE_DUALSTACK_ENDPOINT set.
+        AWS_ENDPOINT_URL_BEDROCK_AGENTCORE: !Sub "https://bedrock-agentcore.${AWS::Region}.amazonaws.com"
+        AWS_ENDPOINT_URL_BEDROCK_AGENTCORE_CONTROL: !Sub "https://bedrock-agentcore-control.${AWS::Region}.amazonaws.com"
+        # Secrets Manager has no dual-stack endpoint either. rag.py swallows the
+        # failure and degrades to no RAG context; gemini.py raises. One is
+        # invisible, which is worse.
+        AWS_ENDPOINT_URL_SECRETS_MANAGER: !Sub "https://secretsmanager.${AWS::Region}.amazonaws.com"
+        # S3 and DynamoDB *do* have dual-stack endpoints, and are pinned to IPv4
+        # anyway -- deliberately. Their Gateway VPC endpoints are free and keep
+        # this traffic off the internet entirely; the dual-stack hostnames would
+        # route it out through the Egress-Only Internet Gateway instead, which
+        # is strictly worse on both cost and exposure. IPv6 is the goal where it
+        # replaces NAT, not where it replaces a private path.
+        AWS_ENDPOINT_URL_S3: !Sub "https://s3.${AWS::Region}.amazonaws.com"
+        AWS_ENDPOINT_URL_DYNAMODB: !Sub "https://dynamodb.${AWS::Region}.amazonaws.com"
 
 Resources:
   VectorDbSecret:
