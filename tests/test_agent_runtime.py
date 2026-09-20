@@ -84,14 +84,13 @@ def test_an_empty_runtime_var_falls_back_to_classic(monkeypatch):
     assert agent_runtime.runtime_name() == "classic"
 
 
-def test_agentcore_refuses_to_run_rather_than_guessing(monkeypatch):
-    # The InvokeAgentRuntime envelope is not confirmed yet. A plausible
-    # implementation written from memory would fail in production instead of
-    # here, so it fails here.
+def test_agentcore_is_implemented_but_still_opt_in():
+    # It was a NotImplementedError placeholder until the service model gave
+    # the real envelope. It is implemented now -- and still reached only when
+    # AGENT_RUNTIME asks for it. See tests/test_agentcore_runtime.py.
     runtime = agent_runtime.AgentCoreRuntime()
-    with pytest.raises(NotImplementedError):
-        runtime.invoke(agent_runtime.AgentRef(runtime_arn="arn:aws:bedrock-agentcore:::runtime/x"),
-                       session_id="s", input_text="hi")
+    assert hasattr(runtime, "invoke")
+    assert agent_runtime.runtime_name() == "classic"
 
 
 # ── what each runtime needs to be usable ─────────────────────────────────────
