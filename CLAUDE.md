@@ -300,6 +300,28 @@ completed would be worse than reporting it as unknown. `tests/test_a2a.py`
 holds the served card and `openapi/teamweave.yaml` to each other in both
 directions, so neither can grow a field the other does not know.
 
+**Discovery is the other half.** `contextweave_client` built every request as
+`{CONTEXTWEAVE_URL}` plus a path constant held in *this* repository — so a
+route moving in ContextWeave surfaced here as a 404 the RAG layer degraded
+past in silence: the run lost its grounding and nothing said so.
+`a2a_discovery.resolve_base_url()` now reads ContextWeave's own card and uses
+the interface URL it publishes. The env var remains the *seed*, because
+discovery needs a first address.
+
+It is strictly additive, which is the property that matters: a sibling serving
+no card, an unreachable one, a malformed card, or one naming no `HTTP+JSON`
+interface all fall back to the seed — exactly the old behaviour. `A2A_DISCOVERY=0`
+opts out without even attempting a fetch, and any exception in discovery is
+caught, because a knowledge layer degrading to no context is designed
+behaviour here while a discovery layer taking the run down would not be. The
+card is cached per container (negative results too, so a card-less sibling is
+not re-asked every turn) with a TTL so a redeployed sibling is picked up.
+
+The binding is *matched*, not assumed: A2A orders `supportedInterfaces` by
+preference and a client takes the first it supports, so taking the first entry
+regardless would send HTTP+JSON to a gRPC endpoint on any sibling listing more
+than one.
+
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them downstream (`schema_validate.py`, `structured_transform.py`).
 
