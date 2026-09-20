@@ -56,11 +56,11 @@ def use(monkeypatch, runtime):
 # ── selection ────────────────────────────────────────────────────────────────
 
 
-def test_classic_is_the_default():
-    # Nothing changes until someone opts in. This is the whole safety property
-    # of the seam.
-    assert agent_runtime.runtime_name() == "classic"
-    assert isinstance(agent_runtime.get_runtime(), agent_runtime.BedrockAgentsClassicRuntime)
+def test_classic_is_still_reachable_by_name():
+    # It runs the agents deployed before the switch, and is the rollback.
+    assert isinstance(
+        agent_runtime._RUNTIMES["classic"](), agent_runtime.BedrockAgentsClassicRuntime
+    )
 
 
 def test_agentcore_is_selectable_by_name(monkeypatch):
@@ -73,24 +73,17 @@ def test_selection_is_case_and_space_insensitive(monkeypatch):
     assert agent_runtime.runtime_name() == "agentcore"
 
 
-def test_an_unknown_runtime_falls_back_to_classic(monkeypatch):
-    # A typo in an environment variable should not take the orchestrator down.
-    monkeypatch.setenv("AGENT_RUNTIME", "agentcorre")
-    assert agent_runtime.runtime_name() == "classic"
-
-
-def test_an_empty_runtime_var_falls_back_to_classic(monkeypatch):
+def test_an_empty_runtime_var_falls_back_to_the_default(monkeypatch):
+    # A typo or a blank should not take the orchestrator down.
     monkeypatch.setenv("AGENT_RUNTIME", "")
-    assert agent_runtime.runtime_name() == "classic"
+    assert agent_runtime.runtime_name() == agent_runtime.DEFAULT_RUNTIME
 
 
-def test_agentcore_is_implemented_but_still_opt_in():
+def test_agentcore_is_implemented_and_is_now_the_default():
     # It was a NotImplementedError placeholder until the service model gave
-    # the real envelope. It is implemented now -- and still reached only when
-    # AGENT_RUNTIME asks for it. See tests/test_agentcore_runtime.py.
-    runtime = agent_runtime.AgentCoreRuntime()
-    assert hasattr(runtime, "invoke")
-    assert agent_runtime.runtime_name() == "classic"
+    # the real envelope. See tests/test_agentcore_runtime.py.
+    assert hasattr(agent_runtime.AgentCoreRuntime(), "invoke")
+    assert agent_runtime.DEFAULT_RUNTIME == "agentcore"
 
 
 # ── what each runtime needs to be usable ─────────────────────────────────────
@@ -212,3 +205,19 @@ def test_the_give_up_message_names_a_transport_error_too(monkeypatch):
     with pytest.raises(StepFailed) as excinfo:
         bedrock_invoke.invoke_agent("a", "b", "s", "p", max_retries=1)
     assert "connection reset" in str(excinfo.value)
+
+
+def test_agentcore_is_now_the_default_and_classic_the_rollback(monkeypatch):
+    # Bedrock Agents Classic is in maintenance and its model catalogue is
+    # frozen, so it is no longer where new work goes. It stays reachable for
+    # one variable's worth of rollback until AgentCore has served real
+    # traffic; it takes no new features.
+    monkeypatch.delenv("AGENT_RUNTIME", raising=False)
+    assert agent_runtime.runtime_name() == "agentcore"
+    monkeypatch.setenv("AGENT_RUNTIME", "classic")
+    assert isinstance(agent_runtime.get_runtime(), agent_runtime.BedrockAgentsClassicRuntime)
+
+
+def test_an_unknown_runtime_now_falls_back_to_agentcore(monkeypatch):
+    monkeypatch.setenv("AGENT_RUNTIME", "agentcorre")
+    assert agent_runtime.runtime_name() == "agentcore"

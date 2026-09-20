@@ -81,6 +81,8 @@ def load_team_config(team: str, version: str) -> Tuple[TeamConfig, Dict[str, Any
                 model_id=br.get("model_id", "us.amazon.nova-micro-v1:0"),
                 shadow_model_id=br.get("shadow_model_id", ""),
                 model_aliases=br.get("model_aliases", {}),
+                runtimeArn=br.get("runtimeArn", ""),
+                qualifier=br.get("qualifier", ""),
             ),
             goal_template=a.get("goal_template",""),
             schema_ref=a.get("schema_ref",""),

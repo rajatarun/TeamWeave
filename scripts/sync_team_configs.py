@@ -30,7 +30,12 @@ from botocore.exceptions import ClientError
 
 # Per agent, the keys provisioning owns. Everything else in `bedrock` (model
 # ids, aliases) is a definition the repository sets.
-RUNTIME_AGENT_KEYS = ("agentId", "aliasId")
+#
+# agentId/aliasId are Bedrock Agents Classic; runtimeArn/qualifier are
+# AgentCore. Both are listed because both are runtime identity, and leaving
+# runtimeArn out would reproduce exactly the bug this script exists to fix --
+# silently, on the newer path, the first time an agent was moved.
+RUNTIME_AGENT_KEYS = ("agentId", "aliasId", "runtimeArn", "qualifier")
 # Model-alias maps are filled in by provisioning too: the keys are declared in
 # the repo, the values are alias ids it creates.
 RUNTIME_ALIAS_MAP = "model_aliases"

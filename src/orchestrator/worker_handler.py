@@ -161,6 +161,8 @@ def _invoke_with_dpo(
             session_id,
             prompt,
             shadow_alias_id=shadow_alias_id,
+            runtime_arn=agent.bedrock.runtimeArn,
+            qualifier=agent.bedrock.qualifier,
         )
 
     return dpo_collector.collect_dpo_step(
@@ -287,6 +289,8 @@ def run_team_pipeline(
             raw_text = invoke_agent(
                 agent.bedrock.agentId, agent.bedrock.aliasId, run_id, prompt,
                 shadow_alias_id=shadow_alias_id,
+                runtime_arn=agent.bedrock.runtimeArn,
+                qualifier=agent.bedrock.qualifier,
             )
 
         try:

@@ -29,6 +29,14 @@ from typing import Any, Dict, Optional
 
 DEFAULT_MODEL_ID = "us.amazon.nova-micro-v1:0"
 DEFAULT_MAX_TOKENS = 4096
+# What a Classic agent carried as its instruction. The per-agent part -- role,
+# step goal, output contract -- is already composed into the prompt by
+# prompt_builder, so this only has to hold the contract steady.
+DEFAULT_INSTRUCTION = (
+    "You are an agent in a TeamWeave pipeline. Follow the ROLE and STEP_GOAL "
+    "given in the message. Obey the OUTPUT CONTRACT exactly: return only valid "
+    "JSON matching the step's schema, with no markdown and no commentary."
+)
 
 _client = None
 
@@ -83,7 +91,16 @@ def run_turn(payload: Any, *, client=None, env: Optional[Dict[str, str]] = None)
         # model instead of at the request.
         return {"error": "payload contained no prompt", "result": ""}
 
-    instruction = (env.get("AGENT_INSTRUCTION") or "").strip()
+    # Per-turn instruction wins over the runtime's default: one runtime serves
+    # every TeamWeave agent, so the identity has to arrive with the request
+    # rather than be baked into the deployment.
+    instruction = ""
+    if isinstance(payload, dict):
+        instruction = str(payload.get("instruction") or "").strip()
+    if not instruction:
+        instruction = (env.get("AGENT_INSTRUCTION") or "").strip()
+    if not instruction:
+        instruction = DEFAULT_INSTRUCTION
     model_id = (env.get("AGENT_MODEL_ID") or "").strip() or DEFAULT_MODEL_ID
     try:
         max_tokens = int(env.get("AGENT_MAX_TOKENS") or DEFAULT_MAX_TOKENS)

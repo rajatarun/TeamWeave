@@ -184,3 +184,20 @@ def test_a_committed_alias_is_not_wiped_by_an_empty_remote_alias():
     remote["agents"][0]["bedrock"]["model_aliases"]["us.amazon.nova-micro-v1:0"] = ""
     merged = sync_mod.merge_team(local, remote)
     assert merged["agents"][0]["bedrock"]["model_aliases"]["us.amazon.nova-micro-v1:0"] == "REPO-ALIAS"
+
+
+def test_an_agentcore_runtime_arn_also_survives_the_sync():
+    # The same clobber, one substrate later. agentId/aliasId are Classic;
+    # runtimeArn/qualifier are AgentCore. Both are runtime identity, and
+    # covering only the first would have reproduced this bug silently on the
+    # newer path the first time an agent was moved.
+    local, remote = local_team(), remote_team()
+    remote["agents"][0]["bedrock"]["runtimeArn"] = "arn:aws:bedrock-agentcore:us-east-1:1:runtime/r"
+    remote["agents"][0]["bedrock"]["qualifier"] = "PROD"
+
+    merged = sync_mod.merge_team(local, remote)
+    bedrock = merged["agents"][0]["bedrock"]
+    assert bedrock["runtimeArn"].endswith("runtime/r")
+    assert bedrock["qualifier"] == "PROD"
+    # And the Classic pair is still preserved alongside it.
+    assert bedrock["agentId"] == "AGENT123"

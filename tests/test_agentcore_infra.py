@@ -108,8 +108,9 @@ def test_the_entrypoint_matches_a_module_that_exists(template):
 
 
 def test_everything_is_behind_the_feature_condition(template):
-    # These are billable, and the runtime cannot create until its code
-    # artifact is in the bucket. Nothing should appear on an ordinary deploy.
+    # Still conditional, but now the condition is the rollback: setting
+    # EnableAgentCore=false takes the whole substrate back to Classic in one
+    # parameter rather than a revert.
     for name in ("AgentCoreMemory", "AgentCoreRuntime", "AgentCoreRuntimeRole",
                  "AgentCoreGateway", "AgentCoreGatewayRole"):
         assert template["Resources"][name].get("Condition") == "AgentCoreEnabled", name
@@ -118,9 +119,19 @@ def test_everything_is_behind_the_feature_condition(template):
     assert template["Resources"]["ScreenWeaveGatewayTarget"]["Condition"] == "AgentCoreGatewayTargetEnabled"
 
 
-def test_the_feature_is_off_by_default(template):
-    assert template["Parameters"]["EnableAgentCore"]["Default"] == "false"
+def test_agentcore_is_the_default_substrate(template):
+    # Classic is in maintenance with a frozen model catalogue; AgentCore is
+    # the platform's substrate now. Classic stays selectable as a rollback.
+    assert template["Parameters"]["EnableAgentCore"]["Default"] == "true"
     assert set(template["Parameters"]["EnableAgentCore"]["AllowedValues"]) == {"true", "false"}
+
+
+def test_the_worker_is_told_which_substrate_and_where(template):
+    # The runtime rejects every call without an ARN, so selecting agentcore
+    # without passing the ARN would fail every step. They travel together.
+    env = template["Globals"]["Function"]["Environment"]["Variables"]
+    assert "AGENT_RUNTIME" in env
+    assert "AGENTCORE_RUNTIME_ARN" in env
 
 
 def test_the_conditional_outputs_are_guarded(template):
@@ -231,3 +242,22 @@ def test_the_gateway_role_keeps_the_confused_deputy_guards(template):
     assert stmt["Principal"]["Service"] == "bedrock-agentcore.amazonaws.com"
     assert "aws:SourceAccount" in json.dumps(stmt["Condition"])
     assert "aws:SourceArn" in json.dumps(stmt["Condition"])
+
+
+def test_classic_provisioning_is_skipped_on_the_agentcore_path():
+    """The provisioning step is Bedrock Agents Classic, and only that.
+
+    It invokes ProvisionTeamFunction, which calls CreateAgent and writes
+    agentId/aliasId back into team.json. An agent on AgentCore has no
+    equivalent: its runtime is an AWS::BedrockAgentCore::Runtime created by
+    this template, and its runtimeArn is a stack output rather than something
+    a Lambda provisions. Leaving the step running after the substrate flips
+    would rebuild Classic agents that nothing invokes.
+    """
+    workflow = yaml.safe_load((REPO / ".github" / "workflows" / "deploy.yml").read_text())
+    step = next(s for s in workflow["jobs"]["deploy"]["steps"]
+                if s.get("name") == "Provision team agents")
+    assert step.get("if"), "provisioning must be conditional on the substrate"
+    assert "ENABLE_AGENTCORE" in step["if"]
+    # The flag it branches on has to exist, or the condition is always true.
+    assert workflow["env"]["ENABLE_AGENTCORE"] is not None

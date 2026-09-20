@@ -86,11 +86,27 @@ def test_the_instruction_becomes_the_system_prompt():
     assert client.calls[0]["system"] == [{"text": "You are terse."}]
 
 
-def test_no_instruction_means_no_system_block():
-    # Some models reject an empty system block outright.
+def test_a_per_turn_instruction_beats_the_runtime_default():
+    # This is what lets one runtime serve every agent: identity arrives with
+    # the request instead of being baked into the deployment.
+    client = FakeBedrock()
+    agent_app.run_turn(
+        {"prompt": "p", "instruction": "You are the editor."},
+        client=client,
+        env={"AGENT_INSTRUCTION": "You are the writer."},
+    )
+    assert client.calls[0]["system"] == [{"text": "You are the editor."}]
+
+
+def test_with_no_instruction_anywhere_the_contract_still_holds():
+    # Never an empty system block -- some models reject one -- and never
+    # silently unconstrained: the JSON output contract is what the worker
+    # validates against afterwards.
     client = FakeBedrock()
     agent_app.run_turn({"prompt": "p"}, client=client, env={})
-    assert "system" not in client.calls[0]
+    system = client.calls[0]["system"][0]["text"]
+    assert system == agent_app.DEFAULT_INSTRUCTION
+    assert "JSON" in system
 
 
 def test_the_model_id_comes_from_the_environment():

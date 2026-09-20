@@ -19,9 +19,17 @@ class InvokeAgentTests(unittest.TestCase):
         os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
         os.environ.setdefault("AWS_ACCESS_KEY_ID", "test")
         os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test")
+        # These patch `brt` -- the Classic client -- so they test the Classic
+        # transport and must say so. AgentCore is the default substrate now
+        # and never touches brt, which is what made them fail when it flipped.
+        os.environ["AGENT_RUNTIME"] = "classic"
 
         cls.bedrock_invoke = importlib.import_module("src.orchestrator.bedrock_invoke")
         cls.StepFailed = importlib.import_module("src.orchestrator.models").StepFailed
+
+    @classmethod
+    def tearDownClass(cls):
+        os.environ.pop("AGENT_RUNTIME", None)
 
     def test_access_denied_fails_fast_without_retries(self):
         err = _FakeClientError(
