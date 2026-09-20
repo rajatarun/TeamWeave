@@ -41,3 +41,5 @@ build-AgentMetricsDashboardFunction: package-lambda
 build-UnifiedObservabilityFunction: package-lambda
 
 build-ConversationFunction: package-lambda
+
+build-A2AFunction: package-lambda
