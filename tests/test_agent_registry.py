@@ -413,6 +413,14 @@ class QuotaLimitedControl:
         return {}
 
 
+def test_the_quota_request_names_the_account():
+    # A support request that says "this account" is a round trip; the ARN
+    # already carries the id.
+    assert reg.account_of("arn:aws:bedrock-agentcore:us-east-1:239571291755:runtime/x") == "239571291755"
+    assert reg.account_of("") == ""
+    assert reg.account_of("not-an-arn") == ""
+
+
 def test_a_quota_error_is_told_apart_from_a_real_error():
     assert reg.is_quota_error(quota_error())
     assert not reg.is_quota_error(ClientError(
@@ -437,8 +445,11 @@ def test_hitting_the_quota_is_impossible_to_miss(monkeypatch, capsys):
     assert "::warning::" in out
     assert "Registered 2 of 4" in out
     # The two ways out, named where the failure is read.
+    # The remedy has to be filable as written: which quota, which account,
+    # which region, and the number to ask for.
     assert "maxEndpointsPerAgent" in out
-    assert "their own runtimes" in out
+    assert "AWS Support" in out
+    assert "at least 4" in out, "the request needs the number of agents"
 
 
 def test_the_agents_that_did_register_are_named(monkeypatch, capsys):

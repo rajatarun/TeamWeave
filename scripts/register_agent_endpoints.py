@@ -54,6 +54,12 @@ RUNTIME_KEYS_OWNED_HERE = ("runtimeArn", "qualifier")
 QUOTA_ERROR_CODES = {"ServiceQuotaExceededException", "LimitExceededException"}
 
 
+def account_of(runtime_arn: str) -> str:
+    """The account id out of an ARN, for a quota request that names it."""
+    parts = str(runtime_arn or "").split(":")
+    return parts[4] if len(parts) > 4 and parts[4].isdigit() else ""
+
+
 def is_quota_error(exc: ClientError) -> bool:
     code = ((exc.response or {}).get("Error") or {}).get("Code", "")
     return code in QUOTA_ERROR_CODES
@@ -327,12 +333,15 @@ def main() -> int:
         # to miss.
         announce(
             "warning",
-            f"Registered {len(registered)} of {len(names)} agent(s); "
-            f"{len(unregistered)} could not be registered and fall back to the "
-            f"runtime's default endpoint: {', '.join(sorted(unregistered))}. "
-            f"AgentCore's per-runtime endpoint quota was reached ({quota_message[:200]}). "
-            "Raise maxEndpointsPerAgent for this account, or give the remaining "
-            "agents their own runtimes.",
+            f"Registered {len(registered)} of {len(names)} agent(s). "
+            f"AgentCore's per-runtime endpoint quota is reached, so these "
+            f"{len(unregistered)} fall back to the runtime's default endpoint: "
+            f"{', '.join(sorted(unregistered))}. "
+            f"Remedy: raise the maxEndpointsPerAgent quota for account "
+            f"{account_of(args.runtime_arn) or 'this account'} in {args.region} to at "
+            f"least {len(names)} via AWS Support. Until it is raised this warning "
+            f"repeats every deploy and the platform runs degraded, not broken. "
+            f"({quota_message[:160]})",
         )
         return 0
 
