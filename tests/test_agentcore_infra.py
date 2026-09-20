@@ -103,8 +103,14 @@ def test_the_entrypoint_matches_a_module_that_exists(template):
     assert isinstance(entry, list) and entry, "EntryPoint must be a non-empty list"
     # A runtime pointing at a module that is not packaged fails at first
     # invocation, long after the deploy reports success.
-    module_path = REPO / (entry[0].replace(".", "/") + ".py")
-    assert module_path.is_file(), f"{entry[0]} does not resolve to a file ({module_path})"
+    # The zip is flat, so the entrypoint names a file at its root. It must be
+    # one the packaging step actually copies there.
+    assert entry[0] == "app.py", "entrypoint must match the packaged layout"
+    assert (REPO / "src" / "agentcore" / entry[0]).is_file()
+
+    workflow = (REPO / ".github" / "workflows" / "deploy.yml").read_text()
+    assert "src/agentcore/app.py src/agentcore/agent.py .agentcore-build/" in workflow, \
+        "packaging step no longer copies the entrypoint to the zip root"
 
 
 def test_everything_is_behind_the_feature_condition(template):
@@ -162,14 +168,15 @@ def test_the_workflow_serialises_deploys():
     assert workflow["concurrency"]["cancel-in-progress"] is False
 
 
-def test_packaging_cannot_take_the_deploy_down():
-    # The agent zip is an optional artifact for a feature that defaults to
-    # off. If pip or the upload fails, that must cost the ability to flip
-    # EnableAgentCore -- not the whole production deploy.
+def test_packaging_failure_stops_the_deploy():
+    # AgentCore is the substrate now and the Runtime cannot create without
+    # this artifact, so a packaging failure must stop the deploy rather than
+    # let CloudFormation try and roll back.
     workflow = yaml.safe_load((REPO / ".github" / "workflows" / "deploy.yml").read_text())
     step = next(s for s in workflow["jobs"]["deploy"]["steps"]
                 if s.get("name") == "Package the AgentCore agent")
-    assert step.get("continue-on-error") is True
+    assert step.get("continue-on-error") is not True
+    assert "import app" in step["run"], "packaging must prove the entrypoint boots"
 
 
 def test_the_memory_name_default_matches_the_service_pattern(template, schemas):

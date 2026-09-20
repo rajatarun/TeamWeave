@@ -15,7 +15,7 @@ import pytest
 
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
-from src.agentcore import app as agent_app  # noqa: E402
+from src.agentcore import agent as agent_app  # noqa: E402
 from src.orchestrator import agent_runtime as ar  # noqa: E402
 
 
