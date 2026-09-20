@@ -285,6 +285,14 @@ jobs:
             --region "${AWS_REGION}"
 
       - name: Provision team agents
+        env:
+          # Provisioning walks every team and creates any missing Bedrock
+          # agents, which takes longer than the CLI's 60s default read
+          # timeout. On timeout botocore retries the invoke, so a single step
+          # fired up to three concurrent 15-minute provisioning runs racing to
+          # create the same agents -- and then failed CI anyway. One attempt,
+          # and wait as long as the function is allowed to run.
+          AWS_MAX_ATTEMPTS: "1"
         run: |
           PROVISION_FUNCTION_ARN=$(aws cloudformation describe-stacks \
             --stack-name "${STACK_NAME}" \
@@ -295,6 +303,8 @@ jobs:
           aws lambda invoke \
             --function-name "${PROVISION_FUNCTION_ARN}" \
             --region "${AWS_REGION}" \
+            --cli-read-timeout 900 \
+            --cli-connect-timeout 60 \
             --cli-binary-format raw-in-base64-out \
             --payload '{"httpMethod":"POST","path":"/teams","headers":{},"body":"{}","queryStringParameters":null}' \
             provision_response.json
