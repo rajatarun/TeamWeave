@@ -151,10 +151,35 @@ This exists because Bedrock Agents Classic closed to new customers on
 30 July 2026, takes no further features, and its model catalogue is frozen as
 of that date — a model released after it is reachable only through AgentCore.
 Existing workloads keep running, so the seam is preparation, not a migration.
-`AgentCoreRuntime` is declared and deliberately raises `NotImplementedError`:
-the `InvokeAgentRuntime` request/response envelope is not confirmed yet, and a
-plausible implementation written from memory would fail in production instead
-of at the seam.
+
+`AgentCoreRuntime` is implemented, against the botocore service model for
+`bedrock-agentcore` (2024-02-28) rather than from recollection. The detail
+worth knowing: `runtimeSessionId` has a **minimum length of 33**, and
+TeamWeave's run-scoped session ids are shorter — `agentcore_session_id()` pads
+deterministically (a hash of the original, never random) so repeated turns of
+one run land on the same AgentCore session. The response body is a *streaming
+blob*, not an event stream, so it is read once rather than iterated.
+
+Telemetry does not lapse across the substrate: `observe_agentcore_request()`
+routes the call through the same mcp-observatory wrapper, under the same
+`invoke_agent` operation name, so a migrated agent's spans stay comparable
+with its own history. Shadow invocation is alias-shaped and has no AgentCore
+equivalent yet — it warns rather than silently collecting nothing, which would
+leave the DPO flywheel looking healthy while doing nothing.
+
+`src/agentcore/app.py` is the program an AgentCore runtime runs. Classic is
+declarative (register an instruction, Bedrock executes it); AgentCore hosts
+your code behind `POST /invocations`, so the agent has to exist as a program.
+It is thin on purpose: `prompt_builder` already composes the whole per-turn
+prompt and the worker validates the result afterwards, so the program only
+applies the instruction as a system prompt and calls Converse. Per-agent
+settings (`AGENT_INSTRUCTION`, `AGENT_MODEL_ID`, `AGENT_MAX_TOKENS`) arrive as
+environment variables set at `CreateAgentRuntime` time.
+
+**None of the AgentCore path is verified against live AWS yet.** It is
+exercised against the declared service model and stubs. Nothing selects it
+until `AGENT_RUNTIME=agentcore`, and no agent carries a `runtimeArn` until
+something provisions one — which is the next phase.
 
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them downstream (`schema_validate.py`, `structured_transform.py`).
@@ -265,3 +290,10 @@ curl -sS "$TEAMWEAVE_API_BASE/observability"
 - Test coverage lives in `tests/` — CI runs `pytest tests/` before `sam build`, so a failing test stops the deploy
 - CI/CD triggers on push to `main` — the GitHub Actions workflow runs `sam build` + `sam deploy`
 - Team configs in `config/examples/` are examples only; live configs are fetched from S3 at runtime
+- **Never `aws s3 sync` the team configs.** Provisioning writes the Bedrock
+  `agentId`/`aliasId` back into the *same* S3 key, and a fresh CI checkout
+  always has the newer mtime — so a plain sync erased them on every deploy and
+  forced a full rebuild of every agent (which is how the provisioning step grew
+  past the CLI timeout, and how each deploy orphaned the previous deploy's
+  agents). `scripts/sync_team_configs.py` merges instead: the repository owns
+  definitions, S3 owns the runtime identifiers.
