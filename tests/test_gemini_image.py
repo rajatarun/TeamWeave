@@ -25,6 +25,29 @@ from src.orchestrator import gemini_image  # noqa: E402
 PNG = b"\x89PNG\r\n\x1a\n" + b"fake"
 
 
+@pytest.fixture(autouse=True)
+def no_ambient_key(monkeypatch):
+    """No test in this file may read the real key.
+
+    `GEMINI_SECRET_ARN` is set in CI and unset locally, and `generate` falls
+    back to `_get_gemini_key()` when `api_key` is empty -- so a test that
+    omitted it called Secrets Manager with live credentials, fetched the
+    production Gemini key, and then *passed* because the key was real. The
+    same test failed locally for the opposite reason. That is a unit test
+    whose result depends on which machine ran it, and one that reads a secret
+    it has no business reading.
+
+    Stubbing it here makes every test hermetic and makes a forgotten
+    `api_key=` fail loudly instead of reaching out to AWS.
+
+    It is patched on `gemini_image`, not on `gemini`: the module does
+    `from .gemini import _get_gemini_key`, so it holds its own reference and
+    patching the source module would change nothing.
+    """
+    monkeypatch.setattr(gemini_image, "_get_gemini_key",
+                        lambda: pytest.fail("a test reached for the real Gemini key"))
+
+
 def inline_response(data=None, mime="image/png"):
     return {"candidates": [{"content": {"parts": [
         {"inlineData": {"mimeType": mime,
@@ -65,10 +88,22 @@ def test_an_imagen_model_is_refused_rather_than_sent():
         gemini_image.generate("p", declared_model_id="imagen-3.0-generate-002", api_key="k")
 
 
-def test_a_missing_key_is_named_not_guessed_at():
+def test_a_missing_key_is_named_not_guessed_at(monkeypatch):
+    """An unset or empty secret must name itself rather than fail later.
+
+    Without the fixture above this passed locally and fetched a live secret in
+    CI, which is why it is explicit about the lookup returning nothing.
+    """
+    monkeypatch.setattr(gemini_image, "_get_gemini_key", lambda: "")
     with pytest.raises(RuntimeError, match="GEMINI_SECRET_ARN"):
         gemini_image.generate("p", declared_model_id="gemini-3.1-flash-lite-image",
                               api_key="", post=lambda *a, **k: inline_response())
+
+
+def test_nothing_here_falls_back_to_the_ambient_key():
+    """The guard itself: omitting api_key= must not silently reach AWS."""
+    with pytest.raises(BaseException, match="reached for the real Gemini key"):
+        gemini_image.generate("p", post=lambda *a, **k: inline_response())
 
 
 # ── which model ─────────────────────────────────────────────────────────────
