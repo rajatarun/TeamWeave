@@ -118,50 +118,6 @@
       },
       "goal_template": "You are a content generation agent. Your job is to produce structured JSON output directly from your knowledge and the context provided. Do NOT say the task is not supported. Do NOT say tools are required. The gemini_research tool is optional \u2014 use it only to look up specific facts if needed, then produce your output regardless. ALWAYS generate actual content. NEVER describe what you would do instead of doing it.\n\nPolish the single winning variant to final publish-ready LinkedIn copy. Integrate SEO keywords from the strategy pack naturally. Self-check: hook is contrarian and two lines, paragraphs are short, no hype words, first-person throughout, ends with question or sharp statement, 5-6 hashtags, 250-350 words, plain text. Fix all issues before output. DO NOT describe what you will do. DO NOT say the task requires tools. DO NOT say you cannot complete this. PRODUCE THE ACTUAL OUTPUT immediately using only the context provided to you. No tools are required \u2014 everything you need is in the input context. ",
       "schema_ref": "final_copy_v1"
-    },
-    {
-      "id": "TVT_DEPT-003_PBM-004_distribution",
-      "name": "Social Media / Distribution Manager",
-      "role_id": "PBM-004",
-      "department_id": "DEPT-003",
-      "bedrock": {
-        "agentId": "",
-        "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
-        "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "",
-          "us.amazon.nova-lite-v1:0": "",
-          "us.amazon.nova-pro-v1:0": "",
-          "us.amazon.nova-premier-v1:0": "",
-          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
-          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
-        }
-      },
-      "goal_template": "You are a content generation agent. Your job is to produce structured JSON output directly from your knowledge and the context provided. Do NOT say the task is not supported. Do NOT say tools are required. The gemini_research tool is optional \u2014 use it only to look up specific facts if needed, then produce your output regardless. ALWAYS generate actual content. NEVER describe what you would do instead of doing it.\n\nProduce a Distribution Plan for the approved LinkedIn post. Include: platform (LinkedIn), optimal post datetime (Tuesday or Thursday 8-10am or 5-6pm), hashtags (5-6, copy from final post), engagement_checklist (first 60 min actions), repurpose_ideas (2-3 formats this post could become). DO NOT describe what you will do. DO NOT say the task requires tools. DO NOT say you cannot complete this. PRODUCE THE ACTUAL OUTPUT immediately using only the context provided to you. No tools are required \u2014 everything you need is in the input context. ",
-      "schema_ref": "distribution_pack_v1"
-    },
-    {
-      "id": "TVT_DEPT-001_PBM-001A_director_approve",
-      "name": "Director Approval",
-      "role_id": "PBM-001A",
-      "department_id": "DEPT-001",
-      "bedrock": {
-        "agentId": "",
-        "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
-        "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "",
-          "us.amazon.nova-lite-v1:0": "",
-          "us.amazon.nova-pro-v1:0": "",
-          "us.amazon.nova-premier-v1:0": "",
-          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
-          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
-        }
-      },
-      "goal_template": "You are a content generation agent. Your job is to produce structured JSON output directly from your knowledge and the context provided. Do NOT say the task is not supported. Do NOT say tools are required. The gemini_research tool is optional \u2014 use it only to look up specific facts if needed, then produce your output regardless. ALWAYS generate actual content. NEVER describe what you would do instead of doing it.\n\nApprove or reject the final copy against the Creative Brief acceptance criteria. Check: mode followed correctly, hook is contrarian and two lines, first-person throughout, no hype words, correct structure, 250-350 words, 5-6 hashtags, plain text, no fabricated experience in MODE B. Output: approved (true/false), feedback, and if rejected a complete revision_reprompt the Writer can execute directly without any other context. DO NOT describe what you will do. DO NOT say the task requires tools. DO NOT say you cannot complete this. PRODUCE THE ACTUAL OUTPUT immediately using only the context provided to you. No tools are required \u2014 everything you need is in the input context. ",
-      "schema_ref": "approval_v1"
     }
   ],
   "workflow": [
@@ -221,44 +177,6 @@
         "TVT_DEPT-003_PBM-003_strategist.output",
         "TVT_DEPT-001_PBM-001_director.output"
       ]
-    },
-    {
-      "step": "TVT_DEPT-003_PBM-004_distribution",
-      "pre_tools": [
-        {
-          "name": "compute_optimal_post_time",
-          "args": {}
-        }
-      ],
-      "post_tools": [
-        {
-          "name": "format_distribution_checklist",
-          "args": {
-            "source_key": "TVT_DEPT-003_PBM-004_distribution.checklist"
-          }
-        }
-      ],
-      "inputs": [
-        "TVT_DEPT-003_PBM-003E_editor.output",
-        "TVT_DEPT-001_PBM-001_director.output"
-      ]
-    },
-    {
-      "step": "TVT_DEPT-001_PBM-001A_director_approve",
-      "post_tools": [
-        {
-          "name": "format_approval_decision",
-          "args": {
-            "source_key": "TVT_DEPT-001_PBM-001A_director_approve",
-            "output_key": "approval"
-          }
-        }
-      ],
-      "inputs": [
-        "TVT_DEPT-003_PBM-003E_editor.output",
-        "TVT_DEPT-003_PBM-004_distribution.output",
-        "TVT_DEPT-001_PBM-001_director.output"
-      ]
     }
   ],
   "schemas": {
@@ -271,20 +189,8 @@
     "draft_pack_v1": {
       "path": "config/examples/schemas/draft_pack_v1.json"
     },
-    "seo_pack_v1": {
-      "path": "config/examples/schemas/seo_pack_v1.json"
-    },
     "final_copy_v1": {
       "path": "config/examples/schemas/final_copy_v1.json"
-    },
-    "design_pack_v1": {
-      "path": "config/examples/schemas/design_pack_v1.json"
-    },
-    "distribution_pack_v1": {
-      "path": "config/examples/schemas/distribution_pack_v1.json"
-    },
-    "approval_v1": {
-      "path": "config/examples/schemas/approval_v1.json"
     }
   },
   "request_schema": {

@@ -201,3 +201,114 @@ def test_an_agentcore_runtime_arn_also_survives_the_sync():
     assert bedrock["qualifier"] == "PROD"
     # And the Classic pair is still preserved alongside it.
     assert bedrock["agentId"] == "AGENT123"
+
+
+# ── Pruning teams the repository no longer defines ───────────────────────────
+# Deleting a team from the repository removes it from nobody's view unless S3
+# is told: GET /teams still lists it, the UI still offers it, and running it
+# starts a pipeline whose definition no longer exists here.
+#
+# This is deliberately narrower than `aws s3 sync --delete`, which is banned
+# because it overwrites keys *within* a team and erased the provisioned ids
+# that provisioning writes back.
+
+class _FakeS3:
+    def __init__(self, keys):
+        self._keys = list(keys)
+        self.deleted = []
+
+    def get_paginator(self, name):
+        assert name == "list_objects_v2"
+        keys = self._keys
+
+        class _P:
+            def paginate(self, Bucket, Prefix):  # noqa: N803 - boto3 casing
+                yield {"Contents": [{"Key": k} for k in keys if k.startswith(Prefix)]}
+
+        return _P()
+
+    def delete_object(self, Bucket, Key):  # noqa: N803 - boto3 casing
+        self.deleted.append(Key)
+
+
+def _sync_module():
+    import importlib.util
+    from pathlib import Path as _Path
+
+    spec = importlib.util.spec_from_file_location(
+        "sync_team_configs", _Path(__file__).resolve().parents[1] / "scripts" / "sync_team_configs.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+KEYS = [
+    "teams/tarun_visibility_team/v1/team.json",
+    "teams/tarun_improvement_team/v1/team.json",
+    "teams/doc_rewrite_team/v1/team.json",
+    "teams/doc_rewrite_team/v1/notes.json",
+]
+
+
+def test_it_deletes_a_team_the_repository_no_longer_has():
+    mod = _sync_module()
+    s3 = _FakeS3(KEYS)
+    removed = mod.prune(s3, "b", "teams", {"tarun_visibility_team", "tarun_improvement_team"})
+    assert removed == 1
+    assert sorted(s3.deleted) == [
+        "teams/doc_rewrite_team/v1/notes.json",
+        "teams/doc_rewrite_team/v1/team.json",
+    ]
+
+
+def test_it_leaves_every_team_the_repository_still_defines():
+    mod = _sync_module()
+    s3 = _FakeS3(KEYS)
+    mod.prune(s3, "b", "teams", {"tarun_visibility_team", "tarun_improvement_team", "doc_rewrite_team"})
+    assert s3.deleted == []
+
+
+def test_a_dry_run_deletes_nothing():
+    mod = _sync_module()
+    s3 = _FakeS3(KEYS)
+    removed = mod.prune(s3, "b", "teams", {"tarun_visibility_team"}, dry_run=True)
+    assert removed == 2          # reported
+    assert s3.deleted == []      # not performed
+
+
+def test_it_only_looks_inside_the_team_prefix():
+    """Keys outside the prefix are not this function's business.
+
+    roles.json and departments.json live at the bucket root; a prune that
+    treated them as teams would delete the platform's own configuration.
+    """
+    mod = _sync_module()
+    s3 = _FakeS3(KEYS + ["roles.json", "departments.json", "agentcore/app.zip"])
+    mod.prune(s3, "b", "teams", {"tarun_visibility_team", "tarun_improvement_team"})
+    assert all(k.startswith("teams/doc_rewrite_team/") for k in s3.deleted), s3.deleted
+
+
+def test_a_loose_file_under_the_prefix_is_not_a_team():
+    """A team is a directory. `teams/notes.txt` is not one.
+
+    Splitting the key and taking the first segment makes any loose file look
+    like a team whose name the repository does not have — so it would be
+    deleted on the next deploy.
+    """
+    mod = _sync_module()
+    s3 = _FakeS3(KEYS + ["teams/README.md", "teams/index.json"])
+    mod.prune(s3, "b", "teams", {"tarun_visibility_team", "tarun_improvement_team"})
+    assert "teams/README.md" not in s3.deleted
+    assert "teams/index.json" not in s3.deleted
+
+
+def test_the_sync_refuses_to_prune_against_no_local_teams(tmp_path, capsys):
+    """An unreadable root must not be read as "delete everything"."""
+    mod = _sync_module()
+    calls = []
+    mod.prune = lambda *a, **k: calls.append(a)  # type: ignore[assignment]
+    empty = tmp_path / "teams"
+    empty.mkdir()
+    mod.sync(empty, "b", "teams", "us-east-1", dry_run=True, do_prune=True)
+    assert not calls, "pruned with nothing to compare against"
+    assert "refusing to prune" in capsys.readouterr().err

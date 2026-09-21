@@ -38,7 +38,9 @@ def load(path: Path) -> dict:
 
 
 def test_there_are_teams_to_check():
-    assert len(team_files()) >= 3, "found almost no team configs — has the layout moved?"
+    # A guard against the parametrised tests below becoming vacuous, not a
+    # statement about how many teams the platform should have.
+    assert len(team_files()) >= 2, "found almost no team configs — has the layout moved?"
 
 
 @pytest.mark.parametrize("path", team_files(), ids=team_ids())

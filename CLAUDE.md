@@ -109,8 +109,25 @@ Client
 ```
 
 **Two production workflow patterns:**
-- **Visibility Team** — content marketing pipeline: strategy → draft → edit → distribute
+- **Visibility Team** — the product path, four agents: director (brief) →
+  strategist (angle) → LinkedIn writer (drafts) → managing editor (the post).
+  It ended in distribution and approval steps that ran *after* the editor and
+  produced a plan and a sign-off rather than the thing asked for; the
+  deliverable is the edited post, so the pipeline now stops there.
 - **Improvement Team** — personal learning loop: coach → plan → daily tasks
+
+`doc_rewrite_team` was removed, along with its AgentCore runtime and its role
+as the deploy's smoke-test subject. `scripts/pipeline_smoke.py` runs the
+visibility team now, so every deploy exercises the path people actually use.
+
+Deleting a team from this repository is only half of removing it:
+`scripts/sync_team_configs.py` also **prunes** teams S3 still serves that the
+repository no longer defines, or `GET /teams` keeps listing one whose
+definition is gone. That prune is deliberately narrower than
+`aws s3 sync --delete` (banned, see below): it removes a team directory only
+in its entirety and only when no such team exists here, never a key *within* a
+team. It refuses to run at all when it finds no local teams, so an unreadable
+root cannot read as "delete everything".
 
 ---
 
@@ -702,6 +719,14 @@ curl -sS "$TEAMWEAVE_API_BASE/observability"
   uploads exactly where it says and the Lambda reads exactly where it is told.
   `OUTPUT_PREFIX` is now empty, and `tests/test_config_bucket_layout.py`
   computes both sides from their real sources and compares them.
+
+- **A trimmed workflow must not leave dangling references.**
+  `tests/test_workflow_integrity.py` checks, for every team: each step's
+  `inputs` name a step that exists, every step has an agent, every agent is
+  run by a step, every `schema_ref` resolves, no schema is orphaned, and a
+  `default_jump_to_step` survives. A survivor naming a dropped step resolves
+  to nothing — the agent gets a prompt missing the context it was written for,
+  which is a worse answer rather than an error.
 
 - **Never `aws s3 sync` the team configs.** Provisioning writes the Bedrock
   `agentId`/`aliasId` back into the *same* S3 key, and a fresh CI checkout
