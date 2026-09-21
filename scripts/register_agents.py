@@ -232,6 +232,20 @@ def load_teams(s3, bucket: str, keys: List[str]) -> Dict[str, Dict[str, Any]]:
     return teams
 
 
+def runtime_for_team(team: Dict[str, Any], team_runtime_arns: Dict[str, str], fallback: str) -> str:
+    """The runtime that serves this team.
+
+    Teams have their own runtimes, so stamping the shared ARN onto every agent
+    is not a neutral record -- the worker resolves an agent's own runtimeArn
+    *first*, so that value shadows the team's runtime and sends every turn to
+    the shared one. That is exactly what happened: the pipeline's failure named
+    teamweave_agent, not teamweave_doc_rewrite_team, and the per-team runtimes
+    sat unused while looking deployed.
+    """
+    name = str((team.get("team") or {}).get("name") or "").strip()
+    return team_runtime_arns.get(name) or fallback
+
+
 def write_back(team: Dict[str, Any], names: Dict[str, str], runtime_arn: str) -> int:
     """Record each agent's registry identity in its config. Returns changes."""
     changed = 0
@@ -260,6 +274,15 @@ def main() -> int:
     parser.add_argument("--runtime-id", required=True)
     parser.add_argument("--runtime-arn", required=True)
     parser.add_argument("--runtime-version", required=True)
+    parser.add_argument(
+        "--team-runtime-arns",
+        default=os.environ.get("AGENTCORE_TEAM_RUNTIME_ARNS", ""),
+        help=(
+            "JSON object of team name -> runtime ARN, as the stack publishes it. "
+            "Each agent records its own team's runtime; --runtime-arn is the "
+            "fallback for a team the map does not name."
+        ),
+    )
     parser.add_argument("--bucket", default=os.environ.get("CONFIG_BUCKET", ""))
     parser.add_argument("--prefix", default=os.environ.get("TEAM_CONFIG_PREFIX", "teams"))
     parser.add_argument("--region", default=os.environ.get("AWS_REGION", "us-east-1"))
@@ -269,6 +292,22 @@ def main() -> int:
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+
+    # Unparseable content falls back to the shared runtime rather than raising:
+    # a malformed map should cost the per-team routing, not the whole deploy.
+    team_runtime_arns: Dict[str, str] = {}
+    raw_map = (args.team_runtime_arns or "").strip()
+    if raw_map:
+        try:
+            parsed = json.loads(raw_map)
+            if isinstance(parsed, dict):
+                team_runtime_arns = {
+                    str(k): str(v) for k, v in parsed.items() if isinstance(v, str) and v.strip()
+                }
+            else:
+                announce("warning", "--team-runtime-arns is not a JSON object; using the shared runtime")
+        except ValueError:
+            announce("warning", "--team-runtime-arns is not valid JSON; using the shared runtime")
 
     if not args.bucket:
         print("--bucket (or CONFIG_BUCKET) is required", file=sys.stderr)
@@ -334,7 +373,9 @@ def main() -> int:
 
     written = 0
     for key, team in teams.items():
-        changed = write_back(team, names, args.runtime_arn)
+        changed = write_back(
+            team, names, runtime_for_team(team, team_runtime_arns, args.runtime_arn)
+        )
         if not changed:
             continue
         written += changed

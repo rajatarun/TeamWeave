@@ -279,6 +279,30 @@ jobs:
           echo "  DualStackEnabled                 = ${DUAL_STACK_ENABLED}"
           echo "  VpcIpv6Block                     = ${VPC_IPV6_BLOCK_OUT:-<not yet assigned — set VPC_IPV6_BLOCK after first deploy>}"
 
+      - name: Check the VPC's only IPv4 path out
+        # Every Bedrock service is IPv4-only from this VPC, and this one NAT
+        # instance is the whole route. When it is not running, every agent
+        # turn fails with a connect timeout that reads like a slow service.
+        # Nothing watched it, so nothing said so.
+        run: |
+          if [ -z "${NAT_INSTANCE_ID}" ]; then
+            echo "::warning::No NAT instance, so the Lambda subnets have no IPv4 egress. Every Bedrock call will connect-timeout."
+            exit 0
+          fi
+          NAT_STATE=$(aws ec2 describe-instances \
+            --instance-ids "${NAT_INSTANCE_ID}" \
+            --region "${AWS_REGION}" \
+            --query 'Reservations[0].Instances[0].State.Name' \
+            --output text 2>/dev/null || echo "unknown")
+          echo "NAT instance ${NAT_INSTANCE_ID}: ${NAT_STATE}"
+          if [ "${NAT_STATE}" != "running" ]; then
+            echo "::error::The NAT instance is ${NAT_STATE}, not running. It is the only IPv4 route out of the Lambda subnets, so every Bedrock call -- including every AgentCore agent turn -- will fail with a connect timeout."
+            aws ec2 start-instances --instance-ids "${NAT_INSTANCE_ID}" --region "${AWS_REGION}" >/dev/null 2>&1 \
+              && echo "::notice::Asked it to start; it needs a moment before traffic flows." \
+              || echo "::warning::Could not start it from here."
+            exit 1
+          fi
+
       - name: Fetch SIWE Authorizer ARN from siwe-infra stack
         run: |
           SIWE_AUTHORIZER_FUNCTION_ARN=$(aws cloudformation describe-stacks \
@@ -485,6 +509,10 @@ jobs:
           RUNTIME_VERSION=$(stack_output AgentCoreRuntimeVersion)
           RUNTIME_ARN=$(stack_output AgentCoreRuntimeArn)
           CONFIG_BUCKET=$(stack_output ConfigBucket)
+          # Each agent records its *own team's* runtime. Stamping the shared
+          # one shadows the per-team routing, because the worker resolves an
+          # agent's runtimeArn before its team's.
+          TEAM_RUNTIME_ARNS=$(stack_output AgentCoreTeamRuntimeArns)
           for name in RUNTIME_ID RUNTIME_VERSION RUNTIME_ARN CONFIG_BUCKET; do
             value="${!name}"
             if [ -z "${value}" ] || [ "${value}" = "None" ]; then
@@ -496,6 +524,7 @@ jobs:
             --runtime-id "${RUNTIME_ID}" \
             --runtime-arn "${RUNTIME_ARN}" \
             --runtime-version "${RUNTIME_VERSION}" \
+            --team-runtime-arns "${TEAM_RUNTIME_ARNS}" \
             --bucket "${CONFIG_BUCKET}" \
             --prefix "${TEAM_CONFIG_PREFIX}" \
             --region "${AWS_REGION}"

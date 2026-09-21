@@ -692,3 +692,83 @@ def test_a_non_quota_error_still_fails_the_deploy(monkeypatch, capsys):
     teams = {"teams/a/v1/team.json": team("aa")}
     assert run_main(monkeypatch, fake_s3(teams), control) == 1
     assert "::error::" in capsys.readouterr().out
+
+
+# ── Which runtime an agent is recorded against ───────────────────────────────
+# The worker resolves an agent's own runtimeArn *before* its team's, so
+# stamping the shared ARN onto every agent is not a neutral record: it shadows
+# the per-team routing entirely. The pipeline's failure named
+# teamweave_agent-BMHHKuDNo1 while three per-team runtimes sat unused and
+# fully deployed.
+
+import importlib.util as _importlib_util  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+
+def _register_agents():
+    spec = _importlib_util.spec_from_file_location(
+        "register_agents", _Path(__file__).resolve().parents[1] / "scripts" / "register_agents.py")
+    module = _importlib_util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+TEAM_MAP = {
+    "doc_rewrite_team": "arn:aws:bedrock-agentcore:us-east-1:1:runtime/teamweave_doc_rewrite_team-a",
+    "tarun_visibility_team": "arn:aws:bedrock-agentcore:us-east-1:1:runtime/teamweave_tarun_visibility_team-b",
+}
+SHARED = "arn:aws:bedrock-agentcore:us-east-1:1:runtime/teamweave_agent-shared"
+
+
+def test_an_agent_is_recorded_against_its_own_teams_runtime():
+    mod = _register_agents()
+    team = {"team": {"name": "doc_rewrite_team"}}
+    assert mod.runtime_for_team(team, TEAM_MAP, SHARED) == TEAM_MAP["doc_rewrite_team"]
+
+
+def test_two_teams_are_not_recorded_against_the_same_runtime():
+    mod = _register_agents()
+    a = mod.runtime_for_team({"team": {"name": "doc_rewrite_team"}}, TEAM_MAP, SHARED)
+    b = mod.runtime_for_team({"team": {"name": "tarun_visibility_team"}}, TEAM_MAP, SHARED)
+    assert a != b, "per-team runtimes recorded as one runtime are not per-team"
+    assert SHARED not in (a, b), "the shared runtime shadows the team's"
+
+
+def test_a_team_the_map_does_not_name_falls_back():
+    # A team added as JSON before its runtime exists still gets a working
+    # agent record rather than an empty one.
+    mod = _register_agents()
+    assert mod.runtime_for_team({"team": {"name": "brand_new"}}, TEAM_MAP, SHARED) == SHARED
+
+
+def test_a_config_with_no_team_name_falls_back():
+    mod = _register_agents()
+    assert mod.runtime_for_team({}, TEAM_MAP, SHARED) == SHARED
+    assert mod.runtime_for_team({"team": {}}, TEAM_MAP, SHARED) == SHARED
+
+
+def test_an_empty_map_falls_back_rather_than_recording_nothing():
+    mod = _register_agents()
+    assert mod.runtime_for_team({"team": {"name": "doc_rewrite_team"}}, {}, SHARED) == SHARED
+
+
+def test_write_back_stamps_the_team_runtime_on_each_agent():
+    """End of the path: what actually lands in team.json."""
+    mod = _register_agents()
+    team = {
+        "team": {"name": "doc_rewrite_team"},
+        "agents": [{"id": "a1", "bedrock": {"runtimeArn": SHARED, "qualifier": "old"}}],
+    }
+    arn = mod.runtime_for_team(team, TEAM_MAP, SHARED)
+    changed = mod.write_back(team, {"a1": "a1"}, arn)
+    assert changed == 1
+    assert team["agents"][0]["bedrock"]["runtimeArn"] == TEAM_MAP["doc_rewrite_team"]
+    assert "qualifier" not in team["agents"][0]["bedrock"]
+
+
+def test_the_deploy_passes_the_map_to_the_registrar():
+    workflow = (_Path(__file__).resolve().parents[1] / ".github" / "workflows" / "deploy.yml").read_text()
+    assert "--team-runtime-arns" in workflow, (
+        "the registrar is never told the map, so every agent is stamped with the shared runtime"
+    )
+    assert "TEAM_RUNTIME_ARNS=$(stack_output AgentCoreTeamRuntimeArns)" in workflow
