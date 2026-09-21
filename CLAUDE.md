@@ -231,6 +231,34 @@ wrong and reporting it as a pass would be worse.
 of its own — the stack runtime serves it — but every deploy now gives each one
 a registry identity anyway.
 
+**One runtime per team.** A team is the deployment unit. Each team gets its
+own `AWS::BedrockAgentCore::Runtime` (`teamweave_{team}`), and the stack
+publishes a `team -> ARN` map as `AGENTCORE_TEAM_RUNTIME_ARNS`, which
+`AgentCoreRuntime.resolve_arn` reads. Resolution is most-specific-first: the
+agent's own `runtimeArn`, then its team's runtime, then the stack-wide
+`AGENTCORE_RUNTIME_ARN` so a team added as JSON before its runtime exists
+degrades rather than failing.
+
+One runtime for the whole platform put every team's agents in one blast radius
+and one endpoint budget — release channels are ten per runtime and *shared*, so
+two teams could not be canaried independently and a bad version reached all of
+them at once. Per team, each has its own version history, its own channels and
+its own failure.
+
+The cost is real and worth naming: adding a team now needs a template change,
+on a platform whose premise is that a team is JSON in S3.
+`tests/test_team_runtimes.py` is where that coupling is made visible — a team
+in `config/examples/teams` with no runtime fails there rather than silently
+falling back to the shared runtime and losing the isolation that was the point.
+`Fn::ForEach` (the `AWS::LanguageExtensions` transform) would generate them
+from a parameter and is the way to remove the coupling later.
+
+The wiring is as important as the logic: the worker passes `team=` down to
+`bedrock_invoke`, and `AgentRef` carries it. Without that every ref arrives
+with `team=""`, every team resolves to the shared runtime, nothing fails, and
+the isolation silently does not exist. A test walks the worker's AST and fails
+any invocation that omits the keyword.
+
 **Agent identity is a span attribute, not an AWS resource.** The first
 attempt gave each agent its own AgentCore endpoint. AWS's quota refused at
 twelve, and it was right to: endpoints are a *release* mechanism — production
@@ -342,6 +370,40 @@ The binding is *matched*, not assumed: A2A orders `supportedInterfaces` by
 preference and a client takes the first it supports, so taking the first entry
 regardless would send HTTP+JSON to a gRPC endpoint on any sibling listing more
 than one.
+
+### Asking a team to do something
+
+This is what the platform is for, and it had no path in the UI at all until
+September 2026: you could chat with a single agent, list teams and edit
+prompts, but not run the pipeline the whole thing exists for.
+
+Two pieces make it work without hardcoding a form per team:
+
+- **`request_schema` in `team.json`** declares the inputs a run needs
+  (`summary` plus `fields`, each with `name`/`label`/`type`/`required`).
+  `GET /teams/{name}` already returns the whole document, so the UI builds the
+  form from it with no new endpoint and adding a team stays a JSON change.
+  `tests/test_request_schema.py` derives the check: a config that reads
+  `request.document_text` anywhere must declare `document_text`, or the form
+  would leave it empty, the run would start anyway, and the agent would be
+  handed a blank where the brief should be.
+- **`scripts/pipeline_smoke.py`** runs one real pipeline after every deploy
+  and reads what it produced. A green `sam deploy` says CloudFormation
+  accepted resources; `agentcore_smoke.py` says one runtime boots. Neither
+  says a person can ask a team to do something and get an answer.
+
+The smoke test's sharpest case is the **empty success**: a run that reaches
+`SUCCEEDED` with nothing in its final step. Every signal the platform emits
+says that worked — it is the same shape as the A2A card that served
+`"skills": []` and the IPv6 query that matched nothing — so it fails the
+deploy. A run that errors fails too, and names the status, because "produced
+nothing usable" would send whoever reads it to debug the wrong thing. A CI
+role that cannot start executions is the *check* failing rather than the
+pipeline: it warns `NOT VERIFIED` and does not fail the deploy.
+
+It starts the execution through Step Functions rather than the HTTP API,
+because the API is behind the SIWE authorizer and CI holds no wallet. That is
+the trade: it covers the pipeline, not the authorizer.
 
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them downstream (`schema_validate.py`, `structured_transform.py`).

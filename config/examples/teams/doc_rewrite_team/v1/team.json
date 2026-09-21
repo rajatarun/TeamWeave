@@ -8,10 +8,10 @@
     "north_star": "Rewrite a document so every paragraph precisely matches the target job description while preserving the original structure, factual accuracy, and professional format.",
     "default_channel": "other",
     "hard_constraints": [
-      "Preserve all factual claims from the original document — do not fabricate experience, skills, or achievements.",
+      "Preserve all factual claims from the original document \u2014 do not fabricate experience, skills, or achievements.",
       "Maintain the original section structure and order.",
       "Align language, keywords, and tone with the job description.",
-      "Do not remove sections — rewrite them to be more relevant.",
+      "Do not remove sections \u2014 rewrite them to be more relevant.",
       "Output valid JSON only. No markdown fences."
     ],
     "features": {
@@ -81,7 +81,7 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "You are an expert document formatter.\n\nYou will receive under STEP_INPUTS_JSON:\n- DRT_DDEPT-001_DRT-002_rewriter: the rewritten sections array\n- DRT_DDEPT-001_DRT-001_analyzer: the original analysis including overall_strategy\n\nYour task:\n1. Take all rewritten sections and assemble them into a final_document.\n2. Ensure consistent tone and smooth transitions between sections.\n3. Apply any last polish — remove redundant phrases, ensure professional presentation.\n4. For each section include: index, header, and final content.\n5. Provide a brief summary_of_changes describing what was changed and why.\n\nThe post-processing pipeline will reconstruct the full document text from your sections array, so make sure every section has a non-empty content field.\n\nOutput a final_document JSON object.",
+      "goal_template": "You are an expert document formatter.\n\nYou will receive under STEP_INPUTS_JSON:\n- DRT_DDEPT-001_DRT-002_rewriter: the rewritten sections array\n- DRT_DDEPT-001_DRT-001_analyzer: the original analysis including overall_strategy\n\nYour task:\n1. Take all rewritten sections and assemble them into a final_document.\n2. Ensure consistent tone and smooth transitions between sections.\n3. Apply any last polish \u2014 remove redundant phrases, ensure professional presentation.\n4. For each section include: index, header, and final content.\n5. Provide a brief summary_of_changes describing what was changed and why.\n\nThe post-processing pipeline will reconstruct the full document text from your sections array, so make sure every section has a non-empty content field.\n\nOutput a final_document JSON object.",
       "schema_ref": "final_document_v1"
     }
   ],
@@ -96,11 +96,16 @@
           }
         }
       ],
-      "inputs": ["request"]
+      "inputs": [
+        "request"
+      ]
     },
     {
       "step": "DRT_DDEPT-001_DRT-002_rewriter",
-      "inputs": ["DRT_DDEPT-001_DRT-001_analyzer", "request"]
+      "inputs": [
+        "DRT_DDEPT-001_DRT-001_analyzer",
+        "request"
+      ]
     },
     {
       "step": "DRT_DDEPT-001_DRT-003_formatter",
@@ -112,7 +117,10 @@
           }
         }
       ],
-      "inputs": ["DRT_DDEPT-001_DRT-002_rewriter", "DRT_DDEPT-001_DRT-001_analyzer"]
+      "inputs": [
+        "DRT_DDEPT-001_DRT-002_rewriter",
+        "DRT_DDEPT-001_DRT-001_analyzer"
+      ]
     }
   ],
   "schemas": {
@@ -125,5 +133,24 @@
     "final_document_v1": {
       "path": "config/examples/schemas/final_document_v1.json"
     }
+  },
+  "request_schema": {
+    "summary": "Rewrite a document so every paragraph matches a target job description, keeping the structure and the facts.",
+    "fields": [
+      {
+        "name": "document_text",
+        "label": "Document to rewrite",
+        "type": "textarea",
+        "required": true,
+        "placeholder": "Paste the full document \u2014 resume, bio, profile\u2026"
+      },
+      {
+        "name": "job_description",
+        "label": "Target job description",
+        "type": "textarea",
+        "required": true,
+        "placeholder": "Paste the job description to align the document with"
+      }
+    ]
   }
 }

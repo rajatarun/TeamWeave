@@ -286,5 +286,31 @@
     "approval_v1": {
       "path": "config/examples/schemas/approval_v1.json"
     }
+  },
+  "request_schema": {
+    "summary": "Turn a topic into a publish-ready LinkedIn post: strategy, draft, edit, distribution plan.",
+    "fields": [
+      {
+        "name": "topic",
+        "label": "Topic",
+        "type": "text",
+        "required": true,
+        "placeholder": "e.g. Why per-team runtimes beat per-agent endpoints"
+      },
+      {
+        "name": "objective",
+        "label": "What should this achieve?",
+        "type": "text",
+        "required": false,
+        "placeholder": "e.g. Show depth on AWS agent orchestration"
+      },
+      {
+        "name": "audience",
+        "label": "Who is it for?",
+        "type": "text",
+        "required": false,
+        "placeholder": "e.g. Senior platform and AI engineers"
+      }
+    ]
   }
 }

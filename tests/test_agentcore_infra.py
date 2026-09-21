@@ -58,10 +58,25 @@ def agentcore_resources(template):
     }
 
 
+# The substrate that is not per team: memory, the tool gateway and its target,
+# plus the stack-wide runtime that serves a team with none of its own.
+SHARED_AGENTCORE_RESOURCES = {
+    "AgentCoreMemory", "AgentCoreRuntime", "AgentCoreGateway", "ScreenWeaveGatewayTarget",
+}
+
+
 def test_the_template_declares_the_agentcore_substrate(template):
-    assert set(agentcore_resources(template)) == {
-        "AgentCoreMemory", "AgentCoreRuntime", "AgentCoreGateway", "ScreenWeaveGatewayTarget",
-    }
+    """An inventory, so a new AgentCore resource is a deliberate addition.
+
+    Per-team runtimes are derived rather than listed — `tests/test_team_runtimes.py`
+    holds them to the teams in config/examples/teams, which is the coupling
+    that matters. Listing them here too would mean two places to edit and one
+    of them forgotten.
+    """
+    declared = set(agentcore_resources(template))
+    per_team = {n for n in declared if n.startswith("AgentCoreRuntime") and n != "AgentCoreRuntime"}
+    assert declared - per_team == SHARED_AGENTCORE_RESOURCES
+    assert per_team, "no per-team runtimes: every team would share one blast radius"
 
 
 def test_every_agentcore_resource_matches_its_schema(template, schemas):

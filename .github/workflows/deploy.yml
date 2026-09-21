@@ -471,6 +471,21 @@ jobs:
             --prefix "${TEAM_CONFIG_PREFIX}" \
             --region "${AWS_REGION}"
 
+      - name: Run one real team pipeline
+        run: |
+          STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" \
+            --output text)
+          if [ -z "${STATE_MACHINE_ARN}" ] || [ "${STATE_MACHINE_ARN}" = "None" ]; then
+            echo "::error::The stack published no StateMachineArn, so no pipeline can run." >&2
+            exit 1
+          fi
+          python3 scripts/pipeline_smoke.py \
+            --state-machine-arn "${STATE_MACHINE_ARN}" \
+            --region "${AWS_REGION}"
+
       - name: Sync roles and departments to S3
         run: |
           CONFIG_BUCKET=$(aws cloudformation describe-stacks \

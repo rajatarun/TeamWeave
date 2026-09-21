@@ -272,6 +272,20 @@ Globals:
         # two travel together.
         AGENT_RUNTIME: !If [AgentCoreEnabled, "agentcore", "classic"]
         AGENTCORE_RUNTIME_ARN: !If [AgentCoreEnabled, !GetAtt AgentCoreRuntime.AgentRuntimeArn, ""]
+        # team name -> its runtime ARN. One variable rather than one per team:
+        # Lambda's environment is a flat map the template names statically, so
+        # a per-team variable would need wiring through every function. The
+        # worker falls back to AGENTCORE_RUNTIME_ARN above for a team absent
+        # here, which is a worse answer than the right runtime and a far
+        # better one than failing every turn.
+        AGENTCORE_TEAM_RUNTIME_ARNS: !If
+          - AgentCoreEnabled
+          - !Sub
+            - '{"doc_rewrite_team":"${ArnDocRewriteTeam}","tarun_improvement_team":"${ArnTarunImprovementTeam}","tarun_visibility_team":"${ArnTarunVisibilityTeam}"}'
+            - ArnDocRewriteTeam: !GetAtt AgentCoreRuntimeDocRewriteTeam.AgentRuntimeArn
+              ArnTarunImprovementTeam: !GetAtt AgentCoreRuntimeTarunImprovementTeam.AgentRuntimeArn
+              ArnTarunVisibilityTeam: !GetAtt AgentCoreRuntimeTarunVisibilityTeam.AgentRuntimeArn
+          - "{}"
         # Route all AWS SDK calls through dual-stack endpoints so boto3 resolves
         # {service}.{region}.api.aws (returns AAAA records). Lambda ENIs with IPv6
         # addresses send this traffic via the Egress-Only Internet Gateway.
@@ -2066,6 +2080,94 @@ Resources:
         # program falls back to, mirroring a Classic agent's own configuration.
         AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
 
+
+  # ── One AgentCore runtime per team ─────────────────────────────────────────
+  # A team is the deployment unit. One runtime for the whole platform put
+  # every team's agents in one blast radius and one endpoint budget: release
+  # channels are ten per runtime and shared, so two teams could not be
+  # canaried independently and a bad version reached all of them at once.
+  #
+  # Not one per *agent*. That was tried: AWS's quota refused at twelve and was
+  # right to, because endpoints are a release mechanism, not an identity axis.
+  # Identity is a name in a document -- a skill id on the A2A card,
+  # gen_ai.agent.id on the span -- and prompt_builder composes ROLE and
+  # STEP_GOAL into each turn, so one runtime serves a team's agents without
+  # them being confusable.
+  #
+  # AgentRuntimeName must match [a-zA-Z][a-zA-Z0-9_]{0,47}: no hyphens, which
+  # is why these are named from the team rather than from ${AWS::StackName}.
+  # tests/test_agentcore_infra.py walks every name property against that
+  # pattern, and tests/test_team_runtimes.py fails when a team in
+  # config/examples/teams has no runtime here.
+
+  AgentCoreRuntimeDocRewriteTeam:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: AgentCoreEnabled
+    Properties:
+      AgentRuntimeName: "teamweave_doc_rewrite_team"
+      Description: "AgentCore runtime serving every agent of doc_rewrite_team."
+      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Code:
+            S3:
+              Bucket: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+              Prefix: !Ref AgentCoreRuntimeCodePrefix
+          Runtime: PYTHON_3_12
+          EntryPoint:
+            - app.py
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      EnvironmentVariables:
+        AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
+        # Which team's runtime this is, for the program's own logs and spans.
+        AGENT_TEAM: "doc_rewrite_team"
+
+  AgentCoreRuntimeTarunImprovementTeam:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: AgentCoreEnabled
+    Properties:
+      AgentRuntimeName: "teamweave_tarun_improvement_team"
+      Description: "AgentCore runtime serving every agent of tarun_improvement_team."
+      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Code:
+            S3:
+              Bucket: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+              Prefix: !Ref AgentCoreRuntimeCodePrefix
+          Runtime: PYTHON_3_12
+          EntryPoint:
+            - app.py
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      EnvironmentVariables:
+        AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
+        # Which team's runtime this is, for the program's own logs and spans.
+        AGENT_TEAM: "tarun_improvement_team"
+
+  AgentCoreRuntimeTarunVisibilityTeam:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: AgentCoreEnabled
+    Properties:
+      AgentRuntimeName: "teamweave_tarun_visibility_team"
+      Description: "AgentCore runtime serving every agent of tarun_visibility_team."
+      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Code:
+            S3:
+              Bucket: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+              Prefix: !Ref AgentCoreRuntimeCodePrefix
+          Runtime: PYTHON_3_12
+          EntryPoint:
+            - app.py
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      EnvironmentVariables:
+        AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
+        # Which team's runtime this is, for the program's own logs and spans.
+        AGENT_TEAM: "tarun_visibility_team"
 
   # ── AgentCore Gateway ──────────────────────────────────────────────────────
   # Managed tool access for agents. AWS_IAM rather than CUSTOM_JWT: the
