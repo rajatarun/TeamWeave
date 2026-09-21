@@ -32,10 +32,14 @@ import argparse
 import json
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, Tuple
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from src.orchestrator import run_ids  # noqa: E402
 
 # The visibility team is the product path, so the deploy exercises what people
 # actually run. Small inputs on purpose: the point is that the machinery works
@@ -59,12 +63,15 @@ def announce(level: str, message: str) -> None:
     print(f"::{level}::{message}", flush=True)
 
 
-def start(sfn, state_machine_arn: str, payload: Dict[str, Any]) -> str:
+def start(sfn, state_machine_arn: str, payload: Dict[str, Any]) -> Tuple[str, str]:
+    """Start the run the way the trigger does, and return (arn, run_id)."""
+    run_id = run_ids.new_run_id()
     response = sfn.start_execution(
         stateMachineArn=state_machine_arn,
-        input=json.dumps(payload),
+        name=run_id,
+        input=json.dumps({**payload, "run_id": run_id}),
     )
-    return response["executionArn"]
+    return response["executionArn"], run_id
 
 
 def wait(sfn, execution_arn: str, timeout_s: int, poll_s: int) -> Tuple[str, Dict[str, Any]]:
@@ -171,7 +178,7 @@ def main() -> int:
 
     try:
         sfn = boto3.client("stepfunctions", region_name=args.region)
-        execution_arn = start(sfn, args.state_machine_arn, payload)
+        execution_arn, run_id = start(sfn, args.state_machine_arn, payload)
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
         if code in {"AccessDeniedException", "AccessDenied", "UnrecognizedClientException"}:
@@ -191,6 +198,20 @@ def main() -> int:
         return 0
 
     print(f"Started {args.team} {args.version}: {execution_arn}", flush=True)
+
+    # The one fact no unit test can establish: that the rule the status handler
+    # uses to turn a run_id back into an ARN matches an ARN Step Functions
+    # really produced. A fake written from the same understanding of the shape
+    # would agree with a wrong rule, and a caller polling a run_id would 404.
+    rebuilt = run_ids.to_execution_arn(run_id, args.state_machine_arn)
+    if rebuilt != execution_arn:
+        announce(
+            "error",
+            "A run_id does not resolve back to its execution: the status handler "
+            f"would look up {rebuilt} for a run Step Functions created as "
+            f"{execution_arn}. Every poll of every run would 404.",
+        )
+        return 1
     status, result = wait(sfn, execution_arn, args.timeout, args.poll)
 
     if status != "SUCCEEDED":

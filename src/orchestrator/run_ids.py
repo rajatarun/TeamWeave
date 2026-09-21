@@ -42,3 +42,19 @@ def is_valid_execution_name(run_id: str) -> bool:
     if not run_id or len(run_id) > EXECUTION_NAME_MAX:
         return False
     return all(c.isalnum() or c in "-_." for c in run_id)
+
+
+def to_execution_arn(run_id: str, state_machine_arn: str) -> str:
+    """The other half of the round trip: run_id -> the ARN that names it.
+
+    Lives here rather than in the status handler so the deploy's smoke test
+    can check it against an ARN Step Functions really returned. A unit test
+    can only hold this rule against a fake that was written from the same
+    understanding -- if the shape itself were wrong, both would agree and
+    both would be wrong.
+    """
+    if run_id.startswith("arn:"):
+        return run_id
+    if ":stateMachine:" not in state_machine_arn:
+        raise ValueError("STATE_MACHINE_ARN must be configured when run_id is an execution id")
+    return f"{state_machine_arn.replace(':stateMachine:', ':execution:', 1)}:{run_id}"

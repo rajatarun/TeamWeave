@@ -532,10 +532,18 @@ the round trip. The existing trigger tests could not see it either, for a
 worse reason — their fake Step Functions returned a fixed ARN whatever `name`
 it was passed, which reports success for both the working and the broken call.
 
-`src/orchestrator/run_ids.py` holds the one definition, and
-`tests/test_run_id_roundtrip.py` drives the real handlers through start →
-poll, over both `POST /team/task` and A2A's `message:send` / `tasks/{id}`,
-against a fake that invents its own name when given none.
+`src/orchestrator/run_ids.py` holds the one definition — minting an id and
+turning it back into an ARN — and `tests/test_run_id_roundtrip.py` drives the
+real handlers through start → poll, over both `POST /team/task` and A2A's
+`message:send` / `tasks/{id}`, against a fake that invents its own name when
+given none.
+
+A unit test can only hold that rule against a fake written from the same
+understanding of the ARN's shape: if the shape itself were wrong, both would
+agree and both would be wrong. So `pipeline_smoke.py` now names its execution
+and checks that `to_execution_arn` rebuilds the ARN **Step Functions actually
+returned** — the one part of this that needs real AWS to falsify, run on every
+deploy.
 
 ---
 
