@@ -18,16 +18,34 @@ class _FakeBody:
 
 
 class _FakeClient:
+    """A Bedrock client that speaks Converse.
+
+    The transform used InvokeModel, whose request body is defined by the model
+    *provider*: an Anthropic-shaped body is malformed for Nova, so the model id
+    and the payload shape were coupled. Converse normalises that, and this fake
+    asserts the Converse shape so a regression to a provider-specific body
+    fails here rather than as a ValidationException in production.
+    """
+
     def __init__(self, response_text: str):
         self.response_text = response_text
         self.last_model_id = None
+        self.last_request = None
 
-    def invoke_model(self, modelId, body):
+    def converse(self, *, modelId, messages, inferenceConfig=None, **kwargs):
         self.last_model_id = modelId
-        request_payload = json.loads(body)
-        assert request_payload["messages"][0]["role"] == "user"
-        result = {"content": [{"text": self.response_text}]}
-        return {"body": _FakeBody(json.dumps(result))}
+        self.last_request = {"messages": messages, "inferenceConfig": inferenceConfig}
+        assert messages[0]["role"] == "user"
+        # Converse content is a list of blocks, never a bare string.
+        assert isinstance(messages[0]["content"], list), "Converse takes content blocks"
+        assert messages[0]["content"][0]["text"]
+        return {"output": {"message": {"content": [{"text": self.response_text}]}}}
+
+    def invoke_model(self, **_kwargs):  # pragma: no cover - must not be reached
+        raise AssertionError(
+            "structured_transform must use Converse; InvokeModel couples the "
+            "model id to a provider-specific body shape"
+        )
 
 
 class StructuredTransformTests(unittest.TestCase):
@@ -156,3 +174,54 @@ class StructuredTransformTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConverseContractTests(unittest.TestCase):
+    """The repair call must not be coupled to one provider's body shape."""
+
+    def test_it_calls_converse_not_invoke_model(self):
+        client = _FakeClient(json.dumps({"summary": "ok"}))
+        transform_json_to_schema(
+            {"a": 1}, {"type": "object", "properties": {"summary": {"type": "string"}}},
+            client=client,
+        )
+        # _FakeClient.invoke_model raises; reaching here means Converse was used.
+        self.assertIsNotNone(client.last_request)
+        self.assertEqual(client.last_model_id, MODEL_ID)
+
+    def test_the_token_limit_is_passed_through(self):
+        client = _FakeClient(json.dumps({"summary": "ok"}))
+        transform_json_to_schema(
+            {"a": 1}, {"type": "object", "properties": {"summary": {"type": "string"}}},
+            client=client, max_tokens=77,
+        )
+        self.assertEqual(client.last_request["inferenceConfig"]["maxTokens"], 77)
+
+    def test_a_reply_with_no_content_does_not_raise(self):
+        """An empty Converse response must degrade, not explode.
+
+        The caller already handles a failed transform by keeping the agent's
+        original answer; an IndexError here would turn a recoverable miss into
+        a failed step.
+        """
+        from src.orchestrator.structured_transform import _text_from_converse
+
+        self.assertEqual(_text_from_converse({}), "")
+        self.assertEqual(_text_from_converse({"output": {}}), "")
+        self.assertEqual(_text_from_converse({"output": {"message": {"content": []}}}), "")
+
+    def test_multiple_content_blocks_are_joined(self):
+        from src.orchestrator.structured_transform import _text_from_converse
+
+        response = {"output": {"message": {"content": [{"text": '{"a":'}, {"text": " 1}"}]}}}
+        self.assertEqual(_text_from_converse(response), '{"a": 1}')
+
+    def test_no_provider_specific_body_remains_in_the_module(self):
+        # anthropic_version in an InvokeModel body is the coupling this removed.
+        from pathlib import Path as _Path
+
+        source = (_Path(__file__).resolve().parents[1]
+                  / "src" / "orchestrator" / "structured_transform.py").read_text()
+        code = "\n".join(l for l in source.splitlines() if not l.strip().startswith("#"))
+        self.assertNotIn("anthropic_version", code)
+        self.assertNotIn("invoke_model", code)

@@ -468,6 +468,18 @@ It defaults to the model the agent turns themselves run on, so the platform
 has one model decision, and `STRUCTURED_TRANSFORM_MODEL_ID` overrides it
 without touching code.
 
+Changing the id was not enough on its own. `InvokeModel`'s request body is
+defined by the model's **provider** — an Anthropic-shaped body
+(`anthropic_version`, string `content`) is malformed for Nova — so the model
+and the payload were coupled, and moving between them produced
+
+    ValidationException: Malformed input request
+
+which reached the caller as the same fallback envelope the dead model had. It
+uses the **Converse** API now, which normalises the request across providers,
+so the model id is the only thing that changes when moving between them. The
+test's fake client raises if `InvokeModel` is called at all.
+
 ### Async Execution
 Every run is async: `POST /team/task` returns a `run_id`, then poll `GET /team/task/{run_id}` until `SUCCEEDED` or `FAILED`.
 
