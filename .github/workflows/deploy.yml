@@ -551,7 +551,7 @@ jobs:
             --region "${AWS_REGION}" \
             --query "Stacks[0].Outputs[?OutputKey=='ConfigBucket'].OutputValue" \
             --output text)
-          echo "Uploading roles.json and departments.json → s3://${CONFIG_BUCKET}/teams/"
+          echo "Uploading roles.json and departments.json → s3://${CONFIG_BUCKET}/"
           aws s3 cp config/examples/roles.json \
             "s3://${CONFIG_BUCKET}/roles.json" \
             --region "${AWS_REGION}"
