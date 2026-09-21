@@ -1716,7 +1716,22 @@ Resources:
           SCAN_DIR: /var/task/config/examples
           ROLES_PATH: /var/task/config/examples/roles.json
           DEPTS_PATH: /var/task/config/examples/departments.json
-          OUTPUT_PREFIX: teams
+          # Empty, and it has to be. The provisioner derives three keys from
+          # it -- teams_prefix = "{OUTPUT_PREFIX}/teams", roles_key =
+          # "{OUTPUT_PREFIX}/roles.json", departments_key likewise -- so
+          # "teams" here meant it scanned s3://bucket/teams/teams/ for team
+          # configs and looked for roles at teams/roles.json.
+          #
+          # The deploy writes team configs to teams/<name>/<version>/team.json
+          # and roles.json / departments.json at the root, so every one of
+          # those lookups missed and GET /teams returned {"teams": [], ...}
+          # with a 200. The UI's team picker was empty with no error, and so
+          # were the roles and departments tabs.
+          #
+          # tests/test_config_bucket_layout.py derives both sides -- where the
+          # workflow writes, where the Lambda reads -- and compares them, so
+          # the two cannot drift apart again in silence.
+          OUTPUT_PREFIX: ""
           FOUNDATION_MODEL: amazon.nova-micro-v1:0
       VpcConfig: !If
         - HasVpcConfig

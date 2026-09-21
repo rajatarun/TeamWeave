@@ -672,6 +672,20 @@ curl -sS "$TEAMWEAVE_API_BASE/observability"
 - Test coverage lives in `tests/` — CI runs `pytest tests/` before `sam build`, so a failing test stops the deploy
 - CI/CD triggers on push to `main` — the GitHub Actions workflow runs `sam build` + `sam deploy`
 - Team configs in `config/examples/` are examples only; live configs are fetched from S3 at runtime
+- **The config bucket's layout is a contract between the deploy and the
+  provisioner.** `ProvisionTeamFunction` derives three keys from one variable:
+  `teams_prefix = "{OUTPUT_PREFIX}/teams"`, `roles_key =
+  "{OUTPUT_PREFIX}/roles.json"`, departments likewise. With `OUTPUT_PREFIX:
+  teams` it scanned `teams/teams/` for team configs while the deploy wrote
+  them to `teams/<name>/<version>/team.json`, and looked for roles at
+  `teams/roles.json` while the deploy put them at the bucket root. So
+  `GET /teams` answered `{"teams": [], "count": 0}` with a **200** — no error,
+  no exception, an empty team picker and empty Roles and Departments tabs.
+  Neither side was wrong alone, which is why nothing caught it: the workflow
+  uploads exactly where it says and the Lambda reads exactly where it is told.
+  `OUTPUT_PREFIX` is now empty, and `tests/test_config_bucket_layout.py`
+  computes both sides from their real sources and compares them.
+
 - **Never `aws s3 sync` the team configs.** Provisioning writes the Bedrock
   `agentId`/`aliasId` back into the *same* S3 key, and a fresh CI checkout
   always has the newer mtime — so a plain sync erased them on every deploy and
