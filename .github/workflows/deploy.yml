@@ -529,6 +529,15 @@ jobs:
             --prefix "${TEAM_CONFIG_PREFIX}" \
             --region "${AWS_REGION}"
 
+      - name: Report which image models this account can call
+        # Informational, never a gate. Two deploys were spent guessing ids --
+        # one real but inaccessible, one that does not exist -- and the
+        # account can answer both. A DNS blip or a missing
+        # bedrock:ListFoundationModels grant must not redden a deploy.
+        continue-on-error: true
+        run: |
+          python3 scripts/image_models.py --region "${AWS_REGION}" || true
+
       - name: Run one real team pipeline
         run: |
           STATE_MACHINE_ARN=$(aws cloudformation describe-stacks \

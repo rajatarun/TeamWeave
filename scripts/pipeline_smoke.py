@@ -39,6 +39,8 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import image_models  # noqa: E402
 from src.orchestrator import run_ids  # noqa: E402
 
 # The visibility team is the product path, so the deploy exercises what people
@@ -269,14 +271,21 @@ def main() -> int:
         )
         return 1
 
-    for step_id, error in image_failures(result).items():
-        announce(
-            "warning",
-            f"{step_id} produced no image: {error[:300]}. The run is not failed "
-            "over this -- the post is the deliverable -- but the illustration "
-            "is missing. Set ImageModelId to a model this account has access "
-            "to, or grant access in the Bedrock console.",
-        )
+    failures = image_failures(result)
+    if failures:
+        # Name real candidates rather than advice. Two deploys were spent
+        # guessing ids: one that exists but is not accessible, one that does
+        # not exist -- different problems, identical symptom, and the account
+        # can answer both.
+        available = image_models.describe(args.region)
+        for step_id, error in failures.items():
+            announce(
+                "warning",
+                f"{step_id} produced no image: {error[:300]}. The run is not "
+                "failed over this -- the post is the deliverable -- but the "
+                f"illustration is missing. {available}. Set the member's "
+                "model_id in team.json, or the ImageModelId stack parameter.",
+            )
 
     rendered = json.dumps(output, ensure_ascii=False)
     announce(

@@ -128,7 +128,7 @@
         "agentId": "",
         "aliasId": "",
         "modality": "image",
-        "model_id": "amazon.nova-canvas-v2:0",
+        "model_id": "amazon.nova-canvas-v1:0",
         "model_aliases": {}
       },
       "goal_template": "Editorial illustration for a LinkedIn post by a senior AWS platform engineer. Clean, modern, professional. Abstract technical composition -- geometric shapes, depth, restrained palette. No text, no letters, no logos, no watermarks, no human faces. Wide 16:9 banner framing. Illustrate the subject of the following approved post:",
