@@ -580,8 +580,11 @@ Resources:
                 Resource: "*"
               - Effect: Allow
                 Action:
+                  # `states` is the IAM prefix; `sfn` is botocore's client
+                  # name and grants nothing. StartExecution *is* scoped to the
+                  # state machine -- unlike DescribeExecution, which is scoped
+                  # to the execution. The two are genuinely different.
                   - states:StartExecution
-                  - sfn:StartExecution
                 Resource: !Ref StateMachine
               - !If
                 - HasVpcConfig
@@ -678,12 +681,29 @@ Resources:
                   - ec2:AssignIpv6Addresses
                   - ec2:UnassignIpv6Addresses
                 Resource: "*"
+              # DescribeExecution is authorized against the *execution* ARN,
+              # not the state machine's. `!Sub "${StateMachine}:*"` expands to
+              #
+              #   arn:...:states:...:stateMachine:<name>:*
+              #
+              # and the thing being described is
+              #
+              #   arn:...:states:...:execution:<name>:<id>
+              #
+              # Different resource-type segment, so the statement matched
+              # nothing and every poll of a run was denied -- which meant
+              # GET /team/task/{run_id} could never report a result, however
+              # well the pipeline ran. The A2A role got this right; this one
+              # predated it.
+              #
+              # Only `states:` is a real IAM prefix. `sfn` is botocore's
+              # client name (the same confusion as AWS_ENDPOINT_URL_SFN), so
+              # `sfn:DescribeExecution` granted nothing and is gone.
               - Effect: Allow
                 Action:
                   - states:DescribeExecution
-                  - sfn:DescribeExecution
                 Resource:
-                  - !Sub "${StateMachine}:*"
+                  - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-state-machine:*"
 
   ConversationRole:
     Type: AWS::IAM::Role

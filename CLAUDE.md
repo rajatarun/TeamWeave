@@ -483,6 +483,23 @@ test's fake client raises if `InvokeModel` is called at all.
 ### Async Execution
 Every run is async: `POST /team/task` returns a `run_id`, then poll `GET /team/task/{run_id}` until `SUCCEEDED` or `FAILED`.
 
+**Starting a run and reading one are authorized against different
+resources.** `StartExecution` names the state machine; `DescribeExecution`
+names the *execution*, whose ARN uses the `execution:` resource-type segment
+rather than `stateMachine:`. The status role scoped it with
+`!Sub "${StateMachine}:*"` — which expands to the state machine's own ARN —
+so every poll of every run was denied and the UI could never report a result,
+however well the pipeline ran. The A2A role, written later, had it right, and
+nothing compared them. This is the same family as `bedrock:InvokeAgent` versus
+`bedrock-agentcore:InvokeAgentRuntime`: the right-looking grant against the
+wrong resource, which reviews as correct.
+
+`tests/test_execution_permissions.py` checks every role's statements: an
+execution-scoped action must name an `execution:` ARN, `StartExecution` must
+not, and no policy may use `sfn:` — that is botocore's client name, not an IAM
+prefix, so `sfn:StartExecution` and `sfn:DescribeExecution` granted nothing
+while making the policy read as though they did.
+
 ---
 
 ## Environment Variables (auto-wired by SAM)
