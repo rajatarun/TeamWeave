@@ -1,12 +1,12 @@
 import json
 import os
-import uuid
 from typing import Any, Dict, Optional
 from urllib.parse import unquote
 
 import boto3
 from botocore.exceptions import ClientError
 
+from . import run_ids
 from .config_loader import load_team_config
 from .db import DbDao
 from .logger import get_logger
@@ -53,7 +53,7 @@ def _json_body(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _start_async_execution(state_machine_arn: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    run_id = str(uuid.uuid4())
+    run_id = run_ids.new_run_id()
     payload_with_run_id = {**payload, "run_id": run_id}
     log.info(
         "stepfunctions_start_execution_requested",
@@ -67,7 +67,14 @@ def _start_async_execution(state_machine_arn: str, payload: Dict[str, Any]) -> D
             "version": payload_with_run_id.get("version"),
         },
     )
-    execution = sfn.start_execution(stateMachineArn=state_machine_arn, input=json.dumps(payload_with_run_id))
+    # `name=` is what makes the returned run_id resolvable: the status handler
+    # rebuilds the execution ARN from it, so an unnamed execution gets a uuid
+    # of Step Functions' own and every poll 404s. See run_ids.
+    execution = sfn.start_execution(
+        stateMachineArn=state_machine_arn,
+        name=run_id,
+        input=json.dumps(payload_with_run_id),
+    )
     execution_arn = execution.get("executionArn")
     execution_id = execution_arn.rsplit(":", 1)[-1] if isinstance(execution_arn, str) and execution_arn else None
     log.info(

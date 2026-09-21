@@ -11,13 +11,12 @@ from __future__ import annotations
 
 import json
 import os
-import uuid
 from typing import Any, Dict
 
 import boto3
 from botocore.exceptions import ClientError
 
-from . import a2a
+from . import a2a, run_ids
 from .logger import get_logger
 
 log = get_logger("a2a_handler")
@@ -145,7 +144,7 @@ def _send_message(event: Dict[str, Any]) -> Dict[str, Any]:
     if not state_machine_arn:
         return _resp(500, {"error": {"code": "INTERNAL", "message": "STATE_MACHINE_ARN is not configured"}})
 
-    run_id = str(uuid.uuid4())
+    run_id = run_ids.new_run_id()
     # `skillId` selects the agent; without it the team's own workflow decides,
     # which is the native behaviour of POST /team/task.
     payload = {
@@ -156,7 +155,13 @@ def _send_message(event: Dict[str, Any]) -> Dict[str, Any]:
         "a2a": True,
     }
     try:
-        sfn.start_execution(stateMachineArn=state_machine_arn, input=json.dumps(payload))
+        # Named with the task id for the same reason the trigger names its
+        # execution: `_get_task` resolves the id straight back to an ARN.
+        sfn.start_execution(
+            stateMachineArn=state_machine_arn,
+            name=run_id,
+            input=json.dumps(payload),
+        )
     except ClientError as exc:
         log.error("a2a_start_failed", extra={"err": str(exc)[:300]})
         return _resp(502, {"error": {"code": "UNAVAILABLE",
