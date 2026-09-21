@@ -67,6 +67,13 @@ class AgentRef:
     # Which team this turn belongs to. AgentCore runtimes are per team, so
     # this is how a turn finds the one that serves it.
     team: str = ""
+    # The model this agent declares in team.json. On Classic the model is a
+    # property of the Bedrock agent resource, so this is unused there. On
+    # AgentCore one generic runtime serves every agent, so the model has to
+    # travel with the turn -- exactly as the instruction does -- or every
+    # agent silently runs on whatever AGENT_MODEL_ID the runtime was created
+    # with, and the per-agent model_id in team.json means nothing.
+    model_id: str = ""
 
 
 class AgentRuntime(Protocol):
@@ -308,14 +315,18 @@ class AgentCoreRuntime:
             )
         return ""
 
-    def build_payload(self, session_id: str, input_text: str, instruction: str = "") -> bytes:
+    def build_payload(self, session_id: str, input_text: str, instruction: str = "",
+                      model_id: str = "") -> bytes:
         # The entrypoint receives this unchanged, so the shape is TeamWeave's
-        # to define. `prompt` is what the agent reads; `instruction` is the
-        # system prompt for this turn, which is what lets one runtime serve
-        # every agent instead of one runtime per agent.
+        # to define. `prompt` is what the agent reads; `instruction` and
+        # `modelId` are this turn's system prompt and model, which is what
+        # lets one runtime serve every agent instead of one runtime per agent.
+        # Both are omitted when empty so the runtime keeps its own default.
         body = {"prompt": input_text, "sessionId": session_id}
         if instruction:
             body["instruction"] = instruction
+        if model_id:
+            body["modelId"] = model_id
         return json.dumps(body, ensure_ascii=False).encode("utf-8")
 
     def invoke(
@@ -344,7 +355,13 @@ class AgentCoreRuntime:
             session_id=session_id,
             runtime_session_id=agentcore_session_id(session_id),
             input_text=input_text,
-            payload=self.build_payload(session_id, input_text),
+            # build_payload took an instruction from the day it was written and
+            # invoke never passed one, so every turn fell back to the
+            # runtime's AGENT_INSTRUCTION. The seam existed and was not
+            # connected to anything.
+            payload=self.build_payload(
+                session_id, input_text, model_id=ref.model_id,
+            ),
         )
 
         status = resp.get("statusCode")

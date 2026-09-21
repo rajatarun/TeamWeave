@@ -165,3 +165,115 @@ def test_every_worker_invocation_names_its_team():
             f"{call.func.id} at line {call.lineno} does not pass team=, so its turns "
             f"resolve to the shared runtime whatever the team map says"
         )
+        # The same wiring bug, one field over. One generic runtime serves every
+        # agent, so an agent's declared model reaches it only by travelling
+        # with the turn; omit this and every agent runs on the runtime's
+        # AGENT_MODEL_ID while team.json says otherwise, and nothing fails.
+        assert "model_id" in keywords, (
+            f"{call.func.id} at line {call.lineno} does not pass model_id=, so the "
+            f"agent's declared model never reaches the runtime"
+        )
+
+
+def test_the_declared_model_travels_with_the_turn():
+    """team.json declares a model per agent; on AgentCore it is only honoured
+    if it is in the payload. AGENT_MODEL_ID is fixed at CreateAgentRuntime
+    time, so a model read solely from there serves one model to every agent
+    while the config claims four."""
+    import json as _json
+    from src.orchestrator.agent_runtime import AgentCoreRuntime, AgentRef
+
+    payload = AgentCoreRuntime().build_payload(
+        "run-1", "the prompt", model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    )
+    assert _json.loads(payload)["modelId"] == "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+
+def test_no_model_in_the_payload_leaves_the_runtime_default():
+    """An agent that declares none must not pin the runtime to anything."""
+    import json as _json
+    from src.orchestrator.agent_runtime import AgentCoreRuntime
+
+    assert "modelId" not in _json.loads(AgentCoreRuntime().build_payload("run-1", "p"))
+
+
+def test_the_runtime_program_prefers_the_payload_model():
+    """The other end of the same wire."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "agentcore"))
+    import agent as agentcore_agent
+
+    seen = {}
+
+    class FakeBedrock:
+        def converse(self, **kw):
+            seen.update(kw)
+            return {"output": {"message": {"content": [{"text": "ok"}]}}}
+
+    out = agentcore_agent.run_turn(
+        {"prompt": "p", "modelId": "us.anthropic.claude-haiku-4-5-20251001-v1:0"},
+        client=FakeBedrock(),
+        env={"AGENT_MODEL_ID": "us.amazon.nova-micro-v1:0"},
+    )
+    assert seen["modelId"] == "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+    assert out["modelId"] == "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+
+def test_the_runtime_default_still_applies_when_no_model_is_sent():
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "agentcore"))
+    import agent as agentcore_agent
+
+    seen = {}
+
+    class FakeBedrock:
+        def converse(self, **kw):
+            seen.update(kw)
+            return {"output": {"message": {"content": [{"text": "ok"}]}}}
+
+    agentcore_agent.run_turn(
+        {"prompt": "p"}, client=FakeBedrock(),
+        env={"AGENT_MODEL_ID": "us.amazon.nova-micro-v1:0"},
+    )
+    assert seen["modelId"] == "us.amazon.nova-micro-v1:0"
+
+
+def test_invoke_actually_puts_the_model_on_the_wire(monkeypatch):
+    """Not that build_payload *can* carry a model -- that invoke passes one.
+
+    `build_payload` accepted an `instruction` from the day it was written and
+    `invoke` never passed one, so every turn silently fell back to the
+    runtime's AGENT_INSTRUCTION. A helper with a parameter nothing supplies
+    looks exactly like a wired feature. Testing the builder alone reproduces
+    that blind spot, so this drives the real invoke and reads the bytes it
+    sends.
+    """
+    import json as _json
+    import io
+    from src.orchestrator import agent_runtime as ar
+
+    sent = {}
+
+    class FakeClient:
+        def invoke_agent_runtime(self, **kw):
+            sent.update(kw)
+            return {"statusCode": 200, "response": io.BytesIO(b'{"result": "ok"}')}
+
+    monkeypatch.setenv("AGENTCORE_TEAM_RUNTIME_ARNS", _json.dumps(TEAM_MAP))
+    runtime = ar.AgentCoreRuntime(client=FakeClient())
+    runtime.invoke(
+        ar.AgentRef(team="tarun_visibility_team",
+                    model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0"),
+        session_id="run-1",
+        input_text="the prompt",
+    )
+
+    body = _json.loads(sent["payload"])
+    assert body["modelId"] == "us.anthropic.claude-haiku-4-5-20251001-v1:0", (
+        "invoke built the payload without the ref's model, so the agent's "
+        "declared model never leaves the worker"
+    )

@@ -165,6 +165,7 @@ def _invoke_with_dpo(
             runtime_arn=agent.bedrock.runtimeArn,
             qualifier=agent.bedrock.qualifier,
             team=team,
+            model_id=agent.bedrock.model_id,
         )
 
     return dpo_collector.collect_dpo_step(
@@ -294,6 +295,7 @@ def run_team_pipeline(
                 runtime_arn=agent.bedrock.runtimeArn,
                 qualifier=agent.bedrock.qualifier,
                 team=team,
+                model_id=agent.bedrock.model_id,
             )
 
         try:
