@@ -6,6 +6,8 @@ from typing import Any, Dict
 import boto3
 from botocore.exceptions import ClientError
 
+from . import run_ids
+
 sfn = boto3.client("stepfunctions", endpoint_url=os.environ.get("STEPFUNCTIONS_ENDPOINT_URL"))
 
 
@@ -27,15 +29,7 @@ def _method(event: Dict[str, Any]) -> str:
 
 
 def _to_execution_arn(run_id: str) -> str:
-    if run_id.startswith("arn:"):
-        return run_id
-
-    state_machine_arn = os.getenv("STATE_MACHINE_ARN", "")
-    if ":stateMachine:" not in state_machine_arn:
-        raise ValueError("STATE_MACHINE_ARN must be configured when run_id is an execution id")
-
-    base = state_machine_arn.replace(":stateMachine:", ":execution:", 1)
-    return f"{base}:{run_id}"
+    return run_ids.to_execution_arn(run_id, os.getenv("STATE_MACHINE_ARN", ""))
 
 
 # ASSUMPTION: run_id path parameter may be URL-encoded because execution ARN contains ':'.

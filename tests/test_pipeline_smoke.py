@@ -119,6 +119,9 @@ def test_it_runs_after_the_configs_it_exercises_are_uploaded():
 import json as _json  # noqa: E402
 
 
+STATE_MACHINE_ARN = "arn:aws:states:us-east-1:239571291755:stateMachine:tarun-content-team-state-machine"
+
+
 class FakeSfn:
     """Enough of the Step Functions client for main() to run against."""
 
@@ -132,7 +135,12 @@ class FakeSfn:
         if self._start_error:
             raise self._start_error
         self.started.append(kwargs)
-        return {"executionArn": "arn:aws:states:us-east-1:1:execution:sm:run-1"}
+        # Derive the ARN from what was passed, as Step Functions does. A fixed
+        # ARN unrelated to the arguments makes the fake agree with any caller,
+        # which is how an unnamed execution -- and a run_id that resolved to
+        # nothing -- survived a green suite.
+        base = kwargs["stateMachineArn"].replace(":stateMachine:", ":execution:", 1)
+        return {"executionArn": f"{base}:{kwargs.get('name') or 'service-generated'}"}
 
     def describe_execution(self, **_kwargs):
         described = {"status": self._status}
@@ -147,7 +155,8 @@ def run_main(smoke, monkeypatch, fake, extra_args=()):
     monkeypatch.setattr(smoke.boto3, "client", lambda *a, **k: fake)
     monkeypatch.setattr(
         "sys.argv",
-        ["pipeline_smoke.py", "--state-machine-arn", "arn:sm", "--poll", "0", *extra_args],
+        ["pipeline_smoke.py", "--state-machine-arn", STATE_MACHINE_ARN,
+         "--poll", "0", *extra_args],
     )
     return smoke.main()
 
@@ -337,3 +346,31 @@ def test_the_stack_publishes_the_per_team_runtimes():
     assert "AgentCoreTeamRuntimeArns:" in outputs, (
         "the deploy cannot smoke-test runtimes the stack does not publish"
     )
+
+
+# ── the run_id round trip, checked against a real ARN on every deploy ────────
+
+def test_the_execution_is_named_so_a_caller_can_poll_it(smoke, monkeypatch, capsys):
+    fake = FakeSfn("SUCCEEDED", GOOD)
+    assert run_main(smoke, monkeypatch, fake) == 0
+    started = fake.started[0]
+    assert started["name"], "the execution must be named, or its run_id resolves to nothing"
+    assert _json.loads(started["input"])["run_id"] == started["name"]
+
+
+def test_an_arn_that_does_not_match_the_rule_fails_the_deploy(smoke, monkeypatch, capsys):
+    """If the reconstruction rule ever stops matching reality, say so loudly.
+
+    This is the case a unit test cannot reach: the fake and the handler would
+    agree on a wrong shape. Here the service returns something else.
+    """
+    class WrongArn(FakeSfn):
+        def start_execution(self, **kwargs):
+            self.started.append(kwargs)
+            return {"executionArn": "arn:aws:states:us-east-1:1:execution:other-sm:somethingelse"}
+
+    code = run_main(smoke, monkeypatch, WrongArn("SUCCEEDED", GOOD))
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "does not resolve back to its execution" in out
+    assert "::error::" in out
