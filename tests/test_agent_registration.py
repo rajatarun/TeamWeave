@@ -313,7 +313,7 @@ def test_a_successful_run_announces_what_it_registered(monkeypatch, capsys):
     rc = run_main(monkeypatch, fake_s3({"teams/a/v1/team.json": team("writer")}), control)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "::notice::" in out and "1 agent(s) on runtime" in out
+    assert "::notice::" in out and "1 agent(s) registered across 1 team(s)" in out
     # The notice must say where identity actually lives, or the next person
     # re-adds an endpoint per agent.
     assert "gen_ai.agent.id" in out
@@ -772,3 +772,78 @@ def test_the_deploy_passes_the_map_to_the_registrar():
         "the registrar is never told the map, so every agent is stamped with the shared runtime"
     )
     assert "TEAM_RUNTIME_ARNS=$(stack_output AgentCoreTeamRuntimeArns)" in workflow
+
+
+
+# ── where the agents actually landed ────────────────────────────────────────
+#
+# The summary used to name --runtime-id, the *shared* runtime, whatever
+# runtime each team's agents were written to. Per-team runtimes exist so a
+# team has its own blast radius and its own release channels; a summary that
+# reports the shared one either way cannot tell a working setup from a team
+# that silently fell back to it -- which is the failure this whole scheme was
+# built to avoid.
+
+TEAM_ARNS = json.dumps({
+    "visibility": "arn:aws:bedrock-agentcore:us-east-1:1:runtime/teamweave_visibility",
+})
+
+
+def named_team(name, *agent_ids):
+    return {"team": {"name": name},
+            "agents": [{"id": a, "bedrock": {}} for a in agent_ids]}
+
+
+def test_the_summary_names_the_runtime_each_team_landed_on(monkeypatch, capsys):
+    control = FakeControl()
+    control.list_agent_runtime_endpoints = lambda **kw: {"runtimeEndpoints": []}
+    rc = run_main(
+        monkeypatch,
+        fake_s3({"teams/visibility/v1/team.json": named_team("visibility", "writer", "editor")}),
+        control,
+        argv_extra=("--team-runtime-arns", TEAM_ARNS),
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "visibility -> teamweave_visibility" in out, out
+    # The shared runtime must not be reported as the placement.
+    assert "visibility -> rt-1" not in out
+
+
+def test_agents_are_written_back_with_their_teams_runtime(monkeypatch, capsys):
+    control = FakeControl()
+    control.list_agent_runtime_endpoints = lambda **kw: {"runtimeEndpoints": []}
+    s3 = fake_s3({"teams/visibility/v1/team.json": named_team("visibility", "writer")})
+    run_main(monkeypatch, s3, control, argv_extra=("--team-runtime-arns", TEAM_ARNS))
+
+    written = json.loads(s3.put_object.call_args.kwargs["Body"])
+    arn = written["agents"][0]["bedrock"]["runtimeArn"]
+    assert arn.endswith("teamweave_visibility"), arn
+
+
+def test_a_team_with_no_runtime_of_its_own_is_warned_about(monkeypatch, capsys):
+    """Falling back to the shared runtime works, and must not be silent."""
+    control = FakeControl()
+    control.list_agent_runtime_endpoints = lambda **kw: {"runtimeEndpoints": []}
+    rc = run_main(
+        monkeypatch,
+        fake_s3({"teams/newteam/v1/team.json": named_team("newteam", "writer")}),
+        control,
+        argv_extra=("--team-runtime-arns", TEAM_ARNS),
+    )
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "::warning::" in out
+    assert "newteam" in out and "fall back to the shared one" in out
+
+
+def test_a_team_that_has_its_runtime_is_not_warned_about(monkeypatch, capsys):
+    control = FakeControl()
+    control.list_agent_runtime_endpoints = lambda **kw: {"runtimeEndpoints": []}
+    run_main(
+        monkeypatch,
+        fake_s3({"teams/visibility/v1/team.json": named_team("visibility", "writer")}),
+        control,
+        argv_extra=("--team-runtime-arns", TEAM_ARNS),
+    )
+    assert "fall back to the shared one" not in capsys.readouterr().out

@@ -40,7 +40,10 @@ def load(path: Path) -> dict:
 def test_there_are_teams_to_check():
     # A guard against the parametrised tests below becoming vacuous, not a
     # statement about how many teams the platform should have.
-    assert len(team_files()) >= 2, "found almost no team configs — has the layout moved?"
+    # One team ships now (tarun_visibility_team). Zero means the glob stopped
+    # matching and every check below passes for free, which is the case worth
+    # catching.
+    assert team_files(), "found no team configs at all — has the layout moved?"
 
 
 @pytest.mark.parametrize("path", team_files(), ids=team_ids())
