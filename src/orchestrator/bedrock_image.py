@@ -49,8 +49,16 @@ DEFAULT_HEIGHT = 720
 DEFAULT_CFG_SCALE = 6.5
 
 
-def model_id() -> str:
-    return (os.environ.get("IMAGE_MODEL_ID") or "").strip() or DEFAULT_MODEL_ID
+def model_id(declared: str = "") -> str:
+    """Most specific first: the agent's own, then the stack's, then a default.
+
+    The declared id is what `team.json` says, and it has to win -- an image
+    member that names a model and is answered by another is the same lie the
+    text agents told when `AGENT_MODEL_ID` was read only from the runtime's
+    environment. Editing the config then changes nothing and says nothing.
+    """
+    return (declared or "").strip() or (os.environ.get("IMAGE_MODEL_ID") or "").strip() \
+        or DEFAULT_MODEL_ID
 
 
 def _client():
@@ -127,11 +135,12 @@ def first_image_b64(payload: Dict[str, Any]) -> str:
     raise RuntimeError(f"image generation returned no image: {str(reason)[:300]}")
 
 
-def generate(prompt: str, *, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT,
+def generate(prompt: str, *, declared_model_id: str = "",
+             width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT,
              negative: str = "", seed: Optional[int] = None,
              client=None) -> Dict[str, Any]:
     """Generate one image. Returns {bytes, model_id, prompt, width, height}."""
-    model = model_id()
+    model = model_id(declared_model_id)
     body = build_body(prompt, model=model, width=width, height=height,
                       negative=negative, seed=seed)
     response = (client or _client()).invoke_model(

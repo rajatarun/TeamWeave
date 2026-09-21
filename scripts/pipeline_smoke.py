@@ -133,17 +133,48 @@ def failure_detail(sfn, execution_arn: str, limit: int = 200) -> str:
     return "\n".join(lines) if lines else "(the history recorded no failure detail)"
 
 
+def is_image_step(output: Any) -> bool:
+    """An image step's output is a reference, not the deliverable."""
+    return isinstance(output, dict) and "image_uri" in output
+
+
+def image_failures(result: Dict[str, Any]) -> Dict[str, str]:
+    """Image steps that recorded an error, by step id.
+
+    An image failure degrades rather than failing the run -- the post is the
+    deliverable and a picture of it is not -- so nothing else would say this
+    happened. It is a warning here, never silence.
+    """
+    steps = result.get("steps")
+    if not isinstance(steps, dict):
+        return {}
+    return {
+        step_id: str(output.get("error"))
+        for step_id, output in steps.items()
+        if is_image_step(output) and output.get("error")
+    }
+
+
 def final_step_output(result: Dict[str, Any]) -> Tuple[str, Any]:
-    """The last step's output -- the team's deliverable.
+    """The team's deliverable -- the last step that produced one.
+
+    Usually the last step, but not always: the visibility team ends with an
+    illustrator whose output is a reference to a PNG. Taking the last step
+    blindly would check the image reference for substance and pass a run whose
+    post was empty, which is the exact failure this script exists to catch.
+    The UI skips image steps for the same reason; the two must agree on what
+    the deliverable is.
 
     `steps` is a dict keyed by step id. Python preserves insertion order and
-    the worker writes steps in workflow order, so the last key is the last
-    step. Read defensively anyway: this runs against whatever the deploy
-    produced, not against a fixture.
+    the worker writes steps in workflow order. Read defensively anyway: this
+    runs against whatever the deploy produced, not against a fixture.
     """
     steps = result.get("steps")
     if not isinstance(steps, dict) or not steps:
         return "", None
+    for step_id in reversed(list(steps)):
+        if not is_image_step(steps[step_id]):
+            return step_id, steps[step_id]
     last_id = list(steps)[-1]
     return last_id, steps[last_id]
 
@@ -237,6 +268,15 @@ def main() -> int:
             f"Steps present: {sorted(result.get('steps') or {})}",
         )
         return 1
+
+    for step_id, error in image_failures(result).items():
+        announce(
+            "warning",
+            f"{step_id} produced no image: {error[:300]}. The run is not failed "
+            "over this -- the post is the deliverable -- but the illustration "
+            "is missing. Set ImageModelId to a model this account has access "
+            "to, or grant access in the Bedrock console.",
+        )
 
     rendered = json.dumps(output, ensure_ascii=False)
     announce(

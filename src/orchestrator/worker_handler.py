@@ -68,7 +68,32 @@ def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any
     the whole run at the state transition, after paying for the image.
     """
     prompt = _image_prompt(agent, step_inputs)
-    result = bedrock_image.generate(prompt)
+    declared = getattr(agent.bedrock, "model_id", "") or ""
+    try:
+        result = bedrock_image.generate(prompt, declared_model_id=declared)
+    except Exception as exc:  # noqa: BLE001 - see below
+        # The illustration adorns the deliverable; it is not the deliverable.
+        # Failing the run here threw away a finished, approved post because a
+        # picture of it could not be made -- which is what happened on the
+        # first real run, when Bedrock refused the image model outright.
+        #
+        # This is the same call the RAG layer makes and the opposite of the
+        # empty-success trap: nothing claims an image exists. The step records
+        # what failed, the run keeps its post, and the smoke test and the UI
+        # both read `error` and say so.
+        log.warning(
+            "image_step_failed step=%s run_id=%s model=%s err=%s",
+            step_id, run_id, bedrock_image.model_id(declared), str(exc)[:300],
+        )
+        return {
+            "image_uri": "",
+            "image_url": "",
+            "model_id": bedrock_image.model_id(declared),
+            "prompt": prompt[:500],
+            "content_type": "image/png",
+            "error": f"{type(exc).__name__}: {str(exc)[:400]}",
+        }
+
     uri = save_bytes(
         run_id, step_id, result["bytes"], extension="png", content_type="image/png",
     )

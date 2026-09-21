@@ -374,3 +374,52 @@ def test_an_arn_that_does_not_match_the_rule_fails_the_deploy(smoke, monkeypatch
     out = capsys.readouterr().out
     assert "does not resolve back to its execution" in out
     assert "::error::" in out
+
+
+# ── the deliverable is the post, not the picture of it ──────────────────────
+
+WITH_IMAGE = {"steps": {
+    "editor": {"post": "the approved copy"},
+    "illustrator": {"image_uri": "s3://b/r/i.png", "model_id": "m", "content_type": "image/png"},
+}}
+
+
+def test_an_image_step_is_not_mistaken_for_the_deliverable(smoke, monkeypatch, capsys):
+    """The visibility team ends with an illustrator. Checking the image
+    reference for substance would pass a run whose post was empty -- exactly
+    what this script exists to catch."""
+    step_id, output = smoke.final_step_output(WITH_IMAGE)
+    assert step_id == "editor"
+    assert output == {"post": "the approved copy"}
+
+
+def test_an_empty_post_still_fails_even_with_an_image(smoke, monkeypatch, capsys):
+    empty = {"steps": {
+        "editor": {},
+        "illustrator": {"image_uri": "s3://b/r/i.png"},
+    }}
+    code = run_main(smoke, monkeypatch, FakeSfn("SUCCEEDED", empty))
+    assert code == 1
+    assert "produced nothing usable" in capsys.readouterr().out
+
+
+def test_a_failed_image_warns_but_does_not_fail_the_deploy(smoke, monkeypatch, capsys):
+    """An image failure degrades rather than failing the run, so nothing else
+    would say it happened."""
+    degraded = {"steps": {
+        "editor": {"post": "the approved copy"},
+        "illustrator": {"image_uri": "", "error": "ResourceNotFoundException: Legacy model"},
+    }}
+    code = run_main(smoke, monkeypatch, FakeSfn("SUCCEEDED", degraded))
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "::warning::" in out
+    assert "produced no image" in out
+    assert "ImageModelId" in out
+
+
+def test_a_working_image_warns_about_nothing(smoke, monkeypatch, capsys):
+    code = run_main(smoke, monkeypatch, FakeSfn("SUCCEEDED", WITH_IMAGE))
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "produced no image" not in out
