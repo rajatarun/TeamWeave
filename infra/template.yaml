@@ -197,6 +197,16 @@ Parameters:
       whose shape it does not know. Model access is granted per model in the
       Bedrock console; a model that is not enabled is refused at the call.
 
+  GeminiImageModel:
+    Type: String
+    Default: "gemini-2.5-flash-image"
+    Description: >
+      Gemini model for image members with image_provider "gemini". A member's
+      own model_id in team.json wins over this. Only the `:generateContent`
+      family is supported -- Imagen answers on `:predict` with a different
+      body and needs its own builder, not just a new id. The key comes from
+      GEMINI_SECRET_ARN, which the research brief already uses.
+
   AgentCoreGatewayName:
     Type: String
     Default: "teamweave-tools"
@@ -288,6 +298,7 @@ Globals:
         # decision rather than a second one hardcoded in a module.
         STRUCTURED_TRANSFORM_MODEL_ID: !Ref AgentCoreDefaultModelId
         IMAGE_MODEL_ID: !Ref ImageModelId
+        GEMINI_IMAGE_MODEL: !Ref GeminiImageModel
         # team name -> its runtime ARN. One variable rather than one per team:
         # Lambda's environment is a flat map the template names statically, so
         # a per-team variable would need wiring through every function. The

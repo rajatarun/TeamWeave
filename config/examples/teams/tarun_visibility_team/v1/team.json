@@ -128,8 +128,9 @@
         "agentId": "",
         "aliasId": "",
         "modality": "image",
-        "model_id": "amazon.nova-canvas-v1:0",
-        "model_aliases": {}
+        "model_id": "gemini-2.5-flash-image",
+        "model_aliases": {},
+        "image_provider": "gemini"
       },
       "goal_template": "Editorial illustration for a LinkedIn post by a senior AWS platform engineer. Clean, modern, professional. Abstract technical composition -- geometric shapes, depth, restrained palette. No text, no letters, no logos, no watermarks, no human faces. Wide 16:9 banner framing. Illustrate the subject of the following approved post:",
       "schema_ref": "image_asset_v1"
@@ -249,6 +250,10 @@
           "error": {
             "type": "string",
             "description": "why no image was produced; absent on success"
+          },
+          "provider": {
+            "type": "string",
+            "description": "bedrock or gemini"
           }
         }
       }

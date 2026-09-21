@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 import boto3
 
 from . import deadline
-from . import bedrock_image
+from . import bedrock_image, gemini_image
 from .bedrock_invoke import invoke_agent, invoke_agent_with_metrics
 from . import contextweave_client
 from . import dpo_collector
@@ -69,8 +69,17 @@ def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any
     """
     prompt = _image_prompt(agent, step_inputs)
     declared = getattr(agent.bedrock, "model_id", "") or ""
+    provider = (getattr(agent.bedrock, "image_provider", "") or "bedrock").lower()
+    # One seam, two services. Everything around it -- the prompt, the S3
+    # write, the presign, the degrade, the schema -- is provider-independent
+    # and stays here; the provider answers only "prompt in, bytes out".
+    generator = gemini_image if provider == "gemini" else bedrock_image
     try:
-        result = bedrock_image.generate(prompt, declared_model_id=declared)
+        if provider not in {"bedrock", "gemini"}:
+            raise ValueError(
+                f"unknown image_provider {provider!r}; expected 'bedrock' or 'gemini'"
+            )
+        result = generator.generate(prompt, declared_model_id=declared)
     except Exception as exc:  # noqa: BLE001 - see below
         # The illustration adorns the deliverable; it is not the deliverable.
         # Failing the run here threw away a finished, approved post because a
@@ -83,19 +92,24 @@ def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any
         # both read `error` and say so.
         log.warning(
             "image_step_failed step=%s run_id=%s model=%s err=%s",
-            step_id, run_id, bedrock_image.model_id(declared), str(exc)[:300],
+            step_id, run_id, generator.model_id(declared), str(exc)[:300],
         )
         return {
             "image_uri": "",
             "image_url": "",
-            "model_id": bedrock_image.model_id(declared),
+            "model_id": generator.model_id(declared),
+            "provider": provider,
             "prompt": prompt[:500],
             "content_type": "image/png",
             "error": f"{type(exc).__name__}: {str(exc)[:400]}",
         }
 
+    # Gemini answers with its own mime type; Bedrock's is always PNG. Writing
+    # a JPEG to a .png key would serve a file whose extension lies.
+    content_type = str(result.get("content_type") or "image/png")
+    extension = {"image/jpeg": "jpg", "image/webp": "webp"}.get(content_type, "png")
     uri = save_bytes(
-        run_id, step_id, result["bytes"], extension="png", content_type="image/png",
+        run_id, step_id, result["bytes"], extension=extension, content_type=content_type,
     )
     log.info("image_step_complete step=%s run_id=%s uri=%s", step_id, run_id, uri)
     return {
@@ -106,9 +120,10 @@ def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any
         "image_url": presign(uri),
         "model_id": result["model_id"],
         "prompt": result["prompt"],
-        "width": result["width"],
-        "height": result["height"],
-        "content_type": "image/png",
+        "width": result.get("width", 0),
+        "height": result.get("height", 0),
+        "content_type": content_type,
+        "provider": provider,
     }
 
 

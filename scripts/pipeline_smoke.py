@@ -277,7 +277,16 @@ def main() -> int:
         # guessing ids: one that exists but is not accessible, one that does
         # not exist -- different problems, identical symptom, and the account
         # can answer both.
-        available = image_models.describe(args.region)
+        # Ask whichever service refused. Listing Bedrock models when the step
+        # ran on Gemini would name candidates the run cannot use.
+        steps = result.get("steps") or {}
+        providers = {str((steps.get(sid) or {}).get("provider") or "bedrock")
+                     for sid in failures}
+        if providers == {"gemini"}:
+            from src.orchestrator import gemini_image
+            available = gemini_image.describe()
+        else:
+            available = image_models.describe(args.region)
         for step_id, error in failures.items():
             announce(
                 "warning",

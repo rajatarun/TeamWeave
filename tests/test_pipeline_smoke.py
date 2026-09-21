@@ -437,3 +437,34 @@ def test_a_working_image_warns_about_nothing(smoke, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "produced no image" not in out
+
+
+def test_a_gemini_failure_lists_gemini_models(smoke, monkeypatch, capsys):
+    """Listing Bedrock models when the step ran on Gemini names candidates
+    the run cannot use."""
+    from src.orchestrator import gemini_image
+
+    monkeypatch.setattr(gemini_image, "describe",
+                        lambda *a, **kw: "Gemini models this key can call: gemini-x")
+    monkeypatch.setattr(smoke.image_models, "describe",
+                        lambda *a, **kw: "BEDROCK LIST SHOULD NOT APPEAR")
+    degraded = {"steps": {
+        "editor": {"post": "copy"},
+        "illustrator": {"image_uri": "", "provider": "gemini",
+                        "error": "Gemini HTTP 404: model not found"},
+    }}
+    assert run_main(smoke, monkeypatch, FakeSfn("SUCCEEDED", degraded)) == 0
+    out = capsys.readouterr().out
+    assert "gemini-x" in out
+    assert "BEDROCK LIST SHOULD NOT APPEAR" not in out
+
+
+def test_a_bedrock_failure_still_lists_bedrock_models(smoke, monkeypatch, capsys):
+    monkeypatch.setattr(smoke.image_models, "describe",
+                        lambda *a, **kw: "image models this account can call: amazon.y")
+    degraded = {"steps": {
+        "editor": {"post": "copy"},
+        "illustrator": {"image_uri": "", "provider": "bedrock", "error": "Legacy"},
+    }}
+    assert run_main(smoke, monkeypatch, FakeSfn("SUCCEEDED", degraded)) == 0
+    assert "amazon.y" in capsys.readouterr().out
