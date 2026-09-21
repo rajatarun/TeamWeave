@@ -83,6 +83,7 @@ def load_team_config(team: str, version: str) -> Tuple[TeamConfig, Dict[str, Any
                 model_aliases=br.get("model_aliases", {}),
                 runtimeArn=br.get("runtimeArn", ""),
                 qualifier=br.get("qualifier", ""),
+                modality=str(br.get("modality", "text") or "text").strip().lower(),
             ),
             goal_template=a.get("goal_template",""),
             schema_ref=a.get("schema_ref",""),

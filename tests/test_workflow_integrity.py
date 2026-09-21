@@ -116,21 +116,54 @@ def test_the_doc_rewrite_team_is_gone():
     assert "doc_rewrite_team" not in template
 
 
-def test_the_visibility_team_is_four_agents():
+def test_the_visibility_team_is_five_members():
     config = load(TEAMS_DIR / "tarun_visibility_team" / "v1" / "team.json")
-    assert len(config["agents"]) == 4, [a["id"] for a in config["agents"]]
-    assert len(config["workflow"]) == 4
+    assert len(config["agents"]) == 5, [a["id"] for a in config["agents"]]
+    assert len(config["workflow"]) == 5
 
 
-def test_the_visibility_pipeline_ends_with_the_post():
-    """The last step's output is what a person came for.
+def test_everything_after_the_editor_consumes_the_approved_copy():
+    """The rule trimming established, kept as the team grows.
 
-    Trimming removed distribution and approval, which ran *after* the editor;
-    the deliverable is the edited post, and the UI shows the final step.
+    The pipeline used to end in distribution and approval steps that ran
+    *after* the editor and produced a plan and a sign-off -- work about the
+    deliverable rather than the deliverable. They were removed for that.
+
+    A step may follow the editor, but only if it consumes what the editor
+    approved: the illustrator does, which is why it is allowed to be last.
+    A step that follows the editor and ignores its output is the old mistake
+    coming back under a new name.
     """
     config = load(TEAMS_DIR / "tarun_visibility_team" / "v1" / "team.json")
-    last = config["workflow"][-1]["step"]
-    agent = next(a for a in config["agents"] if a["id"] == last)
-    assert agent["schema_ref"] == "final_copy_v1", (
-        f"the pipeline ends at {agent['name']} producing {agent['schema_ref']}"
-    )
+    workflow = config["workflow"]
+    agents = {a["id"]: a for a in config["agents"]}
+
+    editor = next(s["step"] for s in workflow if agents[s["step"]]["schema_ref"] == "final_copy_v1")
+    index = [s["step"] for s in workflow].index(editor)
+
+    for step in workflow[index + 1:]:
+        inputs = " ".join(step.get("inputs") or [])
+        assert editor in inputs, (
+            f"{agents[step['step']]['name']} runs after the editor without reading "
+            f"its approved copy — the deliverable is the post, not work about it"
+        )
+
+
+def test_the_illustrator_is_not_an_agent_turn():
+    """Image models do not implement Converse, which is all the AgentCore
+    runtime program speaks. The modality is what routes it elsewhere; without
+    it the worker would send a Canvas id through the agent runtime and the
+    step would fail at the first call."""
+    config = load(TEAMS_DIR / "tarun_visibility_team" / "v1" / "team.json")
+    image_agents = [a for a in config["agents"]
+                    if (a.get("bedrock") or {}).get("modality") == "image"]
+    assert len(image_agents) == 1, [a["id"] for a in image_agents]
+    assert "canvas" in image_agents[0]["bedrock"]["model_id"].lower()
+
+
+def test_every_text_member_still_declares_a_text_model():
+    """A modality typo would silently route a writer through the image path."""
+    config = load(TEAMS_DIR / "tarun_visibility_team" / "v1" / "team.json")
+    for agent in config["agents"]:
+        modality = (agent.get("bedrock") or {}).get("modality", "text")
+        assert modality in {"text", "image"}, (agent["id"], modality)

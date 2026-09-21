@@ -25,6 +25,11 @@ class BedrockRef:
     model_aliases: Dict[str, str] = field(default_factory=dict)
     runtimeArn: str = ""
     qualifier: str = ""
+    # "text" (the default) or "image". An image agent is a full team member in
+    # team.json -- it has a role, a department and a place in the workflow --
+    # but it is not an agent *turn*: image models do not implement Converse,
+    # so the worker runs it through bedrock_image instead of the agent runtime.
+    modality: str = "text"
 
 @dataclass
 class AgentConfig:
