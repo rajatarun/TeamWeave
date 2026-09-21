@@ -610,9 +610,36 @@ was fixed — which is why `model_id(declared)` resolves most-specific-first
 a test walks the worker's real call to check the value is handed over rather
 than merely resolvable.
 
-Model access is granted per model in the Bedrock console, and an
-unentitled model is refused at the call, not at deploy — so `ImageModelId`
-exists as a stack parameter to change it without touching code.
+**Stop guessing model ids; ask the account.** Two deploys were spent on
+guesses that fail identically from the outside and are different problems:
+
+    amazon.nova-canvas-v1:0  ->  "marked by provider as Legacy and you have
+                                  not been actively using the model in the
+                                  last 30 days"      (real id, no access)
+    amazon.nova-canvas-v2:0  ->  "The provided model identifier is invalid"
+                                                     (no such model)
+
+`scripts/image_models.py` answers both from the account.
+`ListFoundationModels` is on the **`bedrock` control-plane client**, not
+`bedrock-runtime`, takes `byOutputModality="IMAGE"`, and returns
+`modelLifecycle.status` (ACTIVE/LEGACY) beside `inferenceTypesSupported` — so
+*exists*, *is not retired* and *can be called on demand* stay three readable
+facts rather than one guess. It adds a fourth the account cannot know: whether
+`bedrock_image.build_body` has a body shape for that family, because a model
+this account can call is still unusable here if its provider takes a different
+body.
+
+The deploy runs it as an informational step (`continue-on-error`, never a
+gate — a missing `bedrock:ListFoundationModels` grant must not redden a
+deploy), and `pipeline_smoke.py` calls it **only when an image step failed**,
+so the warning names real candidates instead of advice. `describe()` never
+raises: it runs inside the reporting of another failure, and a traceback there
+would replace a useful warning with a complaint about the warning.
+
+Model access is granted per model in the Bedrock console, and an unentitled
+model is refused at the call, not at deploy — so `ImageModelId` is a stack
+parameter and a member's `model_id` in `team.json` overrides it, neither
+needing a code change.
 
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them

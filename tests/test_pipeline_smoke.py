@@ -406,6 +406,8 @@ def test_an_empty_post_still_fails_even_with_an_image(smoke, monkeypatch, capsys
 def test_a_failed_image_warns_but_does_not_fail_the_deploy(smoke, monkeypatch, capsys):
     """An image failure degrades rather than failing the run, so nothing else
     would say it happened."""
+    monkeypatch.setattr(smoke.image_models, "describe",
+                        lambda *a, **kw: "image models this account can call: amazon.x-v1:0")
     degraded = {"steps": {
         "editor": {"post": "the approved copy"},
         "illustrator": {"image_uri": "", "error": "ResourceNotFoundException: Legacy model"},
@@ -415,7 +417,19 @@ def test_a_failed_image_warns_but_does_not_fail_the_deploy(smoke, monkeypatch, c
     assert code == 0, out
     assert "::warning::" in out
     assert "produced no image" in out
+    # It must name real candidates, not just advise: two deploys were spent
+    # guessing ids the account could not call.
+    assert "amazon.x-v1:0" in out
     assert "ImageModelId" in out
+
+
+def test_the_model_list_is_only_fetched_when_something_failed(smoke, monkeypatch, capsys):
+    """A successful run must not pay for a control-plane call."""
+    called = []
+    monkeypatch.setattr(smoke.image_models, "describe",
+                        lambda *a, **kw: called.append(1) or "x")
+    run_main(smoke, monkeypatch, FakeSfn("SUCCEEDED", WITH_IMAGE))
+    assert called == []
 
 
 def test_a_working_image_warns_about_nothing(smoke, monkeypatch, capsys):
