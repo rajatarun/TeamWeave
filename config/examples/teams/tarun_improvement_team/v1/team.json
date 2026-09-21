@@ -132,5 +132,24 @@
     "daily_tasks_v1": {
       "path": "config/examples/schemas/daily_tasks_v1.json"
     }
+  },
+  "request_schema": {
+    "summary": "Build a learning plan and today's deliberate-practice tasks toward a target date.",
+    "fields": [
+      {
+        "name": "topic",
+        "label": "What do you want to get better at?",
+        "type": "text",
+        "required": true,
+        "placeholder": "e.g. Distributed systems design interviews"
+      },
+      {
+        "name": "target_date",
+        "label": "Target date",
+        "type": "text",
+        "required": false,
+        "placeholder": "e.g. 2026-12-01"
+      }
+    ]
   }
 }

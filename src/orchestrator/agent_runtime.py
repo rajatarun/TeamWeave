@@ -23,7 +23,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Optional, Protocol, Tuple
+from typing import Dict, Optional, Protocol, Tuple
 
 import boto3
 from botocore.config import Config
@@ -60,6 +60,9 @@ class AgentRef:
     alias_id: str = ""
     runtime_arn: str = ""
     qualifier: str = ""
+    # Which team this turn belongs to. AgentCore runtimes are per team, so
+    # this is how a turn finds the one that serves it.
+    team: str = ""
 
 
 class AgentRuntime(Protocol):
@@ -228,23 +231,69 @@ class AgentCoreRuntime:
         return self._client
 
     @staticmethod
-    def resolve_arn(ref: AgentRef) -> str:
-        """The runtime this turn runs on.
+    def team_runtime_arns() -> Dict[str, str]:
+        """team name -> runtime ARN, as the stack publishes it.
 
-        Classic needed one Bedrock agent per TeamWeave agent, because the
-        agent's identity lived in the agent resource. On AgentCore it does
-        not: prompt_builder already puts ROLE, STEP_GOAL and the output
-        contract in the prompt, so one generic runtime serves every agent and
-        the ARN is a stack-level value. A per-agent runtimeArn in team.json
-        still wins, for an agent that needs its own runtime.
+        A JSON object in one variable rather than one variable per team:
+        Lambda's environment is a flat map the template has to name
+        statically, and a new team would otherwise need a new variable name
+        wired through every function.
+
+        Unparseable content yields {} rather than raising. The caller falls
+        back to the stack-wide runtime, which is a worse answer than the
+        right team's runtime and a far better one than failing every turn.
         """
-        return ref.runtime_arn or (os.environ.get("AGENTCORE_RUNTIME_ARN") or "").strip()
+        raw = (os.environ.get("AGENTCORE_TEAM_RUNTIME_ARNS") or "").strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            log.warning("agentcore_team_runtime_arns_unparseable", extra={"raw": raw[:200]})
+            return {}
+        if not isinstance(parsed, dict):
+            log.warning("agentcore_team_runtime_arns_not_an_object", extra={"raw": raw[:200]})
+            return {}
+        return {str(k): str(v) for k, v in parsed.items() if isinstance(v, str) and v.strip()}
+
+    @classmethod
+    def resolve_arn(cls, ref: AgentRef) -> str:
+        """The runtime this turn runs on, most specific answer first.
+
+        Each team gets its own AgentCore runtime. One runtime for the whole
+        platform put every team's agents in one blast radius and one endpoint
+        budget: the release channels a runtime has are ten, shared, so two
+        teams could not be canaried independently and a bad version reached
+        all of them at once. Per team, each has its own version history, its
+        own channels and its own failure.
+
+        Not per *agent*, which is the mistake this platform already made:
+        identity is a name in a document (a skill id, gen_ai.agent.id), and
+        prompt_builder composes ROLE and STEP_GOAL into the prompt, so one
+        runtime serves every agent of a team without them being confusable.
+        A team is a deployment unit; an agent is not.
+
+        Order:
+          1. the agent's own runtimeArn, for an agent that needs its own
+          2. its team's runtime -- the normal case
+          3. the stack-wide runtime, which keeps a team with no runtime of
+             its own working instead of failing every turn
+        """
+        if ref.runtime_arn:
+            return ref.runtime_arn
+        by_team = cls.team_runtime_arns().get(ref.team, "")
+        if by_team:
+            return by_team
+        return (os.environ.get("AGENTCORE_RUNTIME_ARN") or "").strip()
 
     def missing_fields(self, ref: AgentRef) -> str:
         if not self.resolve_arn(ref):
+            known = sorted(self.team_runtime_arns())
             return (
-                "No AgentCore runtime: set AGENTCORE_RUNTIME_ARN, or give the "
-                "agent its own runtimeArn in team.json"
+                "No AgentCore runtime for team "
+                f"{ref.team or '<unnamed>'}: the stack publishes runtimes for "
+                f"{known or 'no teams'}, AGENTCORE_RUNTIME_ARN is unset, and the "
+                "agent has no runtimeArn of its own in team.json"
             )
         return ""
 

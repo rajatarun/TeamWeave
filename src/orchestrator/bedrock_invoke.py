@@ -64,6 +64,7 @@ def _invoke(
     reraise_step_failed: bool,
     runtime_arn: str = "",
     qualifier: str = "",
+    team: str = "",
 ) -> Tuple[str, dict]:
     """The retry loop both public functions share."""
     runtime = get_runtime()
@@ -75,6 +76,9 @@ def _invoke(
         alias_id=alias_id,
         runtime_arn=runtime_arn,
         qualifier=qualifier,
+        # AgentCore runtimes are per team; without this every turn falls back
+        # to the stack-wide runtime and the isolation is nominal.
+        team=team,
     )
 
     problem = runtime.missing_fields(ref)
@@ -136,6 +140,7 @@ def invoke_agent(
     shadow_alias_id: Optional[str] = None,
     runtime_arn: str = "",
     qualifier: str = "",
+    team: str = "",
 ) -> str:
     text, _ = _invoke(
         "invoke_agent",
@@ -148,6 +153,7 @@ def invoke_agent(
         reraise_step_failed=False,
         runtime_arn=runtime_arn,
         qualifier=qualifier,
+        team=team,
     )
     return text
 
@@ -161,6 +167,7 @@ def invoke_agent_with_metrics(
     shadow_alias_id: Optional[str] = None,
     runtime_arn: str = "",
     qualifier: str = "",
+    team: str = "",
 ) -> tuple:
     """Invoke an agent and return (response_text, span_metrics_dict).
 
@@ -179,4 +186,5 @@ def invoke_agent_with_metrics(
         reraise_step_failed=True,
         runtime_arn=runtime_arn,
         qualifier=qualifier,
+        team=team,
     )
