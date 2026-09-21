@@ -31,11 +31,21 @@ from botocore.exceptions import ClientError
 # Per agent, the keys provisioning owns. Everything else in `bedrock` (model
 # ids, aliases) is a definition the repository sets.
 #
-# agentId/aliasId are Bedrock Agents Classic; runtimeArn/qualifier are
-# AgentCore. Both are listed because both are runtime identity, and leaving
-# runtimeArn out would reproduce exactly the bug this script exists to fix --
-# silently, on the newer path, the first time an agent was moved.
-RUNTIME_AGENT_KEYS = ("agentId", "aliasId", "runtimeArn", "qualifier")
+# agentId/aliasId are Bedrock Agents Classic, which still provisions one
+# Bedrock agent per TeamWeave agent, so they remain S3-owned state.
+#
+# runtimeArn/qualifier are deliberately NOT here. Nothing provisions an agent
+# on AgentCore any more -- an agent is a prompt, and its runtime comes from
+# its team via AGENTCORE_TEAM_RUNTIME_ARNS. Carrying a stamped value across
+# would defeat `register_agents.clear_runtime_identity` completely: it strips
+# the pins from S3, and the very next deploy's merge would read them back out
+# of the previous copy and write them again. The repository would then own a
+# field it never sets and cannot see.
+#
+# A runtimeArn a person writes in team.json still wins at resolution time and
+# still survives this merge -- as a *definition* from the repository, which is
+# what it now is.
+RUNTIME_AGENT_KEYS = ("agentId", "aliasId")
 # Model-alias maps are filled in by provisioning too: the keys are declared in
 # the repo, the values are alias ids it creates.
 RUNTIME_ALIAS_MAP = "model_aliases"

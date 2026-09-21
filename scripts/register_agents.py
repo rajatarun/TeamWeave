@@ -44,11 +44,9 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 # EndpointName: [a-zA-Z][a-zA-Z0-9_]{0,47} -- letters, digits, underscores,
-# must start with a letter, 48 characters. The same alphabet that made
-# AgentRuntimeName fail to create when it was built from a hyphenated stack
-# name; agent ids are hyphenated far more often than stack names are.
+# must start with a letter, 48 characters. Only release-channel names are
+# checked against it now; agent ids never become endpoint names.
 ENDPOINT_NAME_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9_]{0,47}\Z")
-ENDPOINT_NAME_MAX = 48
 
 RUNTIME_KEYS_OWNED_HERE = ("runtimeArn", "qualifier")
 
@@ -93,62 +91,6 @@ def announce(level: str, message: str) -> None:
                 handle.write(f"**Agent registry — {level}:** {message}\n\n")
         except OSError:
             pass
-
-
-def endpoint_name(agent_id: str) -> str:
-    """The registry name for an agent id.
-
-    Deterministic, because the name *is* the address: a different name on the
-    next deploy would orphan the endpoint and silently repoint the agent.
-    """
-    cleaned = re.sub(r"[^a-zA-Z0-9_]", "_", agent_id or "").strip("_")
-    if not cleaned:
-        raise ValueError(f"agent id {agent_id!r} has no characters an endpoint name can use")
-    if not cleaned[0].isalpha():
-        # Must start with a letter. A prefix keeps it derived rather than
-        # invented, so the same id always lands on the same endpoint.
-        cleaned = "a_" + cleaned
-    return cleaned[:ENDPOINT_NAME_MAX]
-
-
-def plan_endpoints(teams: Dict[str, Dict[str, Any]]) -> Tuple[Dict[str, str], List[str]]:
-    """Map every agent id to its endpoint name, and report what cannot be done.
-
-    Collisions are a hard error, never a silent alias. Two agents sharing an
-    endpoint share a registry identity, so their telemetry merges and a version
-    pin meant for one moves the other -- a failure that looks like nothing at
-    all until someone reads a dashboard.
-    """
-    names: Dict[str, str] = {}
-    taken: Dict[str, str] = {}
-    problems: List[str] = []
-
-    for key in sorted(teams):
-        for agent in teams[key].get("agents") or []:
-            agent_id = str(agent.get("id") or agent.get("name") or "").strip()
-            if not agent_id:
-                problems.append(f"{key}: an agent has neither id nor name")
-                continue
-            if agent_id in names:
-                continue
-            try:
-                name = endpoint_name(agent_id)
-            except ValueError as exc:
-                problems.append(f"{key}: {exc}")
-                continue
-            if not ENDPOINT_NAME_PATTERN.match(name):
-                problems.append(f"{key}: {agent_id!r} -> {name!r} is not a legal endpoint name")
-                continue
-            if name in taken and taken[name] != agent_id:
-                problems.append(
-                    f"{key}: {agent_id!r} and {taken[name]!r} both become endpoint {name!r}; "
-                    "they would share one registry identity"
-                )
-                continue
-            taken[name] = agent_id
-            names[agent_id] = name
-
-    return names, problems
 
 
 # ── AWS ────────────────────────────────────────────────────────────────────
@@ -246,27 +188,50 @@ def runtime_for_team(team: Dict[str, Any], team_runtime_arns: Dict[str, str], fa
     return team_runtime_arns.get(name) or fallback
 
 
-def write_back(team: Dict[str, Any], names: Dict[str, str], runtime_arn: str) -> int:
-    """Record each agent's registry identity in its config. Returns changes."""
-    changed = 0
+def agent_census(teams: Dict[str, Dict[str, Any]]) -> Tuple[int, List[str]]:
+    """How many agents there are, and anything that makes one unusable.
+
+    An agent is a prompt, not a resource, so there is nothing to provision --
+    but an agent with no id is still broken: the worker matches agents to
+    workflow steps by id, so one without an id can never be the agent for any
+    step and its turn would raise StepFailed at run time.
+    """
+    count = 0
+    problems: List[str] = []
+    for key in sorted(teams):
+        for agent in teams[key].get("agents") or []:
+            if not str(agent.get("id") or agent.get("name") or "").strip():
+                problems.append(f"{key}: an agent has neither id nor name")
+                continue
+            count += 1
+    return count, problems
+
+
+def clear_runtime_identity(team: Dict[str, Any]) -> int:
+    """Strip the per-agent runtime pins this script used to write.
+
+    An agent does not get provisioned any more, so it must not carry a
+    runtimeArn of its own. `AgentCoreRuntime.resolve_arn` answers
+    most-specific-first, and a stamped value is the *most* specific -- it
+    shadows the team's runtime entirely. So a pin left behind does not merely
+    go unused: it pins the agent to whatever runtime the last deploy wrote,
+    and a team whose runtime is later replaced keeps every turn going to the
+    old one. Nothing fails; the per-team isolation just stops being real.
+
+    The escape hatch survives on purpose: a runtimeArn a *person* puts in
+    team.json still wins. What is removed is this script writing one
+    automatically, which made the hatch indistinguishable from the default.
+    """
+    cleared = 0
     for agent in team.get("agents") or []:
-        agent_id = str(agent.get("id") or agent.get("name") or "").strip()
-        name = names.get(agent_id)
-        if not name:
+        bedrock = agent.get("bedrock")
+        if not isinstance(bedrock, dict):
             continue
-        bedrock = dict(agent.get("bedrock") or {})
-        # No per-agent qualifier: every agent runs on the runtime's DEFAULT
-        # endpoint. A qualifier left here from the per-agent scheme is cleared,
-        # because it names an endpoint that is no longer this agent's.
-        bedrock.pop("qualifier", None)
-        wanted = {"runtimeArn": runtime_arn}
-        if all(str(bedrock.get(k) or "") == v for k, v in wanted.items()) and \
-                not (agent.get("bedrock") or {}).get("qualifier"):
-            continue
-        bedrock.update(wanted)
-        agent["bedrock"] = bedrock
-        changed += 1
-    return changed
+        if any(bedrock.get(k) for k in RUNTIME_KEYS_OWNED_HERE):
+            for k in RUNTIME_KEYS_OWNED_HERE:
+                bedrock.pop(k, None)
+            cleared += 1
+    return cleared
 
 
 def main() -> int:
@@ -322,17 +287,18 @@ def main() -> int:
         return 1
 
     teams = load_teams(s3, args.bucket, keys)
-    names, problems = plan_endpoints(teams)
+    agent_count, problems = agent_census(teams)
     if problems:
-        announce("error", "Cannot register agents: " + "; ".join(problems)[:600])
+        announce("error", "Unusable agent definitions: " + "; ".join(problems)[:600])
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         return 1
-    if not names:
-        announce("error", "Team configs contain no agents to register.")
+    if not agent_count:
+        announce("error", "Team configs contain no agents.")
         return 1
 
-    print(f"Registering {len(names)} agent(s) on runtime {args.runtime_id} v{args.runtime_version}")
+    print(f"{agent_count} agent(s) across {len(teams)} team(s); "
+          f"release channels on runtime {args.runtime_id} v{args.runtime_version}")
 
     # Release channels, a fixed handful, independent of how many agents there
     # are. This is what the endpoint quota is for.
@@ -371,12 +337,10 @@ def main() -> int:
         announce("error", f"AgentCore registry call failed: {exc}")
         return 1
 
-    written = 0
-    # Where each team's agents actually landed, so the summary reports the
-    # runtimes in use rather than the shared one it was handed. Naming
-    # --runtime-id there read as confirmation that every agent was on the
-    # shared runtime, which is the opposite of what per-team runtimes are for
-    # and would have hidden a team silently falling back to it.
+    cleared_total = 0
+    # Where each team's turns will go, resolved exactly as the worker resolves
+    # them, so the summary reports the runtime actually in use rather than the
+    # shared one this script was handed.
     placements: Dict[str, str] = {}
     shared_fallbacks = []
     for key, team in teams.items():
@@ -386,18 +350,17 @@ def main() -> int:
         if runtime_arn == args.runtime_arn and team_name not in team_runtime_arns:
             shared_fallbacks.append(team_name)
 
-        changed = write_back(team, names, runtime_arn)
-        if not changed:
-            print(f"  {key}: already on {placements[team_name]}")
+        cleared = clear_runtime_identity(team)
+        if not cleared:
             continue
-        written += changed
+        cleared_total += cleared
         if not args.dry_run:
             s3.put_object(
                 Bucket=args.bucket, Key=key,
                 Body=json.dumps(team, indent=2).encode("utf-8"),
                 ContentType="application/json",
             )
-        print(f"  {key}: {changed} agent(s) -> {placements[team_name]}")
+        print(f"  {key}: cleared {cleared} stale per-agent runtime pin(s)")
 
     if shared_fallbacks:
         announce(
@@ -409,11 +372,12 @@ def main() -> int:
 
     announce(
         "notice",
-        f"{len(names)} agent(s) registered across {len(placements)} team(s): "
+        f"{agent_count} agent(s) across {len(placements)} team(s): "
         + "; ".join(f"{t} -> {r}" for t, r in sorted(placements.items()))
-        + f". Updated {written} agent record(s); release channels: "
-        f"{', '.join(channels) or 'DEFAULT only'}. Agent identity is carried on "
-        f"spans (gen_ai.agent.id/name), not by an endpoint each.",
+        + f". Cleared {cleared_total} stale per-agent runtime pin(s); release "
+        f"channels: {', '.join(channels) or 'DEFAULT only'}. An agent is a prompt, "
+        "not a resource: nothing is provisioned per agent, and identity is carried "
+        "on spans (gen_ai.agent.id/name).",
     )
     return 0
 

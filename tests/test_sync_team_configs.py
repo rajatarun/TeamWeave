@@ -186,21 +186,36 @@ def test_a_committed_alias_is_not_wiped_by_an_empty_remote_alias():
     assert merged["agents"][0]["bedrock"]["model_aliases"]["us.amazon.nova-micro-v1:0"] == "REPO-ALIAS"
 
 
-def test_an_agentcore_runtime_arn_also_survives_the_sync():
-    # The same clobber, one substrate later. agentId/aliasId are Classic;
-    # runtimeArn/qualifier are AgentCore. Both are runtime identity, and
-    # covering only the first would have reproduced this bug silently on the
-    # newer path the first time an agent was moved.
+def test_an_agentcore_runtime_pin_does_not_survive_the_sync():
+    """The opposite of agentId/aliasId, and for the opposite reason.
+
+    Classic provisions one Bedrock agent per TeamWeave agent, so its ids are
+    state S3 owns and the merge must carry across. AgentCore provisions
+    nothing per agent -- an agent is a prompt, and its runtime comes from its
+    team. `register_agents.clear_runtime_identity` strips the pins earlier
+    deploys stamped, and if the merge carried them back out of the previous
+    copy the very next deploy would write them again: the clear would undo
+    itself forever, and the per-team isolation would stay silently fictional.
+    """
     local, remote = local_team(), remote_team()
     remote["agents"][0]["bedrock"]["runtimeArn"] = "arn:aws:bedrock-agentcore:us-east-1:1:runtime/r"
     remote["agents"][0]["bedrock"]["qualifier"] = "PROD"
 
     merged = sync_mod.merge_team(local, remote)
     bedrock = merged["agents"][0]["bedrock"]
-    assert bedrock["runtimeArn"].endswith("runtime/r")
-    assert bedrock["qualifier"] == "PROD"
-    # And the Classic pair is still preserved alongside it.
+    assert "runtimeArn" not in bedrock
+    assert "qualifier" not in bedrock
+    # The Classic pair is still preserved: it is genuinely S3-owned state.
     assert bedrock["agentId"] == "AGENT123"
+
+
+def test_a_runtime_arn_the_repository_declares_is_kept():
+    """The escape hatch is a definition now, so the repository owns it."""
+    local, remote = local_team(), remote_team()
+    local["agents"][0]["bedrock"]["runtimeArn"] = "arn:chosen-by-hand"
+
+    merged = sync_mod.merge_team(local, remote)
+    assert merged["agents"][0]["bedrock"]["runtimeArn"] == "arn:chosen-by-hand"
 
 
 # ── Pruning teams the repository no longer defines ───────────────────────────
