@@ -37,75 +37,59 @@ def team(*agent_ids, **kw):
     return {"agents": [{"id": a, "bedrock": dict(kw)} for a in agent_ids]}
 
 
-# ── endpoint names ─────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("agent_id", [
-    "strategist",
-    "brand-strategist",          # hyphens: illegal in an endpoint name
-    "brand.strategist v2",       # dots and spaces
-    "2nd_writer",                # must start with a letter
-    "-leading-hyphen",
-    "a" * 80,                    # over the 48-character cap
-    "UPPER_and_lower",
-])
-def test_every_name_is_one_the_service_accepts(agent_id):
-    # The alphabet that made AgentRuntimeName fail to create when it was built
-    # from a hyphenated stack name. Agent ids are hyphenated far more often
-    # than stack names are, so this is the likelier version of that failure.
-    assert SERVICE_PATTERN.match(reg.endpoint_name(agent_id))
+# ── the agent census ───────────────────────────────────────────────────────
+#
+# Nothing is provisioned per agent any more. An agent is a prompt: the
+# runtime is generic, its instruction arrives in the payload, and
+# prompt_builder composes ROLE and STEP_GOAL per turn. So there are no
+# per-agent endpoint names to derive, no collisions between them to refuse,
+# and no registry identity to write back.
+#
+# What is still worth checking is that every agent can be reached by the
+# workflow, because the worker matches agents to steps by id.
 
 
-def test_a_name_is_stable_across_deploys():
-    # The name is the address. A different one next deploy would orphan the
-    # endpoint and silently repoint the agent at the runtime default.
-    assert reg.endpoint_name("brand-strategist") == reg.endpoint_name("brand-strategist")
-
-
-def test_a_name_is_derived_from_the_id_not_invented():
-    assert "brand" in reg.endpoint_name("brand-strategist")
-
-
-def test_an_id_with_nothing_usable_is_refused():
-    with pytest.raises(ValueError):
-        reg.endpoint_name("---")
-
-
-# ── planning ───────────────────────────────────────────────────────────────
-
-def test_every_agent_across_every_team_is_planned():
-    names, problems = reg.plan_endpoints({
+def test_every_agent_in_every_team_is_counted():
+    count, problems = reg.agent_census({
         "teams/a/v1/team.json": team("writer", "editor"),
         "teams/b/v1/team.json": team("coach"),
     })
-    assert not problems
-    assert set(names) == {"writer", "editor", "coach"}
-
-
-def test_two_agents_colliding_on_one_name_is_an_error():
-    # "a-b" and "a_b" both sanitise to "a_b". Sharing an endpoint means
-    # sharing a registry identity: telemetry merges and a version pin meant
-    # for one moves the other. That looks like nothing at all until someone
-    # reads a dashboard, so it must never be a silent alias.
-    names, problems = reg.plan_endpoints({"teams/a/v1/team.json": team("a-b", "a_b")})
-    assert problems and "share one registry identity" in problems[0]
-
-
-def test_the_same_agent_in_two_teams_is_not_a_collision():
-    names, problems = reg.plan_endpoints({
-        "teams/a/v1/team.json": team("writer"),
-        "teams/b/v1/team.json": team("writer"),
-    })
-    assert not problems and names == {"writer": "writer"}
+    assert count == 3
+    assert problems == []
 
 
 def test_an_agent_with_no_id_is_reported_not_skipped():
-    names, problems = reg.plan_endpoints({"teams/a/v1/team.json": {"agents": [{"bedrock": {}}]}})
-    assert problems
+    """It can never be the agent for any step, so the run would fail later."""
+    count, problems = reg.agent_census({"teams/a/v1/team.json": {"agents": [{"bedrock": {}}]}})
+    assert count == 0
+    assert problems and "neither id nor name" in problems[0]
 
 
-def test_an_agent_named_only_by_name_still_registers():
-    plan, problems = reg.plan_endpoints({"teams/a/v1/team.json": {"agents": [{"name": "writer"}]}})
-    assert not problems and plan == {"writer": "writer"}
+def test_an_agent_named_only_by_name_still_counts():
+    count, problems = reg.agent_census(
+        {"teams/a/v1/team.json": {"agents": [{"name": "Writer", "bedrock": {}}]}}
+    )
+    assert (count, problems) == (1, [])
+
+
+def test_the_same_agent_id_in_two_teams_is_not_a_problem():
+    """Two teams may each have a 'writer'; nothing is named after them."""
+    count, problems = reg.agent_census({
+        "teams/a/v1/team.json": team("writer"),
+        "teams/b/v1/team.json": team("writer"),
+    })
+    assert (count, problems) == (2, [])
+
+
+def test_nothing_derives_an_endpoint_name_from_an_agent_id():
+    """The per-agent endpoint scheme is gone, not merely unused.
+
+    It is the mistake this design keeps being pulled back toward -- it blew
+    the quota at twelve agents and consumed the endpoints shadow invocation
+    needed. A helper left lying around is an invitation to call it.
+    """
+    assert not hasattr(reg, "endpoint_name")
+    assert not hasattr(reg, "plan_endpoints")
 
 
 # ── the AWS calls ──────────────────────────────────────────────────────────
@@ -170,33 +154,68 @@ def test_endpoints_are_listed_across_pages():
     assert set(reg.existing_endpoints(client, "rt-1")) == {"a", "b"}
 
 
-# ── writing identity back into team.json ───────────────────────────────────
+# ── clearing the pins this script used to write ────────────────────────────
 
 
-def test_writing_back_preserves_the_rest_of_the_bedrock_block():
-    doc = team("writer", model_id="us.amazon.nova-micro-v1:0")
-    reg.write_back(doc, {"writer": "writer"}, "arn:rt")
-    assert doc["agents"][0]["bedrock"]["model_id"] == "us.amazon.nova-micro-v1:0"
-
-
-def test_an_unchanged_agent_is_not_rewritten():
-    # So a no-op deploy does not rewrite every team.json in S3.
+def test_a_stamped_runtime_arn_is_cleared():
     doc = team("writer", runtimeArn="arn:rt")
-    assert reg.write_back(doc, {"writer": "writer"}, "arn:rt") == 0
+    assert reg.clear_runtime_identity(doc) == 1
+    assert "runtimeArn" not in doc["agents"][0]["bedrock"]
 
 
-def test_what_is_written_back_is_what_the_orchestrator_can_use():
-    # The other half of the contract. An empty qualifier is not a gap: it
-    # means the runtime's DEFAULT endpoint, which is where every agent runs.
+def test_a_qualifier_from_the_per_agent_scheme_is_cleared():
+    doc = team("writer", runtimeArn="arn:rt", qualifier="writer")
+    reg.clear_runtime_identity(doc)
+    assert "qualifier" not in doc["agents"][0]["bedrock"]
+
+
+def test_clearing_preserves_the_rest_of_the_bedrock_block():
+    doc = team("writer", model_id="us.amazon.nova-micro-v1:0", agentId="ABC", runtimeArn="arn:rt")
+    reg.clear_runtime_identity(doc)
+    bedrock = doc["agents"][0]["bedrock"]
+    assert bedrock["model_id"] == "us.amazon.nova-micro-v1:0"
+    # Classic still provisions one Bedrock agent per TeamWeave agent, and
+    # AGENT_RUNTIME=classic is the one-variable rollback. Clearing its ids
+    # would make that rollback rebuild every agent.
+    assert bedrock["agentId"] == "ABC"
+
+
+def test_an_agent_with_no_pin_is_not_rewritten():
+    # So a steady-state deploy does not rewrite every team.json in S3.
+    assert reg.clear_runtime_identity(team("writer")) == 0
+
+
+def test_a_cleared_agent_resolves_through_its_team(monkeypatch):
+    """The point of clearing: resolution reaches the team's runtime.
+
+    resolve_arn answers most-specific-first, so a stamped value is the most
+    specific there is -- it shadows the team map entirely. An agent pinned to
+    last deploy's runtime keeps going there after the team's runtime is
+    replaced, and nothing fails.
+    """
     from src.orchestrator.agent_runtime import AgentCoreRuntime, AgentRef
 
-    doc = team("writer")
-    reg.write_back(doc, {"writer": "writer"}, "arn:rt")
+    monkeypatch.setenv(
+        "AGENTCORE_TEAM_RUNTIME_ARNS",
+        json.dumps({"vis": "arn:aws:bedrock-agentcore:us-east-1:1:runtime/teamweave_vis"}),
+    )
+    AgentCoreRuntime.team_runtime_arns.cache_clear() if hasattr(
+        AgentCoreRuntime.team_runtime_arns, "cache_clear") else None
+
+    doc = team("writer", runtimeArn="arn:aws:bedrock-agentcore:us-east-1:1:runtime/stale")
+    reg.clear_runtime_identity(doc)
     bedrock = doc["agents"][0]["bedrock"]
-    ref = AgentRef(runtime_arn=bedrock["runtimeArn"], qualifier=bedrock.get("qualifier", ""))
-    assert AgentCoreRuntime().missing_fields(ref) == ""
-    assert AgentCoreRuntime.resolve_arn(ref) == "arn:rt"
-    assert ref.qualifier == ""
+
+    ref = AgentRef(runtime_arn=bedrock.get("runtimeArn", ""), team="vis")
+    assert AgentCoreRuntime.resolve_arn(ref).endswith("teamweave_vis")
+
+
+def test_a_runtime_arn_a_person_wrote_is_still_honoured():
+    """The escape hatch survives; only this script writing one does not."""
+    from src.orchestrator.agent_runtime import AgentCoreRuntime, AgentRef
+
+    ref = AgentRef(runtime_arn="arn:chosen-by-hand", team="vis")
+    assert AgentCoreRuntime.resolve_arn(ref) == "arn:chosen-by-hand"
 
 
 # ── the deploy actually runs it ────────────────────────────────────────────
@@ -313,7 +332,7 @@ def test_a_successful_run_announces_what_it_registered(monkeypatch, capsys):
     rc = run_main(monkeypatch, fake_s3({"teams/a/v1/team.json": team("writer")}), control)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "::notice::" in out and "1 agent(s) registered across 1 team(s)" in out
+    assert "::notice::" in out and "1 agent(s) across 1 team(s)" in out
     # The notice must say where identity actually lives, or the next person
     # re-adds an endpoint per agent.
     assert "gen_ai.agent.id" in out
@@ -348,11 +367,15 @@ def test_an_empty_prefix_is_announced_as_an_error(monkeypatch, capsys):
     assert "::error::" in out and "No team.json" in out
 
 
-def test_a_name_collision_is_announced_as_an_error(monkeypatch, capsys):
+def test_ids_that_used_to_collide_are_now_both_fine(monkeypatch, capsys):
+    """`a-b` and `a_b` both became the endpoint name `a_b`, so one shadowed
+    the other's telemetry and version pin. Nothing is named after an agent
+    now, so the two ids coexist and the deploy no longer has to refuse them."""
+    control = FakeControl()
+    control.list_agent_runtime_endpoints = lambda **kw: {"runtimeEndpoints": []}
     teams = {"teams/a/v1/team.json": team("a-b", "a_b")}
-    assert run_main(monkeypatch, fake_s3(teams), FakeControl()) == 1
-    out = capsys.readouterr().out
-    assert "::error::" in out and "share one registry identity" in out
+    assert run_main(monkeypatch, fake_s3(teams), control) == 0
+    assert "share one registry identity" not in capsys.readouterr().out
 
 
 def test_the_reason_reaches_the_step_summary(monkeypatch, tmp_path):
@@ -399,16 +422,16 @@ def test_the_endpoint_count_does_not_grow_with_agents(monkeypatch):
     assert len(control.created) == 1, "40 agents must still cost one endpoint"
 
 
-def test_no_agent_is_given_a_per_agent_qualifier(monkeypatch):
+def test_no_agent_is_left_carrying_a_runtime_of_its_own(monkeypatch):
     control = FakeControl()
     control.list_agent_runtime_endpoints = lambda **kw: {"runtimeEndpoints": []}
-    doc = team("aa", "bb")
+    doc = team("aa", "bb", runtimeArn="arn:stale", qualifier="aa")
     s3 = fake_s3({"teams/a/v1/team.json": doc})
     puts = []
     s3.put_object.side_effect = lambda **kw: puts.append(json.loads(kw["Body"]))
     run_main(monkeypatch, s3, control, ("--channels", "shadow"))
     for agent in puts[-1]["agents"]:
-        assert agent["bedrock"]["runtimeArn"] == "arn:rt"
+        assert "runtimeArn" not in agent["bedrock"]
         assert "qualifier" not in agent["bedrock"]
 
 
@@ -579,7 +602,7 @@ def test_a_successful_run_announces_what_it_registered(monkeypatch, capsys):
     rc = run_main(monkeypatch, fake_s3({"teams/a/v1/team.json": team("writer")}), control)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "::notice::" in out and "1 agent(s) on runtime" in out
+    assert "::notice::" in out and "1 agent(s) across 1 team(s)" in out
     # The notice has to say where identity actually lives, or the next person
     # reading it re-adds an endpoint per agent.
     assert "gen_ai.agent.id" in out
@@ -614,11 +637,15 @@ def test_an_empty_prefix_is_announced_as_an_error(monkeypatch, capsys):
     assert "::error::" in out and "No team.json" in out
 
 
-def test_a_name_collision_is_announced_as_an_error(monkeypatch, capsys):
+def test_ids_that_used_to_collide_are_now_both_fine(monkeypatch, capsys):
+    """`a-b` and `a_b` both became the endpoint name `a_b`, so one shadowed
+    the other's telemetry and version pin. Nothing is named after an agent
+    now, so the two ids coexist and the deploy no longer has to refuse them."""
+    control = FakeControl()
+    control.list_agent_runtime_endpoints = lambda **kw: {"runtimeEndpoints": []}
     teams = {"teams/a/v1/team.json": team("a-b", "a_b")}
-    assert run_main(monkeypatch, fake_s3(teams), FakeControl()) == 1
-    out = capsys.readouterr().out
-    assert "::error::" in out and "share one registry identity" in out
+    assert run_main(monkeypatch, fake_s3(teams), control) == 0
+    assert "share one registry identity" not in capsys.readouterr().out
 
 
 def test_the_reason_reaches_the_step_summary(monkeypatch, tmp_path):
@@ -752,17 +779,21 @@ def test_an_empty_map_falls_back_rather_than_recording_nothing():
     assert mod.runtime_for_team({"team": {"name": "doc_rewrite_team"}}, {}, SHARED) == SHARED
 
 
-def test_write_back_stamps_the_team_runtime_on_each_agent():
-    """End of the path: what actually lands in team.json."""
+def test_the_pins_are_stripped_so_the_team_map_decides():
+    """End of the path: what actually lands in team.json.
+
+    Not the team's runtime ARN -- nothing. A stamped value is the most
+    specific answer resolve_arn has, so writing even the *correct* one freezes
+    the agent at the runtime this deploy saw. Absent, every turn re-resolves
+    through AGENTCORE_TEAM_RUNTIME_ARNS and follows the team.
+    """
     mod = _register_agents()
     team = {
         "team": {"name": "doc_rewrite_team"},
         "agents": [{"id": "a1", "bedrock": {"runtimeArn": SHARED, "qualifier": "old"}}],
     }
-    arn = mod.runtime_for_team(team, TEAM_MAP, SHARED)
-    changed = mod.write_back(team, {"a1": "a1"}, arn)
-    assert changed == 1
-    assert team["agents"][0]["bedrock"]["runtimeArn"] == TEAM_MAP["doc_rewrite_team"]
+    assert mod.clear_runtime_identity(team) == 1
+    assert "runtimeArn" not in team["agents"][0]["bedrock"]
     assert "qualifier" not in team["agents"][0]["bedrock"]
 
 
@@ -810,15 +841,34 @@ def test_the_summary_names_the_runtime_each_team_landed_on(monkeypatch, capsys):
     assert "visibility -> rt-1" not in out
 
 
-def test_agents_are_written_back_with_their_teams_runtime(monkeypatch, capsys):
+def test_a_stale_pin_in_s3_is_cleared_on_the_next_deploy(monkeypatch, capsys):
+    """Stopping writing them is not enough; the ones already there must go.
+
+    Every earlier deploy stamped a runtimeArn onto every agent, and those
+    values are still in S3. Left alone they keep shadowing the team map, so
+    the change would read as done and behave exactly as before.
+    """
+    control = FakeControl()
+    control.list_agent_runtime_endpoints = lambda **kw: {"runtimeEndpoints": []}
+    s3 = fake_s3({"teams/visibility/v1/team.json":
+                  named_team("visibility", "writer") | {}})
+    s3.get_object.side_effect = lambda Bucket, Key: {"Body": io.BytesIO(json.dumps({
+        "team": {"name": "visibility"},
+        "agents": [{"id": "writer", "bedrock": {"runtimeArn": "arn:stale"}}],
+    }).encode())}
+    run_main(monkeypatch, s3, control, argv_extra=("--team-runtime-arns", TEAM_ARNS))
+
+    written = json.loads(s3.put_object.call_args.kwargs["Body"])
+    assert "runtimeArn" not in written["agents"][0]["bedrock"]
+
+
+def test_a_config_with_no_pins_is_not_rewritten(monkeypatch, capsys):
+    """A steady-state deploy must not rewrite every team.json in S3."""
     control = FakeControl()
     control.list_agent_runtime_endpoints = lambda **kw: {"runtimeEndpoints": []}
     s3 = fake_s3({"teams/visibility/v1/team.json": named_team("visibility", "writer")})
     run_main(monkeypatch, s3, control, argv_extra=("--team-runtime-arns", TEAM_ARNS))
-
-    written = json.loads(s3.put_object.call_args.kwargs["Body"])
-    arn = written["agents"][0]["bedrock"]["runtimeArn"]
-    assert arn.endswith("teamweave_visibility"), arn
+    assert s3.put_object.call_args is None
 
 
 def test_a_team_with_no_runtime_of_its_own_is_warned_about(monkeypatch, capsys):

@@ -266,9 +266,8 @@ checks the grant names AgentCore *resources* rather than Classic ARNs (a
 Bedrock agent ARN never matches an AgentCore runtime, and the diff looks
 right either way).
 
-`AGENT_RUNTIME=agentcore` is the default. An agent works with no `runtimeArn`
-of its own — the stack runtime serves it — but every deploy now gives each one
-a registry identity anyway.
+`AGENT_RUNTIME=agentcore` is the default, and an agent carries no `runtimeArn`
+of its own: its team's runtime serves it.
 
 **One runtime per team.** A team is the deployment unit. Each team gets its
 own `AWS::BedrockAgentCore::Runtime` (`teamweave_{team}`), and the stack
@@ -316,6 +315,35 @@ working setup from a team that had silently fallen back. It now names the
 runtime per team (`visibility -> teamweave_tarun_visibility_team`) and warns
 when a team has none of its own.
 
+**Nothing is provisioned per agent at all.** An agent is a prompt: the runtime
+is generic, its instruction arrives in the payload, and `prompt_builder`
+composes `ROLE`, `STEP_GOAL` and the output contract per turn. So the script
+derives no endpoint name from an agent id, refuses no collision between two
+such names, and writes no `runtimeArn` back into `team.json` — the helpers
+that did are gone rather than merely unused, because the per-agent endpoint
+scheme is the mistake this design keeps being pulled back toward.
+
+It does the opposite now: `clear_runtime_identity` **strips** the pins earlier
+deploys stamped. Stopping writing them would not have been enough. `resolve_arn`
+answers most-specific-first, so a stamped value is the most specific there is —
+it shadows the team map entirely, and an agent pinned to last deploy's runtime
+keeps going there after its team's runtime is replaced. Writing even the
+*correct* ARN freezes the agent at the runtime that deploy happened to see.
+
+`sync_team_configs.py` is the other half, and getting it wrong would have made
+the clear undo itself forever: it carried `runtimeArn`/`qualifier` across as
+S3-owned state, so the next deploy's merge would read them out of the previous
+copy and write them straight back. They are off that list now.
+`agentId`/`aliasId` stay on it — Classic really does provision one Bedrock
+agent per TeamWeave agent, so those are genuine S3-owned state and clearing
+them would make the `AGENT_RUNTIME=classic` rollback rebuild every agent.
+
+The escape hatch survives on purpose: a `runtimeArn` a *person* writes in
+`team.json` still wins at resolution and still survives the merge — as a
+definition the repository owns, which is what it now is. What is gone is the
+deploy writing one automatically, which made the hatch indistinguishable from
+the default.
+
 **Agent identity is a span attribute, not an AWS resource.** The first
 attempt gave each agent its own AgentCore endpoint. AWS's quota refused at
 twelve, and it was right to: endpoints are a *release* mechanism — production
@@ -335,12 +363,10 @@ renaming them to make a point about naming would blind all of it. An absent
 value is omitted rather than written blank, because the conventions mark these
 "when available" and on AgentCore every `alias_id` is empty.
 
-So `scripts/register_agents.py` records the shared `runtimeArn` on every agent,
-clears any per-agent `qualifier` left by the old scheme (it names an endpoint
-that is no longer that agent's), and creates only **release-channel**
-endpoints — `shadow` by default, with `DEFAULT` created by AgentCore itself.
-The endpoint count no longer grows with the agent count. A full quota is now a
-real signal rather than an expected outcome.
+So `scripts/register_agents.py` creates only **release-channel** endpoints —
+`shadow` by default, with `DEFAULT` created by AgentCore itself. The endpoint
+count no longer grows with the agent count, and a full quota is a real signal
+rather than an expected outcome.
 
 ### A2A — how the rest of the platform reaches these agents
 
@@ -785,4 +811,6 @@ curl -sS "$TEAMWEAVE_API_BASE/observability"
   forced a full rebuild of every agent (which is how the provisioning step grew
   past the CLI timeout, and how each deploy orphaned the previous deploy's
   agents). `scripts/sync_team_configs.py` merges instead: the repository owns
-  definitions, S3 owns the runtime identifiers.
+  definitions, S3 owns the runtime identifiers — and on AgentCore there are no
+  per-agent runtime identifiers to own, so `runtimeArn`/`qualifier` are
+  deliberately *not* carried across (see the registry section above).
