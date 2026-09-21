@@ -108,17 +108,22 @@ Client
         └─► Gemini Lambda   (external research)              DynamoDB / S3 / pgvector
 ```
 
-**Two production workflow patterns:**
-- **Visibility Team** — the product path, four agents: director (brief) →
-  strategist (angle) → LinkedIn writer (drafts) → managing editor (the post).
-  It ended in distribution and approval steps that ran *after* the editor and
-  produced a plan and a sign-off rather than the thing asked for; the
-  deliverable is the edited post, so the pipeline now stops there.
-- **Improvement Team** — personal learning loop: coach → plan → daily tasks
+**One production workflow.** The **Visibility Team** is the platform's product
+path: four agents, director (brief) → strategist (angle) → LinkedIn writer
+(drafts) → managing editor (the post). It ended in distribution and approval
+steps that ran *after* the editor and produced a plan and a sign-off rather
+than the thing asked for; the deliverable is the edited post, so the pipeline
+now stops there.
 
-`doc_rewrite_team` was removed, along with its AgentCore runtime and its role
-as the deploy's smoke-test subject. `scripts/pipeline_smoke.py` runs the
-visibility team now, so every deploy exercises the path people actually use.
+`doc_rewrite_team` and `tarun_improvement_team` were both removed, each with
+its AgentCore runtime and its entry in the runtime map.
+`scripts/pipeline_smoke.py` runs the visibility team, so every deploy
+exercises the one path people actually use.
+
+The `/improve/tasks` and `/improve/task/done` endpoints are **not** part of
+that removal and still work: they read a DynamoDB task list, which the
+improvement team happened to populate but does not own. Nothing new writes to
+it now.
 
 Deleting a team from this repository is only half of removing it:
 `scripts/sync_team_configs.py` also **prunes** teams S3 still serves that the
@@ -292,6 +297,24 @@ The wiring is as important as the logic: the worker passes `team=` down to
 with `team=""`, every team resolves to the shared runtime, nothing fails, and
 the isolation silently does not exist. A test walks the worker's AST and fails
 any invocation that omits the keyword.
+
+The map is the other place that wiring can be absent without failing. A team
+can have its runtime resource and be missing from `AGENTCORE_TEAM_RUNTIME_ARNS`
+— every one of its turns then falls back to the shared runtime, exactly as if
+the resource were never written. The check for that searched the whole
+template for the team's name, which every per-team runtime carries twice
+already (`AGENT_TEAM` and its `Description`), so it passed on a template with
+the team dropped from the map. It parses the `Fn::Sub` now and holds three
+things: every configured team is a key, no key names a team that no longer
+exists, and each key's `!GetAtt` resolves to the runtime whose `AGENT_TEAM`
+is that same team — two teams' substitutions crossed would deploy and route
+one team's agents into the other's runtime.
+
+`register_agents.py` reported `--runtime-id` — the *shared* runtime — whatever
+runtime each team's agents were written to, so its summary could not tell a
+working setup from a team that had silently fallen back. It now names the
+runtime per team (`visibility -> teamweave_tarun_visibility_team`) and warns
+when a team has none of its own.
 
 **Agent identity is a span attribute, not an AWS resource.** The first
 attempt gave each agent its own AgentCore endpoint. AWS's quota refused at

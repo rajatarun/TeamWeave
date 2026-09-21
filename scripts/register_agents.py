@@ -372,11 +372,23 @@ def main() -> int:
         return 1
 
     written = 0
+    # Where each team's agents actually landed, so the summary reports the
+    # runtimes in use rather than the shared one it was handed. Naming
+    # --runtime-id there read as confirmation that every agent was on the
+    # shared runtime, which is the opposite of what per-team runtimes are for
+    # and would have hidden a team silently falling back to it.
+    placements: Dict[str, str] = {}
+    shared_fallbacks = []
     for key, team in teams.items():
-        changed = write_back(
-            team, names, runtime_for_team(team, team_runtime_arns, args.runtime_arn)
-        )
+        team_name = str((team.get("team") or {}).get("name") or key)
+        runtime_arn = runtime_for_team(team, team_runtime_arns, args.runtime_arn)
+        placements[team_name] = runtime_arn.rsplit("/", 1)[-1] or runtime_arn
+        if runtime_arn == args.runtime_arn and team_name not in team_runtime_arns:
+            shared_fallbacks.append(team_name)
+
+        changed = write_back(team, names, runtime_arn)
         if not changed:
+            print(f"  {key}: already on {placements[team_name]}")
             continue
         written += changed
         if not args.dry_run:
@@ -385,12 +397,21 @@ def main() -> int:
                 Body=json.dumps(team, indent=2).encode("utf-8"),
                 ContentType="application/json",
             )
-        print(f"  {key}: recorded registry identity for {changed} agent(s)")
+        print(f"  {key}: {changed} agent(s) -> {placements[team_name]}")
+
+    if shared_fallbacks:
+        announce(
+            "warning",
+            "No runtime of their own, so these teams fall back to the shared one: "
+            f"{', '.join(sorted(shared_fallbacks))}. They run, but they share a blast "
+            "radius and a release channel budget with every other team there.",
+        )
 
     announce(
         "notice",
-        f"{len(names)} agent(s) on runtime {args.runtime_id} v{args.runtime_version}; "
-        f"updated {written} agent record(s); release channels: "
+        f"{len(names)} agent(s) registered across {len(placements)} team(s): "
+        + "; ".join(f"{t} -> {r}" for t, r in sorted(placements.items()))
+        + f". Updated {written} agent record(s); release channels: "
         f"{', '.join(channels) or 'DEFAULT only'}. Agent identity is carried on "
         f"spans (gen_ai.agent.id/name), not by an endpoint each.",
     )

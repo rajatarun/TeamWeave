@@ -85,8 +85,12 @@ def runtime_names(runtimes) -> set[str]:
 
 def test_the_scan_finds_teams_and_runtimes(runtimes):
     # A glob or loader change could make every assertion below vacuous.
+    # One team is the real floor now: tarun_visibility_team is the product
+    # path and the only team the platform ships. A count of zero still means
+    # the scan found nothing and every assertion below passed for free.
     teams = configured_teams()
-    assert len(teams) >= 2, f"suspiciously few teams found: {teams}"
+    assert len(teams) >= 1, f"the team scan found nothing: {teams}"
+    assert "tarun_visibility_team" in teams
     assert len(runtimes) >= len(teams), f"only found runtimes: {sorted(runtimes)}"
 
 
@@ -136,11 +140,67 @@ def test_each_team_runtime_knows_which_team_it_is(runtimes):
     assert set(configured_teams()) <= tagged, "a team's runtime does not identify its team"
 
 
+def runtime_map():
+    """The (team -> substitution name) map the worker is actually handed.
+
+    Parsed from the `Fn::Sub` that builds AGENTCORE_TEAM_RUNTIME_ARNS rather
+    than grepped out of the template. Searching the whole file for a team's
+    name passes on any mention of it -- and every per-team runtime carries its
+    own name twice, in `AGENT_TEAM` and in its `Description`. So a team
+    dropped from the map while keeping its runtime resource read as correct,
+    which is the exact shape of "the isolation silently does not exist".
+    """
+    doc = yaml.load(TEMPLATE, Loader=CfnLoader)
+    value = doc["Globals"]["Function"]["Environment"]["Variables"]["AGENTCORE_TEAM_RUNTIME_ARNS"]
+    # !If [cond, <the map>, ""] -> the map
+    if isinstance(value, dict) and value.get("__fn__") == "If":
+        value = value["__arg__"][1]
+    assert isinstance(value, dict) and value.get("__fn__") == "Sub", value
+    template_str, substitutions = value["__arg__"]
+    # Substitute placeholder text so the JSON parses, keeping the names.
+    rendered = template_str
+    for name in substitutions:
+        rendered = rendered.replace("${%s}" % name, name)
+    return json.loads(rendered), substitutions
+
+
 def test_the_worker_is_told_where_each_team_runs():
     # The resources exist for nothing if the map never reaches the worker.
-    assert "AGENTCORE_TEAM_RUNTIME_ARNS:" in TEMPLATE
+    mapping, _ = runtime_map()
     for team in configured_teams():
-        assert f'"{team}"' in TEMPLATE, f"{team} is missing from the runtime map"
+        assert team in mapping, (
+            f"{team} is missing from AGENTCORE_TEAM_RUNTIME_ARNS, so every one of "
+            f"its turns falls back to the shared runtime. Present: {sorted(mapping)}"
+        )
+
+
+def test_the_map_names_no_team_that_does_not_exist():
+    """A stale entry points the worker at a runtime for a deleted team."""
+    mapping, _ = runtime_map()
+    teams = configured_teams()
+    stale = sorted(set(mapping) - set(teams))
+    assert not stale, f"the runtime map names teams that no longer exist: {stale}"
+
+
+def test_each_teams_entry_resolves_to_its_own_runtime(resources):
+    """The value must be that team's runtime, not another team's.
+
+    Both sides of the map are strings in a template; crossing two teams'
+    substitutions would deploy, pass every other check here, and route one
+    team's agents into the other's runtime.
+    """
+    mapping, substitutions = runtime_map()
+    for team, placeholder in mapping.items():
+        getatt = substitutions[placeholder]
+        assert getatt.get("__fn__") == "GetAtt", (team, getatt)
+        resource_name = str(getatt["__arg__"]).split(".")[0]
+        agent_team = (
+            (resources[resource_name].get("Properties") or {})
+            .get("EnvironmentVariables") or {}
+        ).get("AGENT_TEAM")
+        assert agent_team == team, (
+            f"{team} maps to {resource_name}, whose AGENT_TEAM is {agent_team!r}"
+        )
 
 
 def test_the_shared_runtime_remains_as_a_fallback():
