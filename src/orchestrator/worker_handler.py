@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 import boto3
 
 from . import deadline
+from . import bedrock_image
 from .bedrock_invoke import invoke_agent, invoke_agent_with_metrics
 from . import contextweave_client
 from . import dpo_collector
@@ -19,7 +20,7 @@ from .models import StepFailed
 from .profile_context import get_owner_profile_context
 from .prompt_builder import build_prompt
 from .rag import get_rag_context_with_meta
-from .storage import save_artifact
+from .storage import presign, save_artifact, save_bytes
 from .structured_transform import transform_json_to_schema
 from .tool_registry import execute_post_tools, execute_pre_tools
 
@@ -36,6 +37,54 @@ def _find_agent(team_cfg, agent_id: str):
         if a.id == agent_id:
             return a
     return None
+
+
+def _image_prompt(agent, step_inputs: Dict[str, Any]) -> str:
+    """The art direction, then the content it illustrates.
+
+    The agent's `goal_template` is the art direction -- style, framing, what to
+    avoid -- and the approved copy is what the image is *of*. Both matter and
+    the direction goes first, because the model's prompt cap truncates the
+    tail and losing the style is worse than losing the last sentence of a post
+    the image only has to evoke.
+    """
+    parts = [str(agent.goal_template or "").strip()]
+    for key, value in (step_inputs or {}).items():
+        if key in {"request", "rag_context", "research_context", "owner",
+                   "rag_meta", "owner_profile_context"}:
+            continue
+        if isinstance(value, str):
+            parts.append(value)
+        elif isinstance(value, (dict, list)):
+            parts.append(json.dumps(value, ensure_ascii=False))
+    return " ".join(p for p in parts if p)
+
+
+def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """An image step's output: a reference, never the bytes.
+
+    A base64 PNG is far past Step Functions' 256 KB state limit, and every
+    step output travels through it -- returning the image inline would fail
+    the whole run at the state transition, after paying for the image.
+    """
+    prompt = _image_prompt(agent, step_inputs)
+    result = bedrock_image.generate(prompt)
+    uri = save_bytes(
+        run_id, step_id, result["bytes"], extension="png", content_type="image/png",
+    )
+    log.info("image_step_complete step=%s run_id=%s uri=%s", step_id, run_id, uri)
+    return {
+        "image_uri": uri,
+        # A browser cannot open an s3:// URI, so the run would produce an
+        # image nobody could look at. Best-effort and short-lived: the durable
+        # reference is image_uri.
+        "image_url": presign(uri),
+        "model_id": result["model_id"],
+        "prompt": result["prompt"],
+        "width": result["width"],
+        "height": result["height"],
+        "content_type": "image/png",
+    }
 
 
 def _load_step_schema(team_raw: Dict[str, Any], schema_ref: str) -> Optional[Dict[str, Any]]:
@@ -254,6 +303,19 @@ def run_team_pipeline(
 
         # ── Pre-tools — run before agent, inject results into step context ──
         step_inputs = execute_pre_tools(step_def, step_inputs)
+
+        # An image agent is a team member in team.json but not an agent *turn*:
+        # Bedrock's image models do not implement Converse, which is all the
+        # AgentCore runtime program speaks. It runs through bedrock_image and
+        # rejoins the pipeline with an ordinary schema-shaped step output.
+        if getattr(agent.bedrock, "modality", "text") == "image":
+            out_json = _run_image_step(agent, step_id, run_id, step_inputs)
+            out_json = execute_post_tools(step_def, out_json, step_inputs)
+            artifact_uri = save_artifact(run_id, step_id, out_json)
+            dao.put_step(run_id, step_id, "SUCCEEDED", step_inputs, out_json,
+                         error=None, artifact_uri=artifact_uri)
+            outputs[step_id] = out_json
+            continue
 
         prompt = build_prompt(
             team_cfg,

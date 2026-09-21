@@ -109,11 +109,13 @@ Client
 ```
 
 **One production workflow.** The **Visibility Team** is the platform's product
-path: four agents, director (brief) → strategist (angle) → LinkedIn writer
-(drafts) → managing editor (the post). It ended in distribution and approval
-steps that ran *after* the editor and produced a plan and a sign-off rather
-than the thing asked for; the deliverable is the edited post, so the pipeline
-now stops there.
+path: five members, director (brief) → strategist (angle) → LinkedIn writer
+(drafts) → managing editor (the post) → visual designer (the illustration).
+It ended in distribution and approval steps that ran *after* the editor and
+produced a plan and a sign-off rather than the thing asked for; those were
+removed, and the rule they left behind is now a test — a step may follow the
+editor only if it **consumes** the approved copy. The illustrator does; a
+plan about the post does not.
 
 `doc_rewrite_team` and `tarun_improvement_team` were both removed, each with
 its AgentCore runtime and its entry in the runtime map.
@@ -534,6 +536,53 @@ needs a Step Functions state per step rather than a loop inside one function.
 `tests/test_deadline.py` derives the invariant from the template: no
 `read_timeout` anywhere in `src/orchestrator/` may be as long as the function
 that makes the call.
+
+### An image member is not an agent turn
+
+The visual designer is a full member of `team.json` — role, department, a
+place in the workflow — and it never reaches the agent runtime. Bedrock's
+image models do not implement `Converse`, which is all `src/agentcore/app.py`
+speaks, so sending a Canvas id through the per-turn model seam would fail at
+the first call. `bedrock.modality: "image"` is what routes it: the worker
+branches to `bedrock_image` and the step rejoins the pipeline as an ordinary
+schema-shaped output.
+
+Teaching the runtime program to branch instead would put binary handling, S3
+credentials and a second request shape inside the artifact whose ARM64
+packaging already has its own failure mode — and an image step has no `ROLE`
+or `STEP_GOAL` to compose. Same argument as `structured_transform`: a
+transform is not an agent.
+
+**The body is provider-defined and botocore does not describe it.**
+`InvokeModel`'s `body` is an opaque blob in the service model, so unlike the
+`bedrock-agentcore` client this shape cannot be verified offline — it is the
+one thing here that needs a real call to confirm. That is exactly the trap
+that produced `ValidationException: Malformed input request` when
+`structured_transform` kept an Anthropic body on a Nova model, so the builder
+is per family and **refuses** a family it does not know rather than sending a
+body its provider will reject with a message naming nothing useful.
+
+**The bytes never enter the pipeline.** Every step output travels through
+Step Functions state, which caps at 256 KB; a base64 PNG inline fails the run
+at the state transition, after paying for the image. The image goes to the
+artifact bucket and the step returns `image_uri` (durable `s3://`) plus
+`image_url` — a presigned URL, best-effort, signed with Lambda's temporary
+credentials so it outlives the run by hours, not the seven days SigV4 allows.
+A signing failure returns `""` rather than failing a step whose artifact is
+already stored.
+
+A response carrying no image is how these models report a content-filter
+block, so `first_image_b64` raises instead of returning empty bytes — that
+would put a corrupt object in the bucket and report the step as succeeded,
+which is the empty-success failure this platform has been bitten by three
+times.
+
+**The UI had to change with it.** `finalOutput` showed the workflow's last
+step as the deliverable, and the illustrator is now last — so the run would
+have displayed `{image_uri, model_id, …}` where the post belongs and buried
+the post behind the "earlier steps" disclosure. It skips image-producing
+steps when choosing what to show, and `runImages` renders them beside the
+copy they illustrate.
 
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them

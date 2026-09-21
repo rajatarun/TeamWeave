@@ -118,6 +118,21 @@
       },
       "goal_template": "You are a content generation agent. Your job is to produce structured JSON output directly from your knowledge and the context provided. Do NOT say the task is not supported. Do NOT say tools are required. The gemini_research tool is optional \u2014 use it only to look up specific facts if needed, then produce your output regardless. ALWAYS generate actual content. NEVER describe what you would do instead of doing it.\n\nPolish the single winning variant to final publish-ready LinkedIn copy. Integrate SEO keywords from the strategy pack naturally. Self-check: hook is contrarian and two lines, paragraphs are short, no hype words, first-person throughout, ends with question or sharp statement, 5-6 hashtags, 250-350 words, plain text. Fix all issues before output. DO NOT describe what you will do. DO NOT say the task requires tools. DO NOT say you cannot complete this. PRODUCE THE ACTUAL OUTPUT immediately using only the context provided to you. No tools are required \u2014 everything you need is in the input context. ",
       "schema_ref": "final_copy_v1"
+    },
+    {
+      "id": "TVT_DEPT-003_PBM-007_illustrator",
+      "name": "Visual Designer",
+      "role_id": "PBM-007",
+      "department_id": "DEPT-003",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "modality": "image",
+        "model_id": "amazon.nova-canvas-v1:0",
+        "model_aliases": {}
+      },
+      "goal_template": "Editorial illustration for a LinkedIn post by a senior AWS platform engineer. Clean, modern, professional. Abstract technical composition -- geometric shapes, depth, restrained palette. No text, no letters, no logos, no watermarks, no human faces. Wide 16:9 banner framing. Illustrate the subject of the following approved post:",
+      "schema_ref": "image_asset_v1"
     }
   ],
   "workflow": [
@@ -177,6 +192,12 @@
         "TVT_DEPT-003_PBM-003_strategist.output",
         "TVT_DEPT-001_PBM-001_director.output"
       ]
+    },
+    {
+      "step": "TVT_DEPT-003_PBM-007_illustrator",
+      "inputs": [
+        "TVT_DEPT-003_PBM-003E_editor.output"
+      ]
     }
   ],
   "schemas": {
@@ -191,6 +212,43 @@
     },
     "final_copy_v1": {
       "path": "config/examples/schemas/final_copy_v1.json"
+    },
+    "image_asset_v1": {
+      "inline": {
+        "type": "object",
+        "required": [
+          "image_uri",
+          "model_id",
+          "prompt",
+          "content_type"
+        ],
+        "properties": {
+          "image_uri": {
+            "type": "string",
+            "description": "s3:// URI of the generated image in the artifact bucket"
+          },
+          "model_id": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "the prompt actually sent, after truncation"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "image_url": {
+            "type": "string",
+            "description": "short-lived presigned URL; empty if signing failed"
+          }
+        }
+      }
     }
   },
   "request_schema": {
