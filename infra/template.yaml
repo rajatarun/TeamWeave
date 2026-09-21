@@ -1312,7 +1312,15 @@ Resources:
       Architectures:
         - arm64
       MemorySize: 1024
-      Timeout: 300
+      # One invocation runs the whole pipeline -- every agent turn, its RAG
+      # lookup, its tools and its schema validation -- so the budget is the
+      # sum of all of them, not one call. At 300 s a three-agent team could
+      # not finish, and the first real pipeline run ever attempted died on
+      # exactly that: Sandbox.Timedout after 300.00 seconds. 900 is Lambda's
+      # ceiling, which also bounds how large a team this architecture can
+      # serve; past that the pipeline needs a state per step rather than a
+      # loop inside one function.
+      Timeout: 900
       Environment:
         Variables:
           CONFIG_BUCKET: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
