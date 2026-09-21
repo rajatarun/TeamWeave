@@ -92,7 +92,19 @@ def run_turn(payload: Any, *, client=None, env: Optional[Dict[str, str]] = None)
         instruction = (env.get("AGENT_INSTRUCTION") or "").strip()
     if not instruction:
         instruction = DEFAULT_INSTRUCTION
-    model_id = (env.get("AGENT_MODEL_ID") or "").strip() or DEFAULT_MODEL_ID
+    # Per-turn model wins over the runtime's default, for the same reason the
+    # instruction does: one generic runtime serves every agent of a team, so
+    # anything that differs between agents has to arrive with the request.
+    # AGENT_MODEL_ID is baked in at CreateAgentRuntime time, so a model read
+    # only from there makes every agent's declared model_id in team.json
+    # decorative -- the config says four models and the runtime serves one.
+    model_id = ""
+    if isinstance(payload, dict):
+        model_id = str(payload.get("modelId") or payload.get("model_id") or "").strip()
+    if not model_id:
+        model_id = (env.get("AGENT_MODEL_ID") or "").strip()
+    if not model_id:
+        model_id = DEFAULT_MODEL_ID
     try:
         max_tokens = int(env.get("AGENT_MAX_TOKENS") or DEFAULT_MAX_TOKENS)
     except ValueError:

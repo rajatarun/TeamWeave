@@ -344,6 +344,25 @@ definition the repository owns, which is what it now is. What is gone is the
 deploy writing one automatically, which made the hatch indistinguishable from
 the default.
 
+**The model has to travel with the turn, for the same reason the identity
+does.** `AGENT_MODEL_ID` is an environment variable set at
+`CreateAgentRuntime` time, so it belongs to the *runtime*, and one generic
+runtime serves every agent of a team. A model read only from there serves one
+model to every agent while `team.json` declares one per agent — the config
+says four and the deployment answers one, with nothing failing and nothing
+logged. `AgentRef` carries `model_id`, `build_payload` sends it as `modelId`
+when set, and `run_turn` prefers it over the environment; omit it and the
+runtime keeps its own default, so an agent that declares no model is
+unaffected.
+
+`build_payload` took an `instruction` argument from the day it was written and
+`invoke` never passed one — the seam existed, was documented, and was
+connected to nothing, so every turn fell back to the runtime's
+`AGENT_INSTRUCTION`. A helper with a parameter nothing supplies reads exactly
+like a wired feature. That is why the test drives the real `invoke` and
+inspects the bytes it sends rather than calling `build_payload` directly: a
+builder test reproduces the blind spot instead of catching it.
+
 **Agent identity is a span attribute, not an AWS resource.** The first
 attempt gave each agent its own AgentCore endpoint. AWS's quota refused at
 twelve, and it was right to: endpoints are a *release* mechanism — production
