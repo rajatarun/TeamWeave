@@ -227,6 +227,23 @@ rather than the runtime — it warns loudly with `NOT VERIFIED` and does not
 fail the deploy, because failing every deploy on a permissions gap would be
 wrong and reporting it as a pass would be worse.
 
+**AgentCore is a different service, with a different action.** The worker
+roles granted `bedrock:InvokeAgent` — Classic — and nothing granted
+`bedrock-agentcore:InvokeAgentRuntime`. With `AGENT_RUNTIME=agentcore` as the
+default, every agent turn in the VPC was therefore refused with
+`AccessDeniedException`, from functions that had been reaching the right
+endpoint all along.
+
+The deploy's smoke test could not catch it: `agentcore_smoke.py` invokes the
+runtime **as the deployer role**, which may do anything. A check that runs as
+the wrong identity proves the runtime answers somebody, not that it answers
+the caller who needs it — which is why the pipeline run matters as a separate
+gate. `tests/test_substrate_permissions.py` derives the requirement from the
+template, so a substrate switch cannot outrun its permissions again, and
+checks the grant names AgentCore *resources* rather than Classic ARNs (a
+Bedrock agent ARN never matches an AgentCore runtime, and the diff looks
+right either way).
+
 `AGENT_RUNTIME=agentcore` is the default. An agent works with no `runtimeArn`
 of its own — the stack runtime serves it — but every deploy now gives each one
 a registry identity anyway.

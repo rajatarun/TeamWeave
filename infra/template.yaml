@@ -485,6 +485,8 @@ Resources:
                   - lambda:InvokeFunction
                 Resource:
                   - !GetAtt ProvisionTeamFunction.Arn
+              # Classic. AGENT_RUNTIME=classic still runs agents deployed
+              # before the switch, so the permission stays.
               - Effect: Allow
                 Action:
                   - bedrock:InvokeAgent
@@ -492,6 +494,19 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent-alias/*"
+              # AgentCore -- the default substrate, and a different service
+              # with a different action. Only the Classic permission was
+              # granted, so with AGENT_RUNTIME=agentcore every agent turn was
+              # refused: AccessDeniedException, from a function that had been
+              # reaching the right endpoint all along. The deploy's own smoke
+              # test never caught it because CI invokes the runtime as the
+              # deployer role, which may do anything.
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore:InvokeAgentRuntime
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*/runtime-endpoint/*"
               - Effect: Allow
                 Action:
                   - bedrock:InvokeModel
@@ -698,6 +713,8 @@ Resources:
                   - ec2:AssignIpv6Addresses
                   - ec2:UnassignIpv6Addresses
                 Resource: "*"
+              # Classic. AGENT_RUNTIME=classic still runs agents deployed
+              # before the switch, so the permission stays.
               - Effect: Allow
                 Action:
                   - bedrock:InvokeAgent
@@ -705,6 +722,19 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:agent-alias/*"
+              # AgentCore -- the default substrate, and a different service
+              # with a different action. Only the Classic permission was
+              # granted, so with AGENT_RUNTIME=agentcore every agent turn was
+              # refused: AccessDeniedException, from a function that had been
+              # reaching the right endpoint all along. The deploy's own smoke
+              # test never caught it because CI invokes the runtime as the
+              # deployer role, which may do anything.
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore:InvokeAgentRuntime
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*/runtime-endpoint/*"
 
   A2ARole:
     Type: AWS::IAM::Role
