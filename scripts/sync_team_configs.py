@@ -105,7 +105,49 @@ def load_remote(s3, bucket: str, key: str) -> Dict[str, Any]:
         return {}
 
 
-def sync(root: Path, bucket: str, prefix: str, region: str, dry_run: bool = False) -> int:
+def teams_in_s3(s3, bucket: str, prefix: str) -> Dict[str, list]:
+    """team name -> its keys, from what the bucket actually holds."""
+    root = f"{prefix}/" if prefix else ""
+    found: Dict[str, list] = {}
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=root):
+        for obj in page.get("Contents") or []:
+            rel = obj["Key"][len(root):]
+            parts = rel.split("/")
+            if len(parts) >= 2 and parts[0]:
+                found.setdefault(parts[0], []).append(obj["Key"])
+    return found
+
+
+def prune(s3, bucket: str, prefix: str, keep: set, dry_run: bool = False) -> int:
+    """Delete teams S3 still serves that the repository no longer defines.
+
+    Without this, deleting a team from the repository removes it from nobody's
+    view: GET /teams still lists it, the UI still offers it, and running it
+    starts a pipeline whose definition no longer exists here.
+
+    This is narrower than `aws s3 sync --delete`, which is banned for good
+    reason -- that overwrites *keys within* a team and erased the provisioned
+    ids written back by provisioning. This only removes a team directory in
+    its entirety, and only when the repository has no such team at all. The
+    repository owns which teams exist; S3 owns the runtime identifiers inside
+    them.
+    """
+    removed = 0
+    for team, keys in sorted(teams_in_s3(s3, bucket, prefix).items()):
+        if team in keep:
+            continue
+        print(f"  pruning team no longer in the repository: {team} ({len(keys)} key(s))")
+        for key in keys:
+            print(f"    delete s3://{bucket}/{key}")
+            if not dry_run:
+                s3.delete_object(Bucket=bucket, Key=key)
+        removed += 1
+    return removed
+
+
+def sync(root: Path, bucket: str, prefix: str, region: str, dry_run: bool = False,
+         do_prune: bool = True) -> int:
     s3 = boto3.client("s3", region_name=region)
     prefix = prefix.strip("/")
     count = 0
@@ -134,6 +176,15 @@ def sync(root: Path, bucket: str, prefix: str, region: str, dry_run: bool = Fals
             )
         count += 1
 
+    if do_prune:
+        local_teams = {p.relative_to(root).parts[0] for p in root.rglob("team.json")}
+        # Never prune against an empty set: an unreadable root would otherwise
+        # delete every team in the bucket.
+        if local_teams:
+            prune(s3, bucket, prefix, local_teams, dry_run)
+        else:
+            print("  refusing to prune: found no local teams to compare against", file=sys.stderr)
+
     return count
 
 
@@ -143,6 +194,14 @@ def main() -> int:
     parser.add_argument("--bucket", default=os.environ.get("CONFIG_BUCKET", ""))
     parser.add_argument("--prefix", default=os.environ.get("TEAM_CONFIG_PREFIX", "teams"))
     parser.add_argument("--region", default=os.environ.get("AWS_REGION", "us-east-1"))
+    parser.add_argument(
+        "--no-prune",
+        action="store_true",
+        help=(
+            "Leave teams in S3 that the repository no longer defines. They stay "
+            "listed by GET /teams and runnable from the UI."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -156,7 +215,8 @@ def main() -> int:
         return 2
 
     print(f"Merging {root}/ -> s3://{args.bucket}/{args.prefix}/")
-    n = sync(root, args.bucket, args.prefix, args.region, args.dry_run)
+    n = sync(root, args.bucket, args.prefix, args.region, args.dry_run,
+             do_prune=not args.no_prune)
     print(f"Synced {n} team config(s).")
     return 0
 

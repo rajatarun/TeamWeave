@@ -285,9 +285,8 @@ Globals:
         AGENTCORE_TEAM_RUNTIME_ARNS: !If
           - AgentCoreEnabled
           - !Sub
-            - '{"doc_rewrite_team":"${ArnDocRewriteTeam}","tarun_improvement_team":"${ArnTarunImprovementTeam}","tarun_visibility_team":"${ArnTarunVisibilityTeam}"}'
-            - ArnDocRewriteTeam: !GetAtt AgentCoreRuntimeDocRewriteTeam.AgentRuntimeArn
-              ArnTarunImprovementTeam: !GetAtt AgentCoreRuntimeTarunImprovementTeam.AgentRuntimeArn
+            - '{"tarun_improvement_team":"${ArnTarunImprovementTeam}","tarun_visibility_team":"${ArnTarunVisibilityTeam}"}'
+            - ArnTarunImprovementTeam: !GetAtt AgentCoreRuntimeTarunImprovementTeam.AgentRuntimeArn
               ArnTarunVisibilityTeam: !GetAtt AgentCoreRuntimeTarunVisibilityTeam.AgentRuntimeArn
           - "{}"
         # Route all AWS SDK calls through dual-stack endpoints so boto3 resolves
@@ -2177,29 +2176,6 @@ Resources:
   # pattern, and tests/test_team_runtimes.py fails when a team in
   # config/examples/teams has no runtime here.
 
-  AgentCoreRuntimeDocRewriteTeam:
-    Type: AWS::BedrockAgentCore::Runtime
-    Condition: AgentCoreEnabled
-    Properties:
-      AgentRuntimeName: "teamweave_doc_rewrite_team"
-      Description: "AgentCore runtime serving every agent of doc_rewrite_team."
-      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
-      AgentRuntimeArtifact:
-        CodeConfiguration:
-          Code:
-            S3:
-              Bucket: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
-              Prefix: !Ref AgentCoreRuntimeCodePrefix
-          Runtime: PYTHON_3_12
-          EntryPoint:
-            - app.py
-      NetworkConfiguration:
-        NetworkMode: PUBLIC
-      EnvironmentVariables:
-        AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
-        # Which team's runtime this is, for the program's own logs and spans.
-        AGENT_TEAM: "doc_rewrite_team"
-
   AgentCoreRuntimeTarunImprovementTeam:
     Type: AWS::BedrockAgentCore::Runtime
     Condition: AgentCoreEnabled
@@ -2417,9 +2393,8 @@ Outputs:
       runtime that does not boot surfaces as an opaque "Worker task failed"
       minutes later in whichever pipeline happened to use it.
     Value: !Sub
-      - '{"doc_rewrite_team":"${ArnDocRewriteTeam}","tarun_improvement_team":"${ArnTarunImprovementTeam}","tarun_visibility_team":"${ArnTarunVisibilityTeam}"}'
-      - ArnDocRewriteTeam: !GetAtt AgentCoreRuntimeDocRewriteTeam.AgentRuntimeArn
-        ArnTarunImprovementTeam: !GetAtt AgentCoreRuntimeTarunImprovementTeam.AgentRuntimeArn
+      - '{"tarun_improvement_team":"${ArnTarunImprovementTeam}","tarun_visibility_team":"${ArnTarunVisibilityTeam}"}'
+      - ArnTarunImprovementTeam: !GetAtt AgentCoreRuntimeTarunImprovementTeam.AgentRuntimeArn
         ArnTarunVisibilityTeam: !GetAtt AgentCoreRuntimeTarunVisibilityTeam.AgentRuntimeArn
   AgentCardUrl:
     Description: The A2A Agent Card every client fetches first.

@@ -37,20 +37,16 @@ from typing import Any, Dict, Tuple
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-# Small on purpose: the point is that the machinery runs, not that the writing
-# is good, and every deploy pays for this in Bedrock calls and wall clock.
-DEFAULT_TEAM = "doc_rewrite_team"
+# The visibility team is the product path, so the deploy exercises what people
+# actually run. Small inputs on purpose: the point is that the machinery works
+# end to end, not that the writing is good, and every deploy pays for this in
+# Bedrock calls and wall clock.
+DEFAULT_TEAM = "tarun_visibility_team"
 DEFAULT_VERSION = "v1"
 DEFAULT_REQUEST = {
-    "document_text": (
-        "Tarun Raja. Platform engineer. Built serverless orchestration on AWS "
-        "using Lambda, Step Functions and Bedrock. Led migration of an agent "
-        "runtime and cut deploy failures."
-    ),
-    "job_description": (
-        "Senior Platform Engineer. AWS serverless, infrastructure as code, and "
-        "production AI systems. Looking for depth in orchestration and CI/CD."
-    ),
+    "topic": "Why per-team agent runtimes beat one runtime per agent",
+    "objective": "Show depth in AWS agent orchestration",
+    "audience": "Senior platform and AI engineers",
 }
 
 

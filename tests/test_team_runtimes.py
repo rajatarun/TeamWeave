@@ -86,7 +86,7 @@ def runtime_names(runtimes) -> set[str]:
 def test_the_scan_finds_teams_and_runtimes(runtimes):
     # A glob or loader change could make every assertion below vacuous.
     teams = configured_teams()
-    assert len(teams) >= 3, f"suspiciously few teams found: {teams}"
+    assert len(teams) >= 2, f"suspiciously few teams found: {teams}"
     assert len(runtimes) >= len(teams), f"only found runtimes: {sorted(runtimes)}"
 
 
