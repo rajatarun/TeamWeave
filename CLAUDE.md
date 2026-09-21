@@ -584,6 +584,36 @@ the post behind the "earlier steps" disclosure. It skips image-producing
 steps when choosing what to show, and `runImages` renders them beside the
 copy they illustrate.
 
+`scripts/pipeline_smoke.py` had to make the same change for a sharper reason.
+Checking the *last* step for substance would have checked the image reference
+— which is always a non-empty dict, even when generation failed — and passed
+a run whose post was empty. That is precisely the empty success the script
+exists to catch, so the two now agree on what the deliverable is.
+
+**The illustration adorns the deliverable; it is not the deliverable.** The
+first real run proved that the hard way: Bedrock refused the image model
+(*"marked by provider as Legacy and you have not been actively using the
+model in the last 30 days"* — the same refusal that killed the repair model)
+and the whole pipeline ended `FAILED`, throwing away a finished, approved
+post because a picture of it could not be made. The step degrades now, as the
+RAG layer does: it records `error`, claims no image, and the run keeps its
+post. That is not an empty success — nothing says an image exists — and both
+the smoke test and the UI read `error` and say so.
+
+**A member's declared model has to reach the call.** `bedrock_image.generate`
+read only `IMAGE_MODEL_ID`, which nothing set, so the `model_id` in
+`team.json` was ignored and every request went to the built-in default:
+editing the config changed nothing and said nothing. That is the same trap
+the text agents had with `AGENT_MODEL_ID`, reintroduced in the same session it
+was fixed — which is why `model_id(declared)` resolves most-specific-first
+(the member's, then the stack's `ImageModelId` parameter, then a default) and
+a test walks the worker's real call to check the value is handed over rather
+than merely resolvable.
+
+Model access is granted per model in the Bedrock console, and an
+unentitled model is refused at the call, not at deploy — so `ImageModelId`
+exists as a stack parameter to change it without touching code.
+
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them
 downstream (`schema_validate.py`, `structured_transform.py`).

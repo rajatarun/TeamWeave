@@ -160,8 +160,12 @@ def test_the_step_returns_a_reference_never_the_bytes(monkeypatch):
     monkeypatch.setattr(worker_handler, "save_bytes",
                         lambda *a, **kw: saved.setdefault("uri", "s3://b/runs/r/s.png"))
 
+    class Bedrock:
+        model_id = "amazon.nova-canvas-v1:0"
+
     class Agent:
         goal_template = "art direction"
+        bedrock = Bedrock()
 
     out = worker_handler._run_image_step(Agent(), "step-1", "run-1", {"editor.output": {"post": "hi"}})
     assert out["image_uri"] == "s3://b/runs/r/s.png"
@@ -338,3 +342,97 @@ def test_a_non_s3_uri_signs_to_nothing():
     from src.orchestrator import storage
     assert storage.presign("https://example.com/x.png") == ""
     assert storage.presign("") == ""
+
+
+# ── a failed image must not destroy a finished post ─────────────────────────
+
+def test_a_refused_model_degrades_instead_of_failing_the_run(monkeypatch):
+    """What the first real run did: Bedrock refused the image model and the
+    whole pipeline ended FAILED, throwing away an approved post because a
+    picture of it could not be made. The illustration adorns the deliverable;
+    it is not the deliverable."""
+    from src.orchestrator import worker_handler
+
+    def _refuse(prompt, **kw):
+        raise RuntimeError(
+            "An error occurred (ResourceNotFoundException): Access denied. "
+            "This Model is marked by provider as Legacy"
+        )
+
+    monkeypatch.setattr(worker_handler.bedrock_image, "generate", _refuse)
+
+    class Bedrock:
+        model_id = "amazon.nova-canvas-v1:0"
+
+    class Agent:
+        goal_template = "art direction"
+        bedrock = Bedrock()
+
+    out = worker_handler._run_image_step(Agent(), "s", "r", {"editor.output": {"post": "x"}})
+    assert out["error"].startswith("RuntimeError:")
+    assert "Legacy" in out["error"]
+    # Nothing claims an image exists -- the opposite of an empty success.
+    assert out["image_uri"] == ""
+    assert out["image_url"] == ""
+    # And it names the model that was refused, so the fix is obvious.
+    assert out["model_id"] == "amazon.nova-canvas-v1:0"
+
+
+# ── which model actually gets called ────────────────────────────────────────
+
+def test_the_members_declared_model_wins(monkeypatch):
+    """Editing team.json has to change the call.
+
+    generate() read only IMAGE_MODEL_ID, which nothing set, so a member's
+    declared model_id was ignored and every request went to the built-in
+    default -- changing the config changed nothing and said nothing. That is
+    the same trap the text agents had with AGENT_MODEL_ID.
+    """
+    monkeypatch.setenv("IMAGE_MODEL_ID", "amazon.titan-image-generator-v2:0")
+    capture = {}
+    bedrock_image.generate("p", declared_model_id="amazon.nova-canvas-v2:0",
+                           client=FakeBedrock(capture=capture))
+    assert capture["modelId"] == "amazon.nova-canvas-v2:0"
+
+
+def test_the_stack_default_applies_when_a_member_declares_none(monkeypatch):
+    monkeypatch.setenv("IMAGE_MODEL_ID", "amazon.titan-image-generator-v2:0")
+    capture = {}
+    bedrock_image.generate("p", client=FakeBedrock(capture=capture))
+    assert capture["modelId"] == "amazon.titan-image-generator-v2:0"
+
+
+def test_the_worker_passes_the_declared_model_through(monkeypatch):
+    """The wire, not the resolver: _run_image_step must hand it over."""
+    from src.orchestrator import worker_handler
+
+    seen = {}
+
+    def _capture(prompt, **kw):
+        seen.update(kw)
+        return {"bytes": PNG, "model_id": kw.get("declared_model_id", ""),
+                "prompt": prompt, "width": 8, "height": 8}
+
+    monkeypatch.setattr(worker_handler.bedrock_image, "generate", _capture)
+    monkeypatch.setattr(worker_handler, "save_bytes", lambda *a, **kw: "s3://b/k.png")
+    monkeypatch.setattr(worker_handler, "presign", lambda *a, **kw: "")
+
+    class Bedrock:
+        model_id = "amazon.nova-canvas-v2:0"
+
+    class Agent:
+        goal_template = "d"
+        bedrock = Bedrock()
+
+    worker_handler._run_image_step(Agent(), "s", "r", {})
+    assert seen.get("declared_model_id") == "amazon.nova-canvas-v2:0", (
+        "the member's declared model never reached bedrock_image, so editing "
+        "team.json changes nothing"
+    )
+
+
+def test_a_v2_canvas_id_is_a_family_the_builder_knows():
+    """The v2 ids a person would reach for must not be refused as unknown."""
+    for model in ("amazon.nova-canvas-v2:0", "amazon.titan-image-generator-v2:0"):
+        body = bedrock_image.build_body("p", model=model, width=8, height=8)
+        assert body["taskType"] == "TEXT_IMAGE"

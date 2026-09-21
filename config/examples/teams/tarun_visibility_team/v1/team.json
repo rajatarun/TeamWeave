@@ -217,7 +217,6 @@
       "inline": {
         "type": "object",
         "required": [
-          "image_uri",
           "model_id",
           "prompt",
           "content_type"
@@ -225,7 +224,7 @@
         "properties": {
           "image_uri": {
             "type": "string",
-            "description": "s3:// URI of the generated image in the artifact bucket"
+            "description": "s3:// URI of the generated image, or empty when generation failed"
           },
           "model_id": {
             "type": "string"
@@ -246,6 +245,10 @@
           "image_url": {
             "type": "string",
             "description": "short-lived presigned URL; empty if signing failed"
+          },
+          "error": {
+            "type": "string",
+            "description": "why no image was produced; absent on success"
           }
         }
       }
