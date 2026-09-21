@@ -413,6 +413,35 @@ jobs:
           echo "Invoking ${RUNTIME_ARN}"
           python3 scripts/agentcore_smoke.py --runtime-arn "${RUNTIME_ARN}" --region "${AWS_REGION}"
 
+          # And every per-team runtime. Smoking only the shared one proved the
+          # artifact boots somewhere while leaving the runtimes that actually
+          # serve traffic untried -- which is how a pipeline failed five
+          # minutes later with nothing but "Worker task failed" to go on.
+          TEAM_ARNS=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='AgentCoreTeamRuntimeArns'].OutputValue" \
+            --output text)
+          if [ -z "${TEAM_ARNS}" ] || [ "${TEAM_ARNS}" = "None" ]; then
+            echo "::warning::The stack published no per-team runtimes, so every team falls back to the shared one."
+          else
+            # Process substitution, not a pipe: `... | while` runs the loop in
+            # a subshell, where a failing runtime need not fail the step. A
+            # check that cannot fail is worse than no check.
+            RUNTIME_FAILURES=0
+            while IFS=$'\t' read -r team arn; do
+              echo "Invoking ${team}: ${arn}"
+              python3 scripts/agentcore_smoke.py --runtime-arn "${arn}" --region "${AWS_REGION}" \
+                || RUNTIME_FAILURES=$((RUNTIME_FAILURES + 1))
+            done < <(echo "${TEAM_ARNS}" | python3 -c 'import json,sys; [print(f"{k}\t{v}") for k,v in json.load(sys.stdin).items()]')
+            if [ "${RUNTIME_FAILURES}" -ne 0 ]; then
+              # stdout: GitHub parses workflow commands from stdout only, so an
+              # annotation written to stderr never appears.
+              echo "::error::${RUNTIME_FAILURES} per-team AgentCore runtime(s) did not answer. Every pipeline on those teams would fail with nothing but 'Worker task failed'."
+              exit 1
+            fi
+          fi
+
       - name: Sync team configs to S3
         run: |
           CONFIG_BUCKET=$(aws cloudformation describe-stacks \
