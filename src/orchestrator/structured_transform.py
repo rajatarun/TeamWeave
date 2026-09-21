@@ -2,7 +2,6 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-from .bedrock_wrappers import invoke_model_request
 from .json_utils import extract_json_payload
 
 
@@ -58,23 +57,32 @@ Target Schema:
 {json.dumps(normalized_target_schema, indent=2)}
 """
 
-    response = invoke_model_request(
-        runtime,
-        model_id=model_id,
-        body=json.dumps(
-            {
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": max_tokens,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-        ),
+    # Converse, not InvokeModel. InvokeModel's request body is defined by the
+    # model *provider*: an Anthropic-shaped body ("anthropic_version",
+    # messages with string content) is malformed for Nova, so changing the
+    # model meant changing the payload too -- and not doing so produced
+    #
+    #   ValidationException: Malformed input request
+    #
+    # which reached the user as the same fallback envelope the dead model had.
+    # Converse normalises that across providers, so the model id is the only
+    # thing that has to change to move between them.
+    response = runtime.converse(
+        modelId=model_id,
+        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        inferenceConfig={"maxTokens": max_tokens, "temperature": 0},
     )
 
-    result = json.loads(response["body"].read())
-    text_payload = result["content"][0]["text"]
+    text_payload = _text_from_converse(response)
     transformed = _extract_transform_payload(text_payload)
     transformed = _normalize_json_string_values(transformed)
     return _coerce_to_template(transformed, normalized_target_schema)
+
+
+def _text_from_converse(response: Dict[str, Any]) -> str:
+    """The text of a Converse reply, tolerating a response with no content."""
+    blocks = (((response or {}).get("output") or {}).get("message") or {}).get("content") or []
+    return "".join(str(b.get("text") or "") for b in blocks if isinstance(b, dict))
 
 
 def _extract_transform_payload(text_payload: str) -> Any:
