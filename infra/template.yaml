@@ -199,7 +199,7 @@ Parameters:
 
   GeminiImageModel:
     Type: String
-    Default: "gemini-2.5-flash-image"
+    Default: "gemini-3.1-flash-lite-image"
     Description: >
       Gemini model for image members with image_provider "gemini". A member's
       own model_id in team.json wins over this. Only the `:generateContent`

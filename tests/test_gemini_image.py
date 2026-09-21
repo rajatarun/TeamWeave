@@ -52,9 +52,9 @@ def test_it_asks_for_an_image_back():
 
 def test_the_model_goes_in_the_url_not_the_body():
     capture = {}
-    gemini_image.generate("p", declared_model_id="gemini-2.5-flash-image",
+    gemini_image.generate("p", declared_model_id="gemini-3.1-flash-lite-image",
                           api_key="k", post=capturing_post(capture, inline_response()))
-    assert capture["url"].endswith("/models/gemini-2.5-flash-image:generateContent")
+    assert capture["url"].endswith("/models/gemini-3.1-flash-lite-image:generateContent")
 
 
 def test_an_imagen_model_is_refused_rather_than_sent():
@@ -67,7 +67,7 @@ def test_an_imagen_model_is_refused_rather_than_sent():
 
 def test_a_missing_key_is_named_not_guessed_at():
     with pytest.raises(RuntimeError, match="GEMINI_SECRET_ARN"):
-        gemini_image.generate("p", declared_model_id="gemini-2.5-flash-image",
+        gemini_image.generate("p", declared_model_id="gemini-3.1-flash-lite-image",
                               api_key="", post=lambda *a, **k: inline_response())
 
 
@@ -189,7 +189,7 @@ def test_the_key_travels_in_the_header_not_the_url(monkeypatch):
 
 def test_list_models_reports_what_each_supports():
     models = gemini_image.list_models(api_key="k", fetch=lambda url: {"models": [
-        {"name": "models/gemini-2.5-flash-image",
+        {"name": "models/gemini-3.1-flash-lite-image",
          "supportedGenerationMethods": ["generateContent"]},
         {"name": "models/imagen-3.0-generate-002",
          "supportedGenerationMethods": ["predict"]},
@@ -197,7 +197,7 @@ def test_list_models_reports_what_each_supports():
          "supportedGenerationMethods": ["embedContent"]},
     ]})
     by_name = {m["model"]: m for m in models}
-    assert by_name["gemini-2.5-flash-image"]["generateContent"] is True
+    assert by_name["gemini-3.1-flash-lite-image"]["generateContent"] is True
     assert by_name["imagen-3.0-generate-002"]["generateContent"] is False
     # Imagen is a Gemini-API model whose shape this builder does not speak.
     assert by_name["imagen-3.0-generate-002"]["shapeKnown"] is False
@@ -206,9 +206,9 @@ def test_list_models_reports_what_each_supports():
 
 def test_describe_names_usable_models():
     text = gemini_image.describe(api_key="k", fetch=lambda url: {"models": [
-        {"name": "models/gemini-2.5-flash-image",
+        {"name": "models/gemini-3.1-flash-lite-image",
          "supportedGenerationMethods": ["generateContent"]}]})
-    assert "gemini-2.5-flash-image" in text
+    assert "gemini-3.1-flash-lite-image" in text
 
 
 def test_describe_never_raises():
