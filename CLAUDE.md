@@ -451,7 +451,22 @@ needs a Step Functions state per step rather than a loop inside one function.
 that makes the call.
 
 ### Structured Output
-Worker validates agent outputs against JSON Schema before passing them downstream (`schema_validate.py`, `structured_transform.py`).
+Worker validates agent outputs against JSON Schema before passing them
+downstream (`schema_validate.py`, `structured_transform.py`).
+
+When an agent's answer is not schema-shaped, `structured_transform` reshapes
+it rather than losing it. That repair model was hardcoded to
+`anthropic.claude-3-haiku-20240307-v1:0` with no way to change it short of a
+deploy, and Bedrock now refuses the id outright — *"marked by provider as
+Legacy and you have not been actively using the model in the last 30 days"*.
+So every repair failed and a working pipeline returned its answer wrapped in a
+`fallback_response` envelope instead of the schema its team declared. The run
+still **succeeded**, which is how this survived a green deploy — and a passing
+test that asserted the broken value.
+
+It defaults to the model the agent turns themselves run on, so the platform
+has one model decision, and `STRUCTURED_TRANSFORM_MODEL_ID` overrides it
+without touching code.
 
 ### Async Execution
 Every run is async: `POST /team/task` returns a `run_id`, then poll `GET /team/task/{run_id}` until `SUCCEEDED` or `FAILED`.

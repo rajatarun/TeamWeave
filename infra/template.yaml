@@ -272,6 +272,10 @@ Globals:
         # two travel together.
         AGENT_RUNTIME: !If [AgentCoreEnabled, "agentcore", "classic"]
         AGENTCORE_RUNTIME_ARN: !If [AgentCoreEnabled, !GetAtt AgentCoreRuntime.AgentRuntimeArn, ""]
+        # The model that reshapes an agent's answer when it is not schema-shaped.
+        # Same model the turns themselves run on, so the platform has one model
+        # decision rather than a second one hardcoded in a module.
+        STRUCTURED_TRANSFORM_MODEL_ID: !Ref AgentCoreDefaultModelId
         # team name -> its runtime ARN. One variable rather than one per team:
         # Lambda's environment is a flat map the template names statically, so
         # a per-team variable would need wiring through every function. The
