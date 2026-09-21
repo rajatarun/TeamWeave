@@ -237,3 +237,103 @@ def test_the_run_it_starts_is_the_team_it_says(smoke, monkeypatch):
     assert payload["team"] == smoke.DEFAULT_TEAM
     assert payload["version"] == smoke.DEFAULT_VERSION
     assert payload["request"] == smoke.DEFAULT_REQUEST
+
+
+# ── Diagnosis ────────────────────────────────────────────────────────────────
+# The first real run failed with "Worker task failed" and nothing else. That is
+# the state machine's Catch, not the error: the Lambda's exception, message and
+# stack trace live in the execution history. A check that goes red and mute
+# still leaves whoever reads it starting from scratch in CloudWatch.
+
+
+class FakeHistorySfn:
+    def __init__(self, events):
+        self._events = events
+
+    def get_execution_history(self, **_kwargs):
+        return {"events": self._events}
+
+
+def test_the_failure_detail_comes_from_the_execution_history(smoke):
+    detail = smoke.failure_detail(FakeHistorySfn([
+        {"type": "TaskStateExited"},
+        {"type": "LambdaFunctionFailed", "lambdaFunctionFailedEventDetails": {
+            "error": "StepFailed", "cause": "No AgentCore runtime for team doc_rewrite_team"}},
+    ]), "arn:x")
+    assert "StepFailed" in detail
+    assert "No AgentCore runtime for team doc_rewrite_team" in detail
+
+
+def test_it_reads_every_shape_of_failure_event(smoke):
+    for key in ("taskFailedEventDetails", "lambdaFunctionFailedEventDetails",
+                "executionFailedEventDetails", "activityFailedEventDetails"):
+        detail = smoke.failure_detail(
+            FakeHistorySfn([{"type": "X", key: {"error": "E", "cause": "C"}}]), "arn:x")
+        assert "E" in detail and "C" in detail, f"{key} was not read"
+
+
+def test_an_unreadable_history_does_not_mask_the_failure(smoke):
+    class Boom:
+        def get_execution_history(self, **_kwargs):
+            raise RuntimeError("denied")
+
+    detail = smoke.failure_detail(Boom(), "arn:x")
+    assert "could not read the execution history" in detail
+    assert "denied" in detail
+
+
+def test_a_history_with_no_failure_says_so_rather_than_lying(smoke):
+    assert "no failure detail" in smoke.failure_detail(FakeHistorySfn([{"type": "Ok"}]), "arn:x")
+
+
+def test_a_failed_run_prints_the_detail(smoke, monkeypatch, capsys):
+    fake = FakeSfn("FAILED", {})
+    fake.get_execution_history = lambda **_k: {"events": [
+        {"type": "LambdaFunctionFailed",
+         "lambdaFunctionFailedEventDetails": {"error": "Boom", "cause": "the real reason"}}
+    ]}
+    assert run_main(smoke, monkeypatch, fake) == 1
+    out = capsys.readouterr().out
+    assert "why it failed" in out
+    assert "the real reason" in out
+
+
+def test_the_deploy_smoke_tests_every_team_runtime():
+    """Smoking only the shared runtime leaves the ones serving traffic untried.
+
+    That is exactly what happened: the shared runtime answered, the deploy went
+    green through that step, and the pipeline then failed on a runtime nothing
+    had ever invoked.
+    """
+    import yaml as _yaml
+
+    workflow = _yaml.safe_load((REPO / ".github" / "workflows" / "deploy.yml").read_text())
+    steps = workflow["jobs"]["deploy"]["steps"]
+    smoke_steps = [s for s in steps if "agentcore_smoke.py" in (s.get("run") or "")]
+    assert smoke_steps, "nothing in the deploy invokes a runtime for real"
+    script = "\n".join(s["run"] for s in smoke_steps)
+
+    assert "AgentCoreTeamRuntimeArns" in script, "the per-team runtimes are never smoke-tested"
+
+    # The loop must run in the current shell. `... | while` puts it in a
+    # subshell, where a failing runtime need not fail the step — a check that
+    # cannot fail is worse than no check.
+    assert "done < <(" in script, "the per-runtime loop must read via process substitution"
+
+    # Counting failures is not acting on them.
+    assert "RUNTIME_FAILURES=$((RUNTIME_FAILURES + 1))" in script, "failures are not counted"
+    guard = script.split('if [ "${RUNTIME_FAILURES}" -ne 0 ]; then', 1)
+    assert len(guard) == 2, "nothing checks the failure count"
+    assert "exit 1" in guard[1].split("fi", 1)[0], "a failing runtime does not fail the deploy"
+
+    # And the annotation has to reach GitHub, which parses stdout only.
+    assert "::error::" in guard[1]
+    assert ">&2" not in guard[1].split("fi", 1)[0], "an annotation on stderr produces nothing"
+
+
+def test_the_stack_publishes_the_per_team_runtimes():
+    template = (REPO / "infra" / "template.yaml").read_text()
+    outputs = template.split("\nOutputs:", 1)[1]
+    assert "AgentCoreTeamRuntimeArns:" in outputs, (
+        "the deploy cannot smoke-test runtimes the stack does not publish"
+    )

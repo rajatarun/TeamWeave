@@ -2326,8 +2326,24 @@ Outputs:
 
   AgentCoreRuntimeArn:
     Condition: AgentCoreEnabled
-    Description: The runtime AGENT_RUNTIME=agentcore invokes.
+    Description: >
+      The stack-wide fallback runtime, used only by a team that has none of
+      its own. Per-team runtimes are in AgentCoreTeamRuntimeArns.
     Value: !GetAtt AgentCoreRuntime.AgentRuntimeArn
+  AgentCoreTeamRuntimeArns:
+    Condition: AgentCoreEnabled
+    Description: >
+      team name -> the AgentCore runtime that serves it, as JSON. The same
+      value the worker reads from AGENTCORE_TEAM_RUNTIME_ARNS. Published so
+      the deploy can invoke each one for real: CloudFormation creating a
+      runtime says nothing about whether the program inside it boots, and a
+      runtime that does not boot surfaces as an opaque "Worker task failed"
+      minutes later in whichever pipeline happened to use it.
+    Value: !Sub
+      - '{"doc_rewrite_team":"${ArnDocRewriteTeam}","tarun_improvement_team":"${ArnTarunImprovementTeam}","tarun_visibility_team":"${ArnTarunVisibilityTeam}"}'
+      - ArnDocRewriteTeam: !GetAtt AgentCoreRuntimeDocRewriteTeam.AgentRuntimeArn
+        ArnTarunImprovementTeam: !GetAtt AgentCoreRuntimeTarunImprovementTeam.AgentRuntimeArn
+        ArnTarunVisibilityTeam: !GetAtt AgentCoreRuntimeTarunVisibilityTeam.AgentRuntimeArn
   AgentCardUrl:
     Description: The A2A Agent Card every client fetches first.
     Value: !Sub "https://${TeamWeaveApi}.execute-api.${AWS::Region}.amazonaws.com/prod/.well-known/agent-card.json"

@@ -91,6 +91,45 @@ def wait(sfn, execution_arn: str, timeout_s: int, poll_s: int) -> Tuple[str, Dic
         time.sleep(poll_s)
 
 
+def failure_detail(sfn, execution_arn: str, limit: int = 200) -> str:
+    """Why the execution actually failed, from its own history.
+
+    DescribeExecution's `cause` for a Lambda task is "Worker task failed" --
+    the state machine's Catch, not the error. The Lambda's exception, message
+    and stack trace are in the execution history, on the *FailedEventDetails
+    of the failing event. Without this the check is red and mute, and whoever
+    reads it still has to go to CloudWatch to learn anything.
+    """
+    try:
+        history = sfn.get_execution_history(
+            executionArn=execution_arn, reverseOrder=True, maxResults=limit
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnosis must never mask the failure
+        return f"(could not read the execution history: {type(exc).__name__}: {exc})"
+
+    detail_keys = (
+        "taskFailedEventDetails",
+        "lambdaFunctionFailedEventDetails",
+        "executionFailedEventDetails",
+        "activityFailedEventDetails",
+    )
+    lines = []
+    for event in history.get("events", []):
+        for key in detail_keys:
+            details = event.get(key)
+            if not details:
+                continue
+            error = str(details.get("error") or "").strip()
+            cause = str(details.get("cause") or "").strip()
+            if not error and not cause:
+                continue
+            lines.append(f"[{event.get('type')}] {error}: {cause}"[:2000])
+            break
+        if len(lines) >= 3:
+            break
+    return "\n".join(lines) if lines else "(the history recorded no failure detail)"
+
+
 def final_step_output(result: Dict[str, Any]) -> Tuple[str, Any]:
     """The last step's output -- the team's deliverable.
 
@@ -159,12 +198,16 @@ def main() -> int:
     status, result = wait(sfn, execution_arn, args.timeout, args.poll)
 
     if status != "SUCCEEDED":
+        detail = failure_detail(sfn, execution_arn)
         announce(
             "error",
             f"The {args.team} pipeline ended as {status}. Asking a team to do something "
             f"is what this platform is for, so this fails the deploy. "
-            f"Cause: {str(result.get('cause'))[:600]}",
+            f"Cause: {str(result.get('cause'))[:300]}",
         )
+        # Printed rather than annotated: a stack trace does not fit in an
+        # annotation, and this is the part that says what to fix.
+        print(f"--- why it failed ---\n{detail}\n---------------------", flush=True)
         return 1
 
     step_id, output = final_step_output(result)
