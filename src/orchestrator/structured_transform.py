@@ -1,11 +1,28 @@
 import json
+import os
 from typing import Any, Dict, Optional
 
 from .bedrock_wrappers import invoke_model_request
 from .json_utils import extract_json_payload
 
 
-MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
+# The repair model: when an agent returns something that is not schema-shaped,
+# this reshapes it rather than losing the answer.
+#
+# It was pinned to anthropic.claude-3-haiku-20240307-v1:0, hardcoded with no
+# way to change it without a deploy, and Bedrock now refuses that id outright:
+#
+#   ResourceNotFoundException: This Model is marked by provider as Legacy and
+#   you have not been actively using the model in the last 30 days.
+#
+# So every repair failed, and a working pipeline returned its answer wrapped in
+# a fallback envelope instead of the schema the team declared. The run still
+# succeeded -- which is why this survived a green deploy.
+#
+# The default is now the model this account actually uses for its agent turns,
+# so one model decision covers the platform, and the environment overrides it.
+DEFAULT_MODEL_ID = "us.amazon.nova-micro-v1:0"
+MODEL_ID = os.environ.get("STRUCTURED_TRANSFORM_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
 
 
 def transform_json_to_schema(

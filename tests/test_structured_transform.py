@@ -56,7 +56,7 @@ class StructuredTransformTests(unittest.TestCase):
         )
 
 
-    def test_transform_uses_haiku_model_and_normalizes_newlines_tabs(self):
+    def test_transform_uses_the_configured_model_and_normalizes_newlines_tabs(self):
         input_json = {"name": "John"}
         target_schema = {"type": "object", "properties": {"summary": {"type": "string"}}}
         fake_client = _FakeClient(json.dumps({"summary": "Line1\n\tLine2"}))
@@ -64,8 +64,42 @@ class StructuredTransformTests(unittest.TestCase):
         transformed = transform_json_to_schema(input_json, target_schema, client=fake_client)
 
         self.assertEqual(fake_client.last_model_id, MODEL_ID)
-        self.assertEqual(MODEL_ID, "anthropic.claude-3-haiku-20240307-v1:0")
         self.assertEqual(transformed, {"summary": "Line1  Line2"})
+
+    def test_the_repair_model_is_not_the_legacy_one_bedrock_refuses(self):
+        """This test used to pin the legacy id, which enforced the bug.
+
+        Bedrock answers that model with ResourceNotFoundException -- "marked by
+        provider as Legacy and you have not been actively using the model in
+        the last 30 days" -- so every repair failed and a working pipeline
+        returned its answer in a fallback envelope instead of the declared
+        schema. The run still succeeded, which is how it survived a green
+        deploy and a passing test that asserted the broken value.
+        """
+        self.assertNotEqual(MODEL_ID, "anthropic.claude-3-haiku-20240307-v1:0")
+        self.assertNotIn("claude-3-haiku-20240307", MODEL_ID)
+
+    def test_the_repair_model_can_be_changed_without_a_code_change(self):
+        # It was a bare constant, so moving off a dead model needed a deploy of
+        # new code rather than a parameter.
+        import importlib
+        import os
+
+        from src.orchestrator import structured_transform as st
+
+        os.environ["STRUCTURED_TRANSFORM_MODEL_ID"] = "us.amazon.nova-lite-v1:0"
+        try:
+            reloaded = importlib.reload(st)
+            self.assertEqual(reloaded.MODEL_ID, "us.amazon.nova-lite-v1:0")
+        finally:
+            os.environ.pop("STRUCTURED_TRANSFORM_MODEL_ID", None)
+            importlib.reload(st)
+
+    def test_the_stack_supplies_the_repair_model(self):
+        from pathlib import Path as _Path
+
+        template = (_Path(__file__).resolve().parents[1] / "infra" / "template.yaml").read_text()
+        self.assertIn("STRUCTURED_TRANSFORM_MODEL_ID:", template)
 
     def test_transform_normalizes_escaped_newline_tab_artifacts_in_json_text(self):
         input_json = {"name": "John"}
