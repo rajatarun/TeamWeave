@@ -14,7 +14,12 @@ class _FakeSfnClient:
 
     def start_execution(self, **kwargs):
         self.async_calls.append(kwargs)
-        return {"executionArn": "arn:aws:states:region:acct:execution:sm:id"}
+        # Honour `name` the way Step Functions does. Returning a fixed ARN
+        # regardless made this fake report success for a trigger that never
+        # named its execution, so the id it handed callers named nothing and
+        # every poll 404'd -- see tests/test_run_id_roundtrip.py.
+        name = kwargs.get("name") or "service-generated"
+        return {"executionArn": f"arn:aws:states:region:acct:execution:sm:{name}"}
 
     def describe_execution(self, **kwargs):
         self.last_execution_arn = kwargs.get("executionArn")

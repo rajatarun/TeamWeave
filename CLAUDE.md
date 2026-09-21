@@ -517,6 +517,26 @@ not, and no policy may use `sfn:` — that is botocore's client name, not an IAM
 prefix, so `sfn:StartExecution` and `sfn:DescribeExecution` granted nothing
 while making the policy read as though they did.
 
+**The id a caller is handed must be the id it can poll back.** Fixing that
+permission exposed the next link in the same chain: the poll was now allowed
+and answered `404 {"error": "run_id not found"}` instead. Both start sites
+minted a uuid4, put it in the execution's *input*, and called
+`start_execution` **without `name=`** — so Step Functions generated a
+different uuid of its own and the id the caller was given named an execution
+that never existed. The run itself was fine; only the handle was wrong.
+
+`scripts/pipeline_smoke.py` cannot see this class of bug, and that is correct
+behaviour for a harness: it polls the `executionArn` that `start_execution`
+returns rather than an id it was handed, so it exercises the pipeline and not
+the round trip. The existing trigger tests could not see it either, for a
+worse reason — their fake Step Functions returned a fixed ARN whatever `name`
+it was passed, which reports success for both the working and the broken call.
+
+`src/orchestrator/run_ids.py` holds the one definition, and
+`tests/test_run_id_roundtrip.py` drives the real handlers through start →
+poll, over both `POST /team/task` and A2A's `message:send` / `tasks/{id}`,
+against a fake that invents its own name when given none.
+
 ---
 
 ## Environment Variables (auto-wired by SAM)
