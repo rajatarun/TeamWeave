@@ -418,11 +418,29 @@ Resources:
     Condition: HasVpcAndInternetGateway
     Properties:
       LaunchTemplateData:
-        InstanceMarketOptions:
-          MarketType: spot
-          SpotOptions:
-            SpotInstanceType: persistent
-            InstanceInterruptionBehavior: stop
+        # On-demand, not spot. This one t4g.nano is the *only* IPv4 path out of
+        # the Lambda subnets, and the services that have no dual-stack endpoint
+        # -- every Bedrock service, including the AgentCore runtime that every
+        # agent turn runs on -- can be reached no other way. It was a spot
+        # instance with InstanceInterruptionBehavior: stop, so an interruption
+        # stopped it, the route kept pointing at a stopped instance, and every
+        # Bedrock call from the VPC failed with
+        #
+        #   Connect timeout on endpoint URL:
+        #   https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/.../invocations
+        #
+        # Silently: nothing watches the instance, and a connect timeout reads
+        # like a slow service rather than a missing route. That is what the
+        # first real pipeline run ever attempted died of.
+        #
+        # A t4g.nano on demand is a few dollars a month, which is the cheapest
+        # part of this stack and buys back the whole agent platform's egress.
+        # An interface VPC endpoint for bedrock-agentcore would be the more
+        # robust answer -- private, no NAT dependency -- and costs more per AZ;
+        # that is a deliberate decision rather than a build fix, so it is named
+        # here and not taken unilaterally.
+        MetadataOptions:
+          HttpTokens: required
 
   NatInstance:
     Type: AWS::EC2::Instance

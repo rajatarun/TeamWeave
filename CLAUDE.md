@@ -525,6 +525,25 @@ workflow's own query against a response built from botocore's EC2 service
 model, so the shape is checked against the data the CLI itself validates
 against rather than against recollection.
 
+**The NAT instance is the whole platform's egress.** Because every Bedrock
+service is IPv4-only from here, one `t4g.nano` NAT instance is the only route
+out for every agent turn. It was a **spot** instance with
+`InstanceInterruptionBehavior: stop`, so an interruption stopped it, the route
+kept pointing at a stopped instance, and every call failed with
+
+    Connect timeout on endpoint URL:
+    https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/.../invocations
+
+Silently — nothing watched the instance, and a connect timeout reads like a
+slow service rather than a missing route. That is what the first real pipeline
+run ever attempted died of. It is on demand now, and the deploy checks the
+instance is running before anything tries to invoke an agent.
+
+An interface VPC endpoint for `bedrock-agentcore` is the more robust answer:
+private, no NAT dependency, no single instance. It costs more per AZ, so it is
+a deliberate decision rather than a build fix, and is named here rather than
+taken unilaterally.
+
 No VPC endpoints were added for any of this.
 
 ---
