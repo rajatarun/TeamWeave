@@ -641,6 +641,43 @@ model is refused at the call, not at deploy — so `ImageModelId` is a stack
 parameter and a member's `model_id` in `team.json` overrides it, neither
 needing a code change.
 
+**Gemini is the second image provider, because Bedrock's blocker is an
+entitlement rather than a bug.** Both refusals were about *access to a model*,
+which is granted per model in a console and cannot be fixed from this
+repository. The Gemini key is already in Secrets Manager, already read by
+`gemini.py`, and already reaching `generativelanguage.googleapis.com` out of
+this VPC for the research brief — so nothing new had to be unblocked.
+
+`bedrock.image_provider` (`"bedrock"` | `"gemini"`) selects it, and
+`src/orchestrator/gemini_image.py` answers only "prompt in, bytes out". It is
+**not** a `tool_registry` tool: tools are pre/post processors that shape a
+step's inputs or outputs around an agent turn, and the illustrator has no
+agent turn to wrap — generating the image *is* the step. Everything
+provider-independent — the prompt, the S3 write, the presign, the degrade, the
+schema — stays in `_run_image_step`, so adding a provider is one function, the
+same seam `agent_runtime.py` is for text.
+
+Three details that would each have shipped broken:
+
+- **`responseModalities: ["IMAGE"]`** is what separates an image from a
+  description of one. Without it the model returns prose about the picture it
+  would draw, which arrives as a step that succeeded and produced no image.
+- **The mime type comes from the response.** Gemini may answer JPEG; writing
+  that to a `.png` key serves a file whose extension lies, so the extension is
+  derived from `content_type` rather than assumed.
+- **An unknown provider degrades and names itself.** A typo silently falling
+  through to Bedrock would send a Gemini model id there and reproduce the
+  exact failure the switch exists to avoid.
+
+Its body is provider-defined and unverifiable offline, like Bedrock's, so the
+builder speaks only `:generateContent` and **refuses** Imagen — which answers
+on `:predict` with a different body — rather than sending one shape to the
+other's endpoint. `gemini_image.list_models()` is the `ListFoundationModels`
+equivalent (`supportedGenerationMethods` says whether a model answers
+`generateContent` at all), and the smoke test asks *whichever service
+refused*: listing Bedrock models for a Gemini failure would name candidates
+the run cannot use.
+
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them
 downstream (`schema_validate.py`, `structured_transform.py`).

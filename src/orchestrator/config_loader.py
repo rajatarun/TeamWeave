@@ -84,6 +84,7 @@ def load_team_config(team: str, version: str) -> Tuple[TeamConfig, Dict[str, Any
                 runtimeArn=br.get("runtimeArn", ""),
                 qualifier=br.get("qualifier", ""),
                 modality=str(br.get("modality", "text") or "text").strip().lower(),
+                image_provider=str(br.get("image_provider", "bedrock") or "bedrock").strip().lower(),
             ),
             goal_template=a.get("goal_template",""),
             schema_ref=a.get("schema_ref",""),

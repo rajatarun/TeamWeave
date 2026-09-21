@@ -436,3 +436,155 @@ def test_a_v2_canvas_id_is_a_family_the_builder_knows():
     for model in ("amazon.nova-canvas-v2:0", "amazon.titan-image-generator-v2:0"):
         body = bedrock_image.build_body("p", model=model, width=8, height=8)
         assert body["taskType"] == "TEXT_IMAGE"
+
+
+# ── which service makes the image ───────────────────────────────────────────
+
+def _agent(provider, model="m"):
+    class Bedrock:
+        image_provider = provider
+        model_id = model
+
+    class Agent:
+        goal_template = "art direction"
+        bedrock = Bedrock()
+
+    return Agent()
+
+
+def _stub_providers(monkeypatch, worker_handler):
+    calls = []
+
+    def bedrock_gen(prompt, **kw):
+        calls.append(("bedrock", kw.get("declared_model_id")))
+        return {"bytes": PNG, "model_id": "b", "prompt": prompt,
+                "width": 8, "height": 8, "content_type": "image/png"}
+
+    def gemini_gen(prompt, **kw):
+        calls.append(("gemini", kw.get("declared_model_id")))
+        return {"bytes": PNG, "model_id": "g", "prompt": prompt,
+                "content_type": "image/png"}
+
+    monkeypatch.setattr(worker_handler.bedrock_image, "generate", bedrock_gen)
+    monkeypatch.setattr(worker_handler.gemini_image, "generate", gemini_gen)
+    monkeypatch.setattr(worker_handler, "save_bytes", lambda *a, **kw: "s3://b/k.png")
+    monkeypatch.setattr(worker_handler, "presign", lambda *a, **kw: "")
+    return calls
+
+
+def test_a_gemini_member_never_reaches_bedrock(monkeypatch):
+    """Bedrock refused the illustration twice over model entitlement. Routing
+    to Gemini is the point of the provider seam; sending it to Bedrock anyway
+    would reproduce the failure the switch exists to avoid."""
+    from src.orchestrator import worker_handler
+
+    calls = _stub_providers(monkeypatch, worker_handler)
+    out = worker_handler._run_image_step(
+        _agent("gemini", "gemini-2.5-flash-image"), "s", "r", {})
+    assert calls == [("gemini", "gemini-2.5-flash-image")]
+    assert out["provider"] == "gemini"
+
+
+def test_bedrock_remains_the_default(monkeypatch):
+    """A member that declares no provider must not change behaviour."""
+    from src.orchestrator import worker_handler
+
+    calls = _stub_providers(monkeypatch, worker_handler)
+
+    class Bedrock:
+        model_id = "amazon.nova-canvas-v1:0"
+
+    class Agent:
+        goal_template = "d"
+        bedrock = Bedrock()
+
+    worker_handler._run_image_step(Agent(), "s", "r", {})
+    assert calls == [("bedrock", "amazon.nova-canvas-v1:0")]
+
+
+def test_an_unknown_provider_degrades_and_names_itself(monkeypatch):
+    """A typo must not silently fall through to Bedrock with a Gemini model."""
+    from src.orchestrator import worker_handler
+
+    _stub_providers(monkeypatch, worker_handler)
+    out = worker_handler._run_image_step(_agent("gemni", "gemini-x"), "s", "r", {})
+    assert "unknown image_provider" in out["error"]
+    assert out["image_uri"] == ""
+
+
+def test_the_stored_extension_matches_the_returned_mime(monkeypatch):
+    """Gemini may answer JPEG; writing it to a .png key serves a file whose
+    extension lies about its contents."""
+    from src.orchestrator import worker_handler
+
+    _stub_providers(monkeypatch, worker_handler)
+    monkeypatch.setattr(worker_handler.gemini_image, "generate",
+                        lambda prompt, **kw: {"bytes": PNG, "model_id": "g",
+                                              "prompt": prompt, "content_type": "image/jpeg"})
+    saved = {}
+    monkeypatch.setattr(worker_handler, "save_bytes",
+                        lambda run, step, data, *, extension, content_type: saved.update(
+                            extension=extension, content_type=content_type) or "s3://b/k.jpg")
+
+    out = worker_handler._run_image_step(_agent("gemini"), "s", "r", {})
+    assert saved == {"extension": "jpg", "content_type": "image/jpeg"}
+    assert out["content_type"] == "image/jpeg"
+
+
+def test_a_gemini_failure_degrades_like_a_bedrock_one(monkeypatch):
+    """The post is still the deliverable whichever service refused."""
+    from src.orchestrator import worker_handler
+
+    _stub_providers(monkeypatch, worker_handler)
+
+    def refuse(prompt, **kw):
+        raise RuntimeError("Gemini HTTP 429: quota exceeded")
+
+    monkeypatch.setattr(worker_handler.gemini_image, "generate", refuse)
+    out = worker_handler._run_image_step(_agent("gemini"), "s", "r", {})
+    assert "quota exceeded" in out["error"]
+    assert out["provider"] == "gemini"
+    assert out["image_uri"] == ""
+
+
+def test_the_shipped_config_parses_with_its_provider(monkeypatch):
+    """The wire from team.json to BedrockRef, through the real loader.
+
+    Every other provider test builds a BedrockRef directly, so all of them
+    pass with the loader silently dropping `image_provider` -- the shipped
+    illustrator would then arrive as "bedrock", be sent to Bedrock with a
+    Gemini model id, and fail exactly the way the switch to Gemini exists to
+    avoid. This reads the file the deploy ships and parses it as the worker
+    does.
+    """
+    import json as _json
+    from pathlib import Path
+
+    from src.orchestrator import config_loader
+
+    repo = Path(__file__).resolve().parents[1]
+    doc = _json.loads(
+        (repo / "config" / "examples" / "teams" / "tarun_visibility_team"
+         / "v1" / "team.json").read_text()
+    )
+    monkeypatch.setattr(config_loader, "_s3_get_json", lambda *a, **kw: doc)
+    monkeypatch.setenv("CONFIG_BUCKET", "b")
+
+    cfg, _ = config_loader.load_team_config("tarun_visibility_team", "v1")
+    image_agents = [a for a in cfg.agents if a.bedrock.modality == "image"]
+    assert len(image_agents) == 1
+    illustrator = image_agents[0]
+
+    assert illustrator.bedrock.image_provider == "gemini", (
+        f"parsed provider was {illustrator.bedrock.image_provider!r}; a Gemini "
+        "model would be sent to Bedrock"
+    )
+    # And the pairing survives the parse, not just the file.
+    assert illustrator.bedrock.model_id.startswith("gemini-")
+
+
+def test_a_text_member_never_parses_as_an_image_provider(monkeypatch):
+    """The default must stay bedrock for members that say nothing."""
+    from src.orchestrator import models as m
+
+    assert m.BedrockRef(agentId="", aliasId="").image_provider == "bedrock"

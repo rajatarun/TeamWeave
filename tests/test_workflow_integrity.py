@@ -152,13 +152,30 @@ def test_everything_after_the_editor_consumes_the_approved_copy():
 def test_the_illustrator_is_not_an_agent_turn():
     """Image models do not implement Converse, which is all the AgentCore
     runtime program speaks. The modality is what routes it elsewhere; without
-    it the worker would send a Canvas id through the agent runtime and the
-    step would fail at the first call."""
+    it the worker would send an image model id through the agent runtime and
+    the step would fail at the first call."""
     config = load(TEAMS_DIR / "tarun_visibility_team" / "v1" / "team.json")
     image_agents = [a for a in config["agents"]
                     if (a.get("bedrock") or {}).get("modality") == "image"]
     assert len(image_agents) == 1, [a["id"] for a in image_agents]
-    assert "canvas" in image_agents[0]["bedrock"]["model_id"].lower()
+
+
+def test_the_image_members_provider_and_model_agree():
+    """A Gemini model on the Bedrock provider (or the reverse) deploys fine
+    and fails at the call, naming only the id -- which is how two deploys were
+    spent on Bedrock ids. The pairing is checkable here."""
+    config = load(TEAMS_DIR / "tarun_visibility_team" / "v1" / "team.json")
+    agent = next(a for a in config["agents"]
+                 if (a.get("bedrock") or {}).get("modality") == "image")
+    bedrock = agent["bedrock"]
+    provider = bedrock.get("image_provider", "bedrock")
+    model = bedrock["model_id"].lower()
+
+    assert provider in {"bedrock", "gemini"}, provider
+    if provider == "gemini":
+        assert model.startswith("gemini-"), (provider, model)
+    else:
+        assert model.startswith("amazon."), (provider, model)
 
 
 def test_every_text_member_still_declares_a_text_model():

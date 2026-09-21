@@ -30,6 +30,12 @@ class BedrockRef:
     # but it is not an agent *turn*: image models do not implement Converse,
     # so the worker runs it through bedrock_image instead of the agent runtime.
     modality: str = "text"
+    # Which service makes the image: "bedrock" (default) or "gemini". Only
+    # read when modality is "image". Bedrock grants model access per model in
+    # a console and refused the illustration twice for that reason; the Gemini
+    # key is already in Secrets Manager and already reaches the API from this
+    # VPC, so the alternative costs a config line rather than an entitlement.
+    image_provider: str = "bedrock"
 
 @dataclass
 class AgentConfig:
