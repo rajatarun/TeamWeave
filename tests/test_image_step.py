@@ -480,8 +480,8 @@ def test_a_gemini_member_never_reaches_bedrock(monkeypatch):
 
     calls = _stub_providers(monkeypatch, worker_handler)
     out = worker_handler._run_image_step(
-        _agent("gemini", "gemini-2.5-flash-image"), "s", "r", {})
-    assert calls == [("gemini", "gemini-2.5-flash-image")]
+        _agent("gemini", "gemini-3.1-flash-lite-image"), "s", "r", {})
+    assert calls == [("gemini", "gemini-3.1-flash-lite-image")]
     assert out["provider"] == "gemini"
 
 

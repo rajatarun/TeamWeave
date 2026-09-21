@@ -40,7 +40,7 @@ log = get_logger("gemini_image")
 GENERATE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 LIST_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models"
 
-DEFAULT_MODEL = "gemini-2.5-flash-image"
+DEFAULT_MODEL = "gemini-3.1-flash-lite-image"
 # The research brief uses 40 s; an image is slower but the worker's remaining
 # budget is the real ceiling -- see deadline.py and the caller.
 DEFAULT_TIMEOUT = 90
