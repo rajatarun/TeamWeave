@@ -28,6 +28,7 @@ from typing import Dict, Optional, Protocol, Tuple
 import boto3
 from botocore.config import Config
 
+from . import deadline
 from .logger import get_logger
 from .mcp_observatory import observe_agent_request, observe_agentcore_request
 
@@ -36,10 +37,13 @@ log = get_logger("agent_runtime")
 # The Classic runtime client. Defined here but re-exported by
 # ``bedrock_invoke`` so existing callers and tests that patch
 # ``bedrock_invoke.brt`` keep working -- it is the same object.
+# 1800 s here was six times the worker's entire Lambda budget, so a stalled
+# call could never raise a read timeout -- Lambda killed the process first and
+# the failure arrived as Sandbox.Timedout, naming no step. See deadline.py.
 brt = boto3.client(
     "bedrock-agent-runtime",
     config=Config(
-        read_timeout=1800,
+        read_timeout=deadline.DEFAULT_CALL_SECONDS,
         connect_timeout=60,
         retries={"max_attempts": 0},
     ),
@@ -219,16 +223,23 @@ class AgentCoreRuntime:
         self._client = client
 
     def _runtime_client(self):
-        if self._client is None:
-            self._client = boto3.client(
-                "bedrock-agentcore",
-                config=Config(
-                    read_timeout=1800,
-                    connect_timeout=60,
-                    retries={"max_attempts": 0},
-                ),
-            )
-        return self._client
+        """A client whose read timeout fits the time this invocation has left.
+
+        Built per call rather than cached, because the budget shrinks as the
+        pipeline's earlier steps spend it: a client made for the first agent
+        would let the last one outlive the function. An injected client (the
+        tests') is always used as-is.
+        """
+        if self._client is not None:
+            return self._client
+        return boto3.client(
+            "bedrock-agentcore",
+            config=Config(
+                read_timeout=deadline.budget_for_call(),
+                connect_timeout=60,
+                retries={"max_attempts": 0},
+            ),
+        )
 
     @staticmethod
     def team_runtime_arns() -> Dict[str, str]:

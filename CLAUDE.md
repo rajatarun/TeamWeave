@@ -405,6 +405,34 @@ It starts the execution through Step Functions rather than the HTTP API,
 because the API is behind the SIWE authorizer and CI holds no wallet. That is
 the trade: it covers the pipeline, not the authorizer.
 
+**A call must not outlive the invocation that made it.** The worker ran the
+whole pipeline with a 300 s Lambda timeout while its Bedrock clients were
+configured to wait **1800 s** for one response. Six times the function's
+entire budget, which makes the SDK's read timeout unreachable by
+construction: Lambda kills the process first, so every stall arrived as
+
+    Sandbox.Timedout: Task timed out after 300.00 seconds
+
+naming no step, no agent and no cause. No amount of logging inside the worker
+would have helped — it never reached its error path. That is what the first
+real pipeline run ever attempted produced.
+
+`deadline.py` records what the Lambda context says is left, and each outbound
+call gets that minus a reserve, so a stall raises `ReadTimeoutError` with
+enough time for the worker to say which step hung. The AgentCore client is
+built per call rather than cached, because the budget shrinks as earlier steps
+spend it — a client made for the first agent would hand the last one a timeout
+computed when the function was fresh, and that is exactly the call that
+outlives it.
+
+The worker's own timeout is now 900 s, Lambda's ceiling. One invocation runs
+every step, so its budget is the sum of all of them; that ceiling is also the
+limit on how large a team this architecture serves, and past it the pipeline
+needs a Step Functions state per step rather than a loop inside one function.
+`tests/test_deadline.py` derives the invariant from the template: no
+`read_timeout` anywhere in `src/orchestrator/` may be as long as the function
+that makes the call.
+
 ### Structured Output
 Worker validates agent outputs against JSON Schema before passing them downstream (`schema_validate.py`, `structured_transform.py`).
 

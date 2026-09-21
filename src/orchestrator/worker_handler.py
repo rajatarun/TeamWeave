@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import boto3
 
+from . import deadline
 from .bedrock_invoke import invoke_agent, invoke_agent_with_metrics
 from . import contextweave_client
 from . import dpo_collector
@@ -368,6 +369,11 @@ def run_team_pipeline(
 
 
 def handler(event, context):
+    # Every outbound call from here on is bounded by what is left of this
+    # invocation, so a stall raises a real error with time to report which
+    # step hung -- rather than Lambda killing the process and reporting
+    # Sandbox.Timedout, which names nothing.
+    deadline.set_deadline_from_context(context)
     log.info("worker_handler_received_event", extra={"event": event})
 
     if event.get("operation") in {"provision", "agent_management"}:
