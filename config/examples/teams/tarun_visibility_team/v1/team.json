@@ -11,7 +11,8 @@
       "No fabricated facts or citations.",
       "If any claim is uncertain, label NEEDS_SOURCE.",
       "Use Tarun's own experience only where VERIFIED_EXPERIENCE supplies it; where it does not, write from general expertise and claim no personal involvement.",
-      "The piece is about the topic, not about Tarun. His experience is evidence for a point, never the subject of the article."
+      "The piece is about the topic, not about Tarun. His experience is evidence for a point, never the subject of the article.",
+      "This request may be a follow-up. When request.edit_instruction is present, request.previous_output is your own last answer: revise it to satisfy the instruction and change nothing else. Do not start over, and do not drop fields the instruction did not mention."
     ],
     "features": {
       "gemini_research": true,
@@ -261,7 +262,7 @@
     }
   },
   "request_schema": {
-    "summary": "Turn a topic into a publish-ready LinkedIn post: strategy, draft, edit, distribution plan.",
+    "summary": "Turn a topic into a publish-ready LinkedIn post: strategy, draft, edit, distribution plan. Follow-up turns in the same chat revise the last answer rather than starting over.",
     "fields": [
       {
         "name": "topic",
@@ -283,6 +284,25 @@
         "type": "text",
         "required": false,
         "placeholder": "e.g. Senior platform and AI engineers"
+      },
+      {
+        "name": "edit_instruction",
+        "label": "Change to make",
+        "type": "text",
+        "required": false,
+        "placeholder": "Only on a follow-up turn \u2014 what to change about the last answer"
+      },
+      {
+        "name": "previous_output",
+        "label": "Previous answer",
+        "type": "hidden",
+        "required": false
+      },
+      {
+        "name": "previous_run_id",
+        "label": "Previous run",
+        "type": "hidden",
+        "required": false
       }
     ]
   }

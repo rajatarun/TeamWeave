@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "term_decision_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "term": {
+      "type": "string"
+    },
+    "exists_in_catalogue": {
+      "type": "boolean"
+    },
+    "existing_definition": {
+      "type": "string"
+    },
+    "proposed_definition": {
+      "type": "string"
+    },
+    "duplicates_considered": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "catalogue_reachable": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "term",
+    "exists_in_catalogue",
+    "catalogue_reachable"
+  ]
+}

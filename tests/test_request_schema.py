@@ -22,7 +22,14 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 TEAMS_DIR = REPO / "config" / "examples" / "teams"
 
-ALLOWED_TYPES = {"text", "textarea"}
+# "hidden" is continuation state, not a question: on a follow-up turn the run
+# page submits the previous answer and run id alongside the person's edit, and
+# nobody types either. It is declared in request_schema rather than smuggled in
+# as an undeclared extra so the "a config that reads request.X must declare X"
+# rule below still covers it -- and the UI is required to skip rendering it,
+# which tests/test_conversational_contract.py holds it to.
+ALLOWED_TYPES = {"text", "textarea", "hidden"}
+HIDDEN_TYPE = "hidden"
 
 
 def team_files() -> list[Path]:
@@ -59,6 +66,12 @@ def test_every_field_is_renderable(path):
     for field in load(path)["request_schema"]["fields"]:
         assert field.get("name"), f"a field with no name cannot be submitted: {field}"
         assert field.get("label", "").strip(), f"{field['name']} has no label"
+        if field.get("type") == HIDDEN_TYPE:
+            # A hidden field the person cannot see must not be required: the
+            # form would block on a value there is no way to supply.
+            assert not field.get("required"), (
+                f"{field['name']} is hidden and required, so a first turn can never submit"
+            )
         assert field.get("type") in ALLOWED_TYPES, (
             f"{field['name']} has type {field.get('type')!r}; the UI renders {sorted(ALLOWED_TYPES)}"
         )
