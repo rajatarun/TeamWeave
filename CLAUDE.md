@@ -472,12 +472,18 @@ the four were guessed wrong and the gateway came up with two targets instead
 of four. The names share no convention, because each sibling's own deploy
 chose it:
 
-| Target | Stack | Why that name |
+Read each one from that sibling's **CI workflow**, which is the thing that
+creates the stack. A `samconfig` `default_name` or a `deploy.sh` derivation is
+what someone gets running it by hand, and is not evidence of what exists —
+three of these four were guessed from a local default and two of those were
+wrong, `screenweave` twice over:
+
+| Target | Stack | Source |
 |---|---|---|
-| ScreenWeave | `screenweave-dev` | `deploy.sh` defaults `ENV=dev`, and there is no CI workflow to override it |
+| ScreenWeave | `screenweave` | `.github/workflows/deploy.yaml`: `STACK_NAME: screenweave` (also its README and `docs/architecture.md`). `deploy.sh` *derives* `screenweave-${ENV}`, which produced two wrong guesses |
 | CipherWeave | `cipherweave-prod` | workflow: `cipherweave-${{ inputs.stage \|\| 'prod' }}` |
 | DataDictionary | `data-dictionary-mcp-prod` | workflow: `data-dictionary-mcp-${STAGE:-prod}`; its samconfig's unsuffixed name is the *local* default, not what CI deploys |
-| ToolWeave | `toolweave` | samconfig, unsuffixed |
+| ToolWeave | `toolweave` | samconfig, unsuffixed — and its workflow agrees, which is the only reason reading the samconfig worked here |
 
 A wrong name and an undeployed sibling are indistinguishable from here — both
 resolve to nothing, both warn, neither fails — so the wrong guess cost a round
