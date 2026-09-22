@@ -449,20 +449,25 @@ jobs:
           # ToolWeave's own DataDictionary client shows the convention
           # (base.rstrip("/") + "/mcp").
           #
-          # Each stack name is the one that sibling's own deploy creates, and
-          # they do not share a convention -- two of these were guessed wrong
-          # the first time and the gateway came up with two targets instead of
-          # four:
-          #   screenweave-dev         deploy.sh defaults ENV=dev, and there is
-          #                           no CI workflow to override it
-          #   cipherweave-prod        workflow: cipherweave-${stage:-prod}
-          #   data-dictionary-mcp-prod  workflow: data-dictionary-mcp-${STAGE:-prod}
-          #                           (its samconfig default_name has no suffix)
-          #   toolweave               samconfig, unsuffixed
+          # Each name is read from that sibling's own CI workflow -- the thing
+          # that actually creates the stack. They share no convention:
+          #   screenweave               .github/workflows/deploy.yaml:
+          #                             STACK_NAME: screenweave
+          #   cipherweave-prod          cipherweave-${{ inputs.stage || 'prod' }}
+          #   data-dictionary-mcp-prod  data-dictionary-mcp-${STAGE:-prod}
+          #   toolweave                 samconfig, unsuffixed
+          #
+          # Read the sibling's workflow, not its samconfig or its deploy.sh.
+          # Three of these were guessed from a local default and two were
+          # wrong: DataDictionary's samconfig says "data-dictionary-mcp" while
+          # its CI appends the stage, and ScreenWeave's deploy.sh derives
+          # "screenweave-${ENV}" while its CI pins STACK_NAME outright. A local
+          # default is what someone gets running the script by hand; it is not
+          # evidence of what is deployed.
           MCP_WIRED=()
           MCP_MISSING=()
           for spec in \
-            "screenweave-dev:McpEndpoint::ScreenWeaveMcpEndpoint" \
+            "screenweave:McpEndpoint::ScreenWeaveMcpEndpoint" \
             "cipherweave-prod:CipherWeaveApiEndpoint:/mcp:CipherWeaveMcpEndpoint" \
             "data-dictionary-mcp-prod:DataDictionaryFunctionUrl:/mcp:DataDictionaryMcpEndpoint" \
             "toolweave:ToolWeaveApiEndpoint:/mcp:ToolWeaveMcpEndpoint"; do
