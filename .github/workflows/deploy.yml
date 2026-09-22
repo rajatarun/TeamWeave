@@ -376,6 +376,11 @@ jobs:
 
       - name: SAM Deploy
         run: |
+          # Captured before the cd: this step runs from infra/, so any path to
+          # a repo-root file has to be absolute. A relative `scripts/...` here
+          # resolves to infra/scripts/... and dies at run time with
+          # "can't open file", after the deploy has already started.
+          REPO_ROOT="${GITHUB_WORKSPACE:-$PWD}"
           cd infra
           ASSUME_ROLE_NAME="${ASSUME_ROLE_ARN##*/}"
 
@@ -517,7 +522,7 @@ jobs:
               # answered with a revision it prefers over ours, which is the
               # refusal the Gateway acts on; exit 2 means the probe could not
               # tell, and wires it anyway (see the script).
-              python scripts/mcp_handshake.py "${mcp_url}" --name "${mcp_param%McpEndpoint}"
+              python "${REPO_ROOT}/scripts/mcp_handshake.py" "${mcp_url}" --name "${mcp_param%McpEndpoint}"
               mcp_probe=$?
               if [ ${mcp_probe} -eq 1 ]; then
                 MCP_MISSING+=("${mcp_param%McpEndpoint} (MCP handshake refused; wiring it would fail the stack, not lose a tool)")

@@ -275,7 +275,10 @@ class TestTheResolutionLoopRuns:
             for line in WORKFLOW[start:end].splitlines()
         )
         return (
-            "set -u\nPARAM_OVERRIDES=()\nAWS_REGION=us-east-1\n"
+            # REPO_ROOT is captured by the real step before its `cd infra`, so
+            # the extracted loop needs it too. Pointing it at the temporary
+            # directory is what puts the probe stub on the path the loop uses.
+            "set -u\nPARAM_OVERRIDES=()\nAWS_REGION=us-east-1\nREPO_ROOT=\"$PWD\"\n"
             + body
             + '\necho "---PARAMS---"\n'
             + 'if [ ${#PARAM_OVERRIDES[@]} -gt 0 ]; then printf "%s\\n" "${PARAM_OVERRIDES[@]}"; fi\n'
