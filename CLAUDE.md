@@ -505,6 +505,29 @@ Two shapes matter and both are handled: an MCP server over HTTP may answer
 `initialize` as plain JSON or as an SSE `data:` frame, and a check reading only
 one would report every streaming server as unverified and wire it blind.
 
+**The step runs under `bash -e`, and the probe reports its outcome as an exit
+code.** Those two facts together killed the next deploy — the log read
+`ScreenWeave: handshake ok at 2025-06-18`, then
+`Process completed with exit code 2` on CipherWeave's `unverified`, the one
+outcome that exists in order *not* to fail the deploy. A bare command
+returning non-zero ends the step before the next line can read `$?`, so the
+call is now `python … || mcp_probe=$?` with `mcp_probe` initialised first.
+
+`tests/test_gateway_targets.py` could not see it: the harness ran the
+extracted loop under `set -u` but not `-e`, so it was testing a shell CI does
+not use. It runs `set -eu` now and a test holds it to the workflow's own
+`shell:` lines. `tests/test_workflow_shell.py` covers the family statically.
+
+One thing that reads like the same trap and is **not**: `[ -n "$X" ] && push`.
+A failing command in a `&&` list is exempt from `-e`, and bash does not exit
+on the list's status either —
+
+    set -e; X=value; [ "$X" = "None" ] && X=""; echo reached   # prints
+
+An earlier pass through this file "fixed" those lines on the belief that they
+were landmines and added a check that failed correct code; both were reverted
+after testing the behaviour rather than recalling it.
+
 **The SAM Deploy step runs from `infra/`.** The probe was first called as
 `python scripts/mcp_handshake.py`, which is right from the repository root and
 resolves to `infra/scripts/...` there — so the deploy died mid-run with

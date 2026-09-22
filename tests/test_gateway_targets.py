@@ -275,10 +275,18 @@ class TestTheResolutionLoopRuns:
             for line in WORKFLOW[start:end].splitlines()
         )
         return (
+            # `set -e` matches how GitHub runs a `run:` block -- the job log
+            # shows `shell: /usr/bin/bash -e {0}`. Without it these tests pass
+            # on a loop that dies in CI: the handshake probe reports its
+            # outcome as an exit code, and under -e a bare non-zero command
+            # ends the script before the next line can read $?. The deploy
+            # failed with "Process completed with exit code 2" on the very
+            # case -- `unverified` -- that exists in order not to fail.
+            #
             # REPO_ROOT is captured by the real step before its `cd infra`, so
             # the extracted loop needs it too. Pointing it at the temporary
             # directory is what puts the probe stub on the path the loop uses.
-            "set -u\nPARAM_OVERRIDES=()\nAWS_REGION=us-east-1\nREPO_ROOT=\"$PWD\"\n"
+            "set -eu\nPARAM_OVERRIDES=()\nAWS_REGION=us-east-1\nREPO_ROOT=\"$PWD\"\n"
             + body
             + '\necho "---PARAMS---"\n'
             + 'if [ ${#PARAM_OVERRIDES[@]} -gt 0 ]; then printf "%s\\n" "${PARAM_OVERRIDES[@]}"; fi\n'
@@ -427,6 +435,21 @@ class TestTheResolutionLoopRuns:
         assert "handshake refused" in out
         assert "not lose a tool" in out
         assert proc.returncode == 0, "refusing a target must not fail the deploy step"
+
+    def test_the_harness_runs_the_loop_the_way_github_does(self):
+        """If this drifts from the real shell flags, every test in this class
+        is checking a loop CI does not run."""
+        source = self._loop_source()
+        assert source.startswith("set -e"), (
+            "the extracted loop must run under -e, as `shell: /usr/bin/bash -e {0}` does"
+        )
+        workflow_shell = [
+            line for line in WORKFLOW.splitlines() if line.strip().startswith("shell:")
+        ]
+        for line in workflow_shell:
+            assert "-e" in line or "bash" not in line, (
+                f"a step opts out of -e ({line.strip()!r}); these tests assume the default"
+            )
 
     def test_an_unverified_handshake_still_wires_the_target(self, tmp_path):
         """A probe from CI is weak evidence about a call the Gateway makes with
