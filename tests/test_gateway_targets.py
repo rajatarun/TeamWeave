@@ -155,18 +155,28 @@ def test_each_endpoint_is_read_from_a_sibling_stack_not_hardcoded(doc):
 # with two targets instead of four. Pinned here with provenance so that
 # changing one is a deliberate act against a stated source, and so the pairing
 # of sibling to stack survives a later edit to the loop.
+#
+# Every entry cites the sibling's **CI workflow**, because that is what creates
+# the stack. A samconfig's default_name and a deploy.sh's derived name are what
+# someone gets running it by hand; neither is evidence of what exists. Guessing
+# from those cost three wrong names across two rounds:
+#   screenweave-prod, screenweave-dev  <- deploy.sh's screenweave-${ENV}
+#   data-dictionary-mcp                <- samconfig's unsuffixed default
 EXPECTED_STACKS = {
-    "ScreenWeaveMcpEndpoint": "screenweave-dev",
-    # ScreenWeave has no CI workflow; deploy.sh defaults ENV=dev and names the
-    # stack screenweave-${ENV}. "screenweave-prod" resolved to nothing.
+    "ScreenWeaveMcpEndpoint": "screenweave",
+    # .github/workflows/deploy.yaml: STACK_NAME: screenweave
+    # (also README.md and docs/architecture.md, both of which spell out
+    # `--stack-name screenweave`)
     "CipherWeaveMcpEndpoint": "cipherweave-prod",
     # .github/workflows: STACK_NAME: cipherweave-${{ inputs.stage || 'prod' }}
     "DataDictionaryMcpEndpoint": "data-dictionary-mcp-prod",
     # .github/workflows: --stack-name "data-dictionary-mcp-${{ env.STAGE }}"
-    # with STAGE defaulting to prod. Its samconfig's unsuffixed
-    # "data-dictionary-mcp" is the local default, not what CI deploys.
+    # with STAGE defaulting to prod.
     "ToolWeaveMcpEndpoint": "toolweave",
-    # samconfig.toml, unsuffixed.
+    # samconfig.toml, unsuffixed. Its `sam deploy` takes the name from there
+    # rather than a flag, and its workflow's own describe-stacks calls say
+    # `--stack-name toolweave`, so both sources agree -- which is why this one
+    # was right when read from the samconfig and DataDictionary's was not.
 }
 
 
@@ -317,7 +327,7 @@ class TestTheResolutionLoopRuns:
         return proc, out, params
 
     ALL_GOOD = {
-        "screenweave-dev": {"Stacks": [{"Outputs": [
+        "screenweave": {"Stacks": [{"Outputs": [
             {"OutputKey": "McpEndpoint", "OutputValue": "https://sw.test/mcp"}]}]},
         "cipherweave-prod": {"Stacks": [{"Outputs": [
             {"OutputKey": "CipherWeaveApiEndpoint", "OutputValue": "https://cw.test/"}]}]},
@@ -353,10 +363,10 @@ class TestTheResolutionLoopRuns:
         """The original failure: `screenweave-prod` does not exist and
         `screenweave-dev` does. The log has to say so, or the next person
         guesses again."""
-        describe = {k: v for k, v in self.ALL_GOOD.items() if k != "screenweave-dev"}
-        _proc, out, params = self._run(tmp_path, describe, listing="screenweave-dev")
-        assert "no stack 'screenweave-dev'" in out
-        assert "found: screenweave-dev" in out
+        describe = {k: v for k, v in self.ALL_GOOD.items() if k != "screenweave"}
+        _proc, out, params = self._run(tmp_path, describe, listing="screenweave-prod")
+        assert "no stack 'screenweave'" in out
+        assert "found: screenweave-prod" in out
         assert len(params) == 3
 
     def test_a_sibling_that_was_never_deployed_says_so(self, tmp_path):
