@@ -795,6 +795,54 @@ uses the **Converse** API now, which normalises the request across providers,
 so the model id is the only thing that changes when moving between them. The
 test's fake client raises if `InvokeModel` is called at all.
 
+### DynamoDB has no float type
+
+A run died on its **first step**, after the retrieval and the agent turn had
+both been paid for:
+
+    Failed DynamoDB put_item for table=... pk=RUN#... sk=STEP#...director:
+    Float types are not supported. Use Decimal types instead.
+
+`_contextweave_context` puts the knowledge layer's `confidence` into the meta
+the worker persists as `inputs_json.rag_meta`, and boto3's DynamoDB resource
+refuses a float outright. One value, nested two levels down in a telemetry
+field, took out the whole pipeline.
+
+Converting it at that call site would have been the wrong fix. What this DAO
+writes is not a fixed set of fields — `inputs_json` and `output_json` carry
+whatever the retrieval layer and the agents produced — so any agent answering
+with a score, a ratio or a temperature would have failed identically, at a
+different step, on a different day. `DbDao._to_dynamo_numbers` walks the whole
+item in `_safe_put`, which every write in the DAO already funnels through;
+`tests/test_dynamo_number_types.py` holds that chokepoint with an AST check,
+because a new method calling `self.table.put_item` directly would be the whole
+defect back.
+
+Three details the conversion has to get right, each of which trades this
+failure for a later one:
+
+- **`Decimal(str(x))`, not `Decimal(x)`.** The latter takes the full binary
+  expansion — `Decimal(0.1)` is 55 significant digits and DynamoDB accepts 38.
+  Rounding to 8 d.p. matches `mcp_observatory._to_decimal`, so the platform
+  stores numbers one way.
+- **Non-finite floats are kept as strings.** `json.loads` accepts `NaN` and
+  `Infinity` by default, so an agent's output can carry one, and
+  `Decimal("NaN")` is refused by the same serializer with a different message.
+  Dropping the key would lose the one value that explains what went wrong.
+- **`bool` is not a float.** A conversion written against
+  `isinstance(x, (int, float))` would store `cache_hit` as `0`.
+
+The tests' fake table serialises with boto3's **real** `TypeSerializer` rather
+than a hand-written rule about which values it rejects. That is the component
+that raised in production; a fake written from recollection of its behaviour
+agrees with whatever the code does, which is how the existing Step Functions
+fake hid the `run_id` defect.
+
+Nothing reads these step records back today (`get_run` has no caller), so the
+`Decimal` reaches no HTTP response. When one appears, note that both handlers
+serialise with `json.dumps(..., default=str)` — which renders a `Decimal` as a
+JSON *string*, not a number.
+
 ### Async Execution
 Every run is async: `POST /team/task` returns a `run_id`, then poll `GET /team/task/{run_id}` until `SUCCEEDED` or `FAILED`.
 
