@@ -16,6 +16,7 @@ env:
   STACK_NAME: tarun-content-team
   SHARED_STACK_NAME: tarun-teamweave-shared
   BEDROCK_AGENTS_STACK_NAME: tarun-bedrock-agents
+  CONTEXTWEAVE_STACK_NAME: contextweave-rag-prod
   FOUNDATION_MODEL_ID: amazon.nova-micro-v1:0
   AGENT_SERVICE_ROLE_ARN: arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
   TEAM_CONFIG_PREFIX: teams
@@ -411,30 +412,26 @@ jobs:
           # So this must resolve, and it must resolve here rather than at
           # smoke-test time where the cause would be three layers away.
           #
-          # Resolved from ContextWeave's own stack output, never hardcoded:
-          # its samconfig and its CLAUDE.md disagree on the stack name, so
-          # both candidates are tried and whichever exists wins.
-          CONTEXTWEAVE_URL=""
-          for cw_stack in contextweave-rag-dev expertise-rag-dev; do
-            CONTEXTWEAVE_URL=$(aws cloudformation describe-stacks \
-              --stack-name "${cw_stack}" \
-              --region "${AWS_REGION}" \
-              --query "Stacks[0].Outputs[?OutputKey=='APIEndpoint'].OutputValue" \
-              --output text 2>/dev/null || true)
-            [ "${CONTEXTWEAVE_URL}" = "None" ] && CONTEXTWEAVE_URL=""
-            if [ -n "${CONTEXTWEAVE_URL}" ]; then
-              echo "ContextWeave URL from ${cw_stack}: ${CONTEXTWEAVE_URL}"
-              break
-            fi
-          done
+          # Read from ContextWeave's own APIEndpoint output, never hardcoded.
+          # One named stack rather than a list of candidates: falling back to
+          # a dev stack when prod is missing would point the live pipeline at
+          # a different knowledge layer and still report success, which is the
+          # same silent-wrong-source failure this whole section is about.
+          CONTEXTWEAVE_URL=$(aws cloudformation describe-stacks \
+            --stack-name "${CONTEXTWEAVE_STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='APIEndpoint'].OutputValue" \
+            --output text 2>/dev/null || true)
+          [ "${CONTEXTWEAVE_URL}" = "None" ] && CONTEXTWEAVE_URL=""
           if [ -z "${CONTEXTWEAVE_URL}" ]; then
-            echo "::error::No ContextWeave APIEndpoint output found in any of: \
-          contextweave-rag-dev, expertise-rag-dev. The visibility team declares \
-          rag.mode=contextweave, so every run would be refused at config load. \
-          Deploy ContextWeave first, or set globals.rag.mode back to a mode this \
-          stack can serve." >&2
+            # stdout, not stderr: GitHub parses workflow commands from stdout
+            # only, so an annotation written to stderr renders nowhere and is
+            # readable only by paging the job log. One line, because that is
+            # what an annotation is.
+            echo "::error::No APIEndpoint output on stack ${CONTEXTWEAVE_STACK_NAME}. The visibility team declares rag.mode=contextweave, so every run would be refused at config load. Deploy ContextWeave, correct CONTEXTWEAVE_STACK_NAME, or set globals.rag.mode to a mode this stack can serve."
             exit 1
           fi
+          echo "ContextWeave URL from ${CONTEXTWEAVE_STACK_NAME}: ${CONTEXTWEAVE_URL}"
           PARAM_OVERRIDES+=("ContextWeaveUrl=${CONTEXTWEAVE_URL}")
           [ -n "${LAMBDA_SUBNET_IDS}" ]            && PARAM_OVERRIDES+=("LambdaSubnetIds=${LAMBDA_SUBNET_IDS}")
           [ -n "${S3_VPCE_ID}" ]                   && PARAM_OVERRIDES+=("S3VpcEndpointId=${S3_VPCE_ID}")
