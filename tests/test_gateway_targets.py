@@ -281,8 +281,15 @@ class TestTheResolutionLoopRuns:
             + 'if [ ${#PARAM_OVERRIDES[@]} -gt 0 ]; then printf "%s\\n" "${PARAM_OVERRIDES[@]}"; fi\n'
         )
 
-    def _run(self, tmp_path, describe: dict, listing: str = ""):
-        """describe: stack name -> describe-stacks JSON. Absent = no such stack."""
+    def _run(self, tmp_path, describe: dict, listing: str = "", probe_exit: int = 0):
+        """describe: stack name -> describe-stacks JSON. Absent = no such stack.
+
+        probe_exit is what the MCP handshake check reports: 0 ok, 1 refused,
+        2 unverified. The real script is replaced by a stub and the loop runs
+        with tmp_path as its working directory, so what is exercised here is
+        the loop's branching on that outcome -- the script's own behaviour is
+        covered by tests/test_mcp_handshake.py.
+        """
         import json as _json
         import os
         import shutil
@@ -316,11 +323,20 @@ class TestTheResolutionLoopRuns:
         )
         (bindir / "aws").chmod(0o755)
 
+        probe_dir = tmp_path / "scripts"
+        probe_dir.mkdir(exist_ok=True)
+        (probe_dir / "mcp_handshake.py").write_text(
+            "import sys\n"
+            f"print('probe stub ->', ' '.join(sys.argv[1:]))\n"
+            f"sys.exit({probe_exit})\n"
+        )
+
         script = tmp_path / "loop.sh"
         script.write_text(self._loop_source())
         env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
         proc = subprocess.run(
-            ["bash", str(script)], capture_output=True, text=True, env=env, timeout=120
+            ["bash", str(script)], capture_output=True, text=True, env=env,
+            timeout=120, cwd=str(tmp_path),
         )
         out = proc.stdout
         params = out.split("---PARAMS---", 1)[1].split() if "---PARAMS---" in out else []
@@ -398,6 +414,23 @@ class TestTheResolutionLoopRuns:
         assert proc.returncode == 0, proc.stderr
         assert params == []
         assert "infrastructure for nothing" in out
+
+    def test_a_sibling_that_refuses_the_handshake_is_not_wired(self, tmp_path):
+        """The failure that rolls the stack back. AgentCore handshakes the
+        server while creating the target, so a refusal is not a missing tool --
+        it is a CloudFormation failure that takes every other target with it."""
+        proc, out, params = self._run(tmp_path, self.ALL_GOOD, probe_exit=1)
+        assert params == [], params
+        assert "handshake refused" in out
+        assert "not lose a tool" in out
+        assert proc.returncode == 0, "refusing a target must not fail the deploy step"
+
+    def test_an_unverified_handshake_still_wires_the_target(self, tmp_path):
+        """A probe from CI is weak evidence about a call the Gateway makes with
+        its own identity. Dropping a working tool on it would be the silent
+        failure; letting it through means CloudFormation says so."""
+        _proc, _out, params = self._run(tmp_path, self.ALL_GOOD, probe_exit=2)
+        assert len(params) == 4, params
 
     @pytest.mark.parametrize("case", ["none", "all", "partial"])
     def test_the_loop_never_fails_the_deploy(self, tmp_path, case):

@@ -508,6 +508,22 @@ jobs:
 
             if [ -n "${mcp_url}" ]; then
               mcp_url="${mcp_url%/}${mcp_suffix}"
+
+              # Resolving the URL is not enough. AgentCore handshakes the
+              # server while *creating* the target, so a server that refuses
+              # the MCP handshake fails CloudFormation and rolls the whole
+              # stack back -- the opposite of the "one tool fewer" degradation
+              # everything else here is built for. Exit 1 means the server
+              # answered with a revision it prefers over ours, which is the
+              # refusal the Gateway acts on; exit 2 means the probe could not
+              # tell, and wires it anyway (see the script).
+              python scripts/mcp_handshake.py "${mcp_url}" --name "${mcp_param%McpEndpoint}"
+              mcp_probe=$?
+              if [ ${mcp_probe} -eq 1 ]; then
+                MCP_MISSING+=("${mcp_param%McpEndpoint} (MCP handshake refused; wiring it would fail the stack, not lose a tool)")
+                continue
+              fi
+
               PARAM_OVERRIDES+=("${mcp_param}=${mcp_url}")
               MCP_WIRED+=("${mcp_param%McpEndpoint}")
             else
