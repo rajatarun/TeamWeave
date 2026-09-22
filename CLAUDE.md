@@ -440,6 +440,42 @@ So `scripts/register_agents.py` creates only **release-channel** endpoints —
 count no longer grows with the agent count, and a full quota is a real signal
 rather than an expected outcome.
 
+### The tool gateway — which weave systems agents can call
+
+The AgentCore gateway existed with **nothing behind it**. One
+`AWS::BedrockAgentCore::GatewayTarget` was declared, gated on a
+`ScreenWeaveMcpEndpoint` parameter that defaulted to empty and that the deploy
+never passed — so the condition was false on every deploy, the target was
+created on none, and the gateway was infrastructure for nothing. Nothing
+failed: an unset parameter is not an error, a false condition is not an error,
+and a gateway with zero targets deploys green. The same shape as the A2A card
+that served `"skills": []`.
+
+**Only an HTTP MCP server can be a target.** `TargetConfiguration.Mcp.McpServer`
+requires an `Endpoint`, so a stdio server has nothing to point at. Four
+siblings qualify — ScreenWeave, CipherWeave, DataDictionary and ToolWeave, each
+serving `mcp.http_app(stateless_http=True)` at `/mcp`. **DeployWeave is absent
+on purpose**: it calls `mcp.run()` with no transport, which is stdio, and a
+target for it could never resolve.
+
+Each target is gated on **its own** parameter, not a shared one. A single
+condition would mean one unreachable sibling silently taking the other three
+down with it, and a sibling that has not been deployed yet is not a broken
+platform — it simply contributes no tool. So the deploy resolves each endpoint
+from that sibling's own stack output, warns by name for the ones it could not
+find, warns again if it found none at all, and never exits non-zero. That is
+the opposite of the ContextWeave URL, which a declared RAG mode makes
+mandatory and which therefore fails the step.
+
+`tests/test_gateway_targets.py` holds the two halves to each other in **both**
+directions, because each is invisible from the other side: every declared MCP
+parameter must have a target that reads it and a condition that gates on it,
+and every parameter the workflow passes must be one the template declares —
+`sam deploy` rejects an unknown override, but only on a run where that
+sibling's stack actually resolves, so the mismatch deploys green until the day
+it does not. It also checks no two targets share a condition, which is the
+regression that would restore the original defect.
+
 ### A2A — how the rest of the platform reaches these agents
 
 [A2A](https://github.com/a2aproject/A2A) reached 1.0.0 in January 2026 under

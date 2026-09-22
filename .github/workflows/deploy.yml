@@ -433,6 +433,56 @@ jobs:
           fi
           echo "ContextWeave URL from ${CONTEXTWEAVE_STACK_NAME}: ${CONTEXTWEAVE_URL}"
           PARAM_OVERRIDES+=("ContextWeaveUrl=${CONTEXTWEAVE_URL}")
+
+          # The weave systems that are MCP servers, as AgentCore Gateway
+          # targets. Resolved from each sibling's own stack output, never
+          # hardcoded -- same rule as the ContextWeave URL above.
+          #
+          # Optional, unlike that one: a missing sibling means one tool fewer,
+          # not a run that cannot start, so these warn rather than fail. They
+          # are never silent either -- the gateway existed with a target
+          # gated on a parameter nothing passed, so it had nothing behind it
+          # and no signal said so.
+          #
+          # `stack:output:suffix` -- ScreenWeave already publishes the /mcp
+          # path in its output; the others publish a base URL, and
+          # ToolWeave's own DataDictionary client shows the convention
+          # (base.rstrip("/") + "/mcp").
+          MCP_WIRED=()
+          MCP_MISSING=()
+          for spec in \
+            "screenweave-prod:McpEndpoint::ScreenWeaveMcpEndpoint" \
+            "cipherweave-prod:CipherWeaveApiEndpoint:/mcp:CipherWeaveMcpEndpoint" \
+            "data-dictionary-mcp:DataDictionaryFunctionUrl:/mcp:DataDictionaryMcpEndpoint" \
+            "toolweave:ToolWeaveApiEndpoint:/mcp:ToolWeaveMcpEndpoint"; do
+            mcp_stack="${spec%%:*}"; rest="${spec#*:}"
+            mcp_output="${rest%%:*}"; rest="${rest#*:}"
+            mcp_suffix="${rest%%:*}"; mcp_param="${rest#*:}"
+
+            mcp_url=$(aws cloudformation describe-stacks \
+              --stack-name "${mcp_stack}" \
+              --region "${AWS_REGION}" \
+              --query "Stacks[0].Outputs[?OutputKey=='${mcp_output}'].OutputValue" \
+              --output text 2>/dev/null || true)
+            [ "${mcp_url}" = "None" ] && mcp_url=""
+
+            if [ -n "${mcp_url}" ]; then
+              mcp_url="${mcp_url%/}${mcp_suffix}"
+              PARAM_OVERRIDES+=("${mcp_param}=${mcp_url}")
+              MCP_WIRED+=("${mcp_param%McpEndpoint}")
+            else
+              MCP_MISSING+=("${mcp_param%McpEndpoint} (${mcp_stack}.${mcp_output})")
+            fi
+          done
+
+          if [ ${#MCP_WIRED[@]} -gt 0 ]; then
+            echo "::notice::Gateway targets wired: ${MCP_WIRED[*]}"
+          else
+            echo "::warning::No MCP gateway targets resolved. The AgentCore gateway will be created with nothing behind it, which is infrastructure for nothing."
+          fi
+          if [ ${#MCP_MISSING[@]} -gt 0 ]; then
+            echo "::warning::No MCP endpoint found for: ${MCP_MISSING[*]}. Those tools are simply absent from the gateway; deploy the sibling to add one."
+          fi
           [ -n "${LAMBDA_SUBNET_IDS}" ]            && PARAM_OVERRIDES+=("LambdaSubnetIds=${LAMBDA_SUBNET_IDS}")
           [ -n "${S3_VPCE_ID}" ]                   && PARAM_OVERRIDES+=("S3VpcEndpointId=${S3_VPCE_ID}")
           [ -n "${DYNAMODB_VPCE_ID}" ]             && PARAM_OVERRIDES+=("DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}")
