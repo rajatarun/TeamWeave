@@ -467,7 +467,34 @@ find, warns again if it found none at all, and never exits non-zero. That is
 the opposite of the ContextWeave URL, which a declared RAG mode makes
 mandatory and which therefore fails the step.
 
-`tests/test_gateway_targets.py` holds the two halves to each other in **both**
+**Each sibling's stack name is the one thing here nothing can derive.** Two of
+the four were guessed wrong and the gateway came up with two targets instead
+of four. The names share no convention, because each sibling's own deploy
+chose it:
+
+| Target | Stack | Why that name |
+|---|---|---|
+| ScreenWeave | `screenweave-dev` | `deploy.sh` defaults `ENV=dev`, and there is no CI workflow to override it |
+| CipherWeave | `cipherweave-prod` | workflow: `cipherweave-${{ inputs.stage \|\| 'prod' }}` |
+| DataDictionary | `data-dictionary-mcp-prod` | workflow: `data-dictionary-mcp-${STAGE:-prod}`; its samconfig's unsuffixed name is the *local* default, not what CI deploys |
+| ToolWeave | `toolweave` | samconfig, unsuffixed |
+
+A wrong name and an undeployed sibling are indistinguishable from here — both
+resolve to nothing, both warn, neither fails — so the wrong guess cost a round
+trip through a human. The deploy now separates the two failures that used to
+read alike: a stack that **does not exist** (wrong name, or not deployed) is
+reported with the stacks that do exist and look close (`no stack
+'screenweave-prod'; found: screenweave-dev` — the answer, in the log), while a
+stack that exists but **publishes no such output** is reported with the keys it
+does publish. One is fixed in this repository, the other in the sibling's
+template.
+
+`tests/test_gateway_targets.py` extracts that resolution loop and **runs it**
+under bash against a fake `aws`, rather than only reading the workflow as text.
+A structural assertion that the right strings appear passed happily on a
+version whose missing-stack branch had been made dead, and on one that wired
+all four targets while logging "infrastructure for nothing". It also holds the
+two halves to each other in **both**
 directions, because each is invisible from the other side: every declared MCP
 parameter must have a target that reads it and a condition that gates on it,
 and every parameter the workflow passes must be one the template declares —
