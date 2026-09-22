@@ -522,8 +522,14 @@ jobs:
               # answered with a revision it prefers over ours, which is the
               # refusal the Gateway acts on; exit 2 means the probe could not
               # tell, and wires it anyway (see the script).
-              python "${REPO_ROOT}/scripts/mcp_handshake.py" "${mcp_url}" --name "${mcp_param%McpEndpoint}"
-              mcp_probe=$?
+              # `|| mcp_probe=$?` rather than reading $? on the next line:
+              # the step runs under `bash -e`, so a bare command returning
+              # non-zero ends the script before anything can inspect it. The
+              # probe reports its outcome *as* its exit code, so every run
+              # that was not `ok` killed the deploy -- including the
+              # `unverified` case that exists precisely not to.
+              mcp_probe=0
+              python "${REPO_ROOT}/scripts/mcp_handshake.py" "${mcp_url}" --name "${mcp_param%McpEndpoint}" || mcp_probe=$?
               if [ ${mcp_probe} -eq 1 ]; then
                 MCP_MISSING+=("${mcp_param%McpEndpoint} (MCP handshake refused; wiring it would fail the stack, not lose a tool)")
                 continue
