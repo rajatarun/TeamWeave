@@ -1,0 +1,156 @@
+{
+  "team": {
+    "name": "weave_data_steward",
+    "version": "v1",
+    "owner": "Tarun Raja"
+  },
+  "globals": {
+    "north_star": "Before a new term is invented, find out whether the platform already has one \u2014 and how it must be protected.",
+    "default_channel": "internal",
+    "hard_constraints": [
+      "Never propose a term without stating what the search returned.",
+      "A handling decision must say whether it came from CipherWeave or from general knowledge.",
+      "Tool results arrive in STEP_INPUTS_JSON under tool_results. A result carrying `error` means the lookup did not happen -- say so in your output and fall back to general knowledge. Never present a value you did not receive as though a tool returned it.",
+      "This request may be a follow-up. When request.edit_instruction is present, request.previous_output is your own last answer: revise it to satisfy the instruction and change nothing else. Do not start over, and do not drop fields the instruction did not mention."
+    ],
+    "features": {
+      "gemini_research": false,
+      "explicit_rag": false
+    },
+    "rag": {
+      "mode": "none"
+    },
+    "artifact_store": {
+      "artifact_bucket_env": "ARTIFACT_BUCKET",
+      "dynamo_table_env": "DDB_TABLE"
+    },
+    "revision": {
+      "default_jump_to_step": "WDS_cataloguer"
+    }
+  },
+  "agents": [
+    {
+      "id": "WDS_cataloguer",
+      "name": "Catalogue Steward",
+      "role_id": "PBM-001",
+      "department_id": "DEPT-001",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "",
+          "us.amazon.nova-lite-v1:0": "",
+          "us.amazon.nova-pro-v1:0": "",
+          "us.amazon.nova-premier-v1:0": "",
+          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
+      },
+      "goal_template": "DataDictionary was searched for this term and the result is in tool_results.search_data_elements. Decide one thing: does the platform already have a term for what was described? If it does, give its agreed definition and stop -- a second term for the same thing is the problem this step exists to prevent. If it does not, draft a definition that could be proposed. Set catalogue_reachable from whether the lookup carried an error. Tool results arrive in STEP_INPUTS_JSON under tool_results. A result carrying `error` means the lookup did not happen -- say so in your output and fall back to general knowledge. Never present a value you did not receive as though a tool returned it.",
+      "schema_ref": "term_decision_v1"
+    },
+    {
+      "id": "WDS_protector",
+      "name": "Data Handling Advisor",
+      "role_id": "PBM-003",
+      "department_id": "DEPT-003",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "",
+          "us.amazon.nova-lite-v1:0": "",
+          "us.amazon.nova-pro-v1:0": "",
+          "us.amazon.nova-premier-v1:0": "",
+          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
+      },
+      "goal_template": "Given the term decided above, say how this data must be stored and moved. CipherWeave's standing policy is in tool_results.encryption_strategy. Set policy_source to 'cipherweave' only if that lookup returned a policy; if it carried an error, answer from general practice and set 'general_knowledge' -- a recalled policy presented as the platform's own is worse than no answer. Tool results arrive in STEP_INPUTS_JSON under tool_results. A result carrying `error` means the lookup did not happen -- say so in your output and fall back to general knowledge. Never present a value you did not receive as though a tool returned it.",
+      "schema_ref": "handling_decision_v1"
+    }
+  ],
+  "workflow": [
+    {
+      "step": "WDS_cataloguer",
+      "pre_tools": [
+        {
+          "name": "search_data_elements",
+          "args": {
+            "source_key": "request.describes",
+            "output_key": "query"
+          }
+        }
+      ],
+      "inputs": [
+        "request"
+      ]
+    },
+    {
+      "step": "WDS_protector",
+      "pre_tools": [
+        {
+          "name": "encryption_strategy",
+          "args": {
+            "source_key": "request.element_name",
+            "output_key": "dataElement"
+          }
+        }
+      ],
+      "inputs": [
+        "request",
+        "WDS_cataloguer.output"
+      ]
+    }
+  ],
+  "schemas": {
+    "term_decision_v1": {
+      "path": "config/examples/schemas/term_decision_v1.json"
+    },
+    "handling_decision_v1": {
+      "path": "config/examples/schemas/handling_decision_v1.json"
+    }
+  },
+  "request_schema": {
+    "summary": "Describe a piece of data. You get back whether the platform already names it, and how it must be protected. Follow-up turns in the same chat revise the last answer rather than starting over.",
+    "fields": [
+      {
+        "name": "describes",
+        "label": "Describe the data",
+        "type": "text",
+        "required": true,
+        "placeholder": "e.g. the wallet address a session was signed with"
+      },
+      {
+        "name": "element_name",
+        "label": "Element name (if you have one)",
+        "type": "text",
+        "required": false,
+        "placeholder": "e.g. wallet_address"
+      },
+      {
+        "name": "edit_instruction",
+        "label": "Change to make",
+        "type": "text",
+        "required": false,
+        "placeholder": "Only on a follow-up turn \u2014 what to change about the last answer"
+      },
+      {
+        "name": "previous_output",
+        "label": "Previous answer",
+        "type": "hidden",
+        "required": false
+      },
+      {
+        "name": "previous_run_id",
+        "label": "Previous run",
+        "type": "hidden",
+        "required": false
+      }
+    ]
+  }
+}

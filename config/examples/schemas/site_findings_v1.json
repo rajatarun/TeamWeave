@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "site_findings_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "url": {
+      "type": "string"
+    },
+    "crawled": {
+      "type": "boolean"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "evidence_source": {
+      "type": "string",
+      "enum": [
+        "crawl",
+        "not_available"
+      ]
+    }
+  },
+  "required": [
+    "url",
+    "crawled",
+    "summary",
+    "evidence_source"
+  ]
+}

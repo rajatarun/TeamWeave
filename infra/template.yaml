@@ -340,12 +340,24 @@ Globals:
         AGENTCORE_TEAM_RUNTIME_ARNS: !If
           - AgentCoreEnabled
           - !Sub
-            - '{"tarun_visibility_team":"${ArnTarunVisibilityTeam}"}'
+            - '{"tarun_visibility_team":"${ArnTarunVisibilityTeam}","weave_api_caller":"${ArnWeaveApiCaller}","weave_data_steward":"${ArnWeaveDataSteward}","weave_site_auditor":"${ArnWeaveSiteAuditor}"}'
             - ArnTarunVisibilityTeam: !GetAtt AgentCoreRuntimeTarunVisibilityTeam.AgentRuntimeArn
+              ArnWeaveApiCaller: !GetAtt AgentCoreRuntimeWeaveApiCaller.AgentRuntimeArn
+              ArnWeaveDataSteward: !GetAtt AgentCoreRuntimeWeaveDataSteward.AgentRuntimeArn
+              ArnWeaveSiteAuditor: !GetAtt AgentCoreRuntimeWeaveSiteAuditor.AgentRuntimeArn
           - "{}"
         # Route all AWS SDK calls through dual-stack endpoints so boto3 resolves
         # {service}.{region}.api.aws (returns AAAA records). Lambda ENIs with IPv6
         # addresses send this traffic via the Egress-Only Internet Gateway.
+        # Weave sibling MCP endpoints, read by src/orchestrator/mcp_client.py.
+        # The same parameters the gateway targets are gated on: one resolved
+        # URL per sibling, not a second copy that can drift. Empty when that
+        # sibling did not resolve, which the tool reports as an error in the
+        # step's inputs rather than as a silent absence.
+        SCREENWEAVE_MCP_URL: !Ref ScreenWeaveMcpEndpoint
+        CIPHERWEAVE_MCP_URL: !Ref CipherWeaveMcpEndpoint
+        DATADICTIONARY_MCP_URL: !Ref DataDictionaryMcpEndpoint
+        TOOLWEAVE_MCP_URL: !Ref ToolWeaveMcpEndpoint
         AWS_USE_DUALSTACK_ENDPOINT: "true"
         # Explicit dual-stack endpoint for Step Functions so boto3 resolves
         # AAAA records and connects via the Egress-Only Internet Gateway.
@@ -2252,6 +2264,72 @@ Resources:
         AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
         # Which team's runtime this is, for the program's own logs and spans.
         AGENT_TEAM: "tarun_visibility_team"
+
+  AgentCoreRuntimeWeaveApiCaller:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: AgentCoreEnabled
+    Properties:
+      AgentRuntimeName: "teamweave_weave_api_caller"
+      Description: "AgentCore runtime serving every agent of weave_api_caller."
+      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Code:
+            S3:
+              Bucket: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+              Prefix: !Ref AgentCoreRuntimeCodePrefix
+          Runtime: PYTHON_3_12
+          EntryPoint:
+            - app.py
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      EnvironmentVariables:
+        AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
+        AGENT_TEAM: "weave_api_caller"
+
+  AgentCoreRuntimeWeaveDataSteward:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: AgentCoreEnabled
+    Properties:
+      AgentRuntimeName: "teamweave_weave_data_steward"
+      Description: "AgentCore runtime serving every agent of weave_data_steward."
+      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Code:
+            S3:
+              Bucket: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+              Prefix: !Ref AgentCoreRuntimeCodePrefix
+          Runtime: PYTHON_3_12
+          EntryPoint:
+            - app.py
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      EnvironmentVariables:
+        AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
+        AGENT_TEAM: "weave_data_steward"
+
+  AgentCoreRuntimeWeaveSiteAuditor:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: AgentCoreEnabled
+    Properties:
+      AgentRuntimeName: "teamweave_weave_site_auditor"
+      Description: "AgentCore runtime serving every agent of weave_site_auditor."
+      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Code:
+            S3:
+              Bucket: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+              Prefix: !Ref AgentCoreRuntimeCodePrefix
+          Runtime: PYTHON_3_12
+          EntryPoint:
+            - app.py
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      EnvironmentVariables:
+        AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
+        AGENT_TEAM: "weave_site_auditor"
 
   # ── AgentCore Gateway ──────────────────────────────────────────────────────
   # Managed tool access for agents. AWS_IAM rather than CUSTOM_JWT: the

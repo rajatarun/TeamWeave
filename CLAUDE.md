@@ -587,6 +587,74 @@ sibling's stack actually resolves, so the mismatch deploys green until the day
 it does not. It also checks no two targets share a condition, which is the
 regression that would restore the original defect.
 
+### Teams that use the siblings' tools
+
+**The gateway is not the path, and cannot be yet.** `src/agentcore/agent.py`
+builds a Converse request with no `toolConfig`, so an agent turn cannot invoke
+a `GatewayTarget` at all — the four targets are preparation. A team config
+declaring a gateway tool today would be dead config of exactly the shape this
+file keeps recording.
+
+What executes is `tool_registry`: deterministic Python before or after a turn.
+`src/orchestrator/mcp_client.py` speaks MCP over HTTP to a sibling, and
+`src/orchestrator/tools/weave_tools.py` wraps one sibling tool per rule. So a
+step is **given** a lookup; it cannot **decide** to make one. That is a real
+constraint on team design rather than a detail.
+
+**`tool_rules.py` says when each tool applies — and refuses two of them.**
+DataDictionary splits `propose_data_element` → `commit_data_element`, and
+ToolWeave splits `pre_tool` → `commit_api_call`, each returning a token the
+second call needs. That design exists so an unattended caller cannot mutate a
+catalogue or fire a real REST call on its own reading of a prompt, and a
+pipeline step is precisely that caller. `effect: "commit"` tools are therefore
+**refused in `execute_tool`**, by name, and are absent from `TOOL_REGISTRY` —
+two barriers, because removing one must not silently open the path. The refusal
+`raise`s rather than logging and skipping: `execute_pre_tools` swallows tool
+failures so one bad lookup cannot lose a run, and a *skipped* commit would
+report success for work never done.
+
+`propose` is allowed, and is the useful half: a run drafts the entry or the
+call and hands a person the token.
+
+| Team | Members | Siblings | What it answers |
+|---|---|---|---|
+| `weave_api_caller` | 2 | ToolWeave | prose → one reviewable API call, never fired |
+| `weave_data_steward` | 2 | DataDictionary, CipherWeave | does a term exist, and how must it be protected |
+| `weave_site_auditor` | 2 | ScreenWeave | what a page really contains, then a fix list |
+
+Two members each, distinct goals and distinct output schemas — a test fails two
+agents that share either, because that is one agent and a wasted model call.
+One worker invocation runs every step inside a 900 s Lambda, so short teams are
+what the ceiling affords as well as what was asked for. `crawl_site` caps depth
+and breadth in code rather than in config for the same reason.
+
+Every tooled agent is told what a failed lookup looks like: a result carrying
+`error` means the lookup did not happen, and an agent that cannot tell that from
+an empty one fills the blank in — the failure `NO_VERIFIED_EXPERIENCE` exists to
+stop, in a second place.
+
+### A conversation is a series of runs
+
+The run page takes follow-up edits. It is **not** a resumed pipeline: nothing in
+the worker reads `default_jump_to_step`, so there is no partial re-entry to ask
+for. Each follow-up is a whole new run carrying the previous answer and the
+edit, and the thread lives on the page. The UI says so rather than implying an
+edit is cheaper than a run, because it is not.
+
+`request_schema` gained a `hidden` field type for the continuation state —
+`previous_output`, `previous_run_id` — which the page carries and nobody types.
+Declared rather than smuggled in as undeclared extras, so the "a config that
+reads `request.X` must declare `X`" rule still covers them; the UI is required
+to skip rendering them, and a hidden field may not be `required`, or a first
+turn could never submit.
+
+The page offers the composer only to a team that **declares**
+`edit_instruction`. A team whose agents were never told what an edit is would
+receive one and ignore it, and the box would silently re-run the same request.
+A follow-up also revises the last **succeeded** turn, not the last turn: a
+failed run has no answer, and sending its absence would ask the team to revise
+nothing and quietly produce a fresh first draft.
+
 ### A2A — how the rest of the platform reaches these agents
 
 [A2A](https://github.com/a2aproject/A2A) reached 1.0.0 in January 2026 under

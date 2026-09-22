@@ -40,6 +40,17 @@ from .tools.content_tools import (
     measure_post_quality,
 )
 from .tools.document_tools import parse_document, reconstruct_document
+from .tools.weave_tools import (
+    crawl_site,
+    data_elements_for_context,
+    encryption_strategy,
+    lookup_data_element,
+    plan_api_call,
+    propose_data_element,
+    search_data_elements,
+    site_metrics,
+)
+from .tool_rules import is_refused, refusal_message
 
 log = get_logger("tool_registry")
 
@@ -58,6 +69,18 @@ TOOL_REGISTRY: Dict[str, Callable[..., Any]] = {
     "measure_post_quality": measure_post_quality,
     "format_distribution_checklist": format_distribution_checklist,
     "format_approval_decision": format_approval_decision,
+    # Weave sibling tools, over MCP. Every one has a rule in tool_rules.RULES
+    # saying when a step should reach for it; the commit halves of the
+    # two-phase siblings are deliberately absent from this map *and* refused
+    # below, so neither a typo nor a later import can reintroduce them.
+    "lookup_data_element": lookup_data_element,
+    "search_data_elements": search_data_elements,
+    "data_elements_for_context": data_elements_for_context,
+    "propose_data_element": propose_data_element,
+    "encryption_strategy": encryption_strategy,
+    "crawl_site": crawl_site,
+    "site_metrics": site_metrics,
+    "plan_api_call": plan_api_call,
 }
 
 
@@ -137,6 +160,12 @@ def execute_tool(name: str, args: Dict[str, Any]) -> Any:
 
     Raises KeyError if the tool is not registered.
     """
+    if is_refused(name):
+        # Raised, not logged and skipped. execute_pre_tools swallows tool
+        # failures so one bad lookup cannot lose a run -- but a step that asked
+        # to commit and quietly did not would report success for work it never
+        # did, which is worse than the run failing here.
+        raise PermissionError(refusal_message(name))
     if name not in TOOL_REGISTRY:
         raise KeyError(f"Tool '{name}' is not registered. Available: {list(TOOL_REGISTRY)}")
     fn = TOOL_REGISTRY[name]
