@@ -467,6 +467,44 @@ find, warns again if it found none at all, and never exits non-zero. That is
 the opposite of the ContextWeave URL, which a declared RAG mode makes
 mandatory and which therefore fails the step.
 
+**Resolving a URL is not enough, and "one tool fewer" was not true.** AgentCore
+handshakes the MCP server while *creating* the target, so a server that refuses
+the handshake does not produce a missing tool — it produces
+
+    GatewayTarget ... failed to stabilize, status: FAILED, reason: Failed to
+    connect and fetch tools from the provided MCP target server.
+    Error - Unsupported protocol version
+
+and CloudFormation rolls the **whole stack** back. One sibling's bug takes the
+platform's deploy with it, which is the exact opposite of the degradation the
+per-target conditions are for. ScreenWeave's hand-rolled MCP Lambda answered
+`initialize` with a hardcoded `2024-11-05` whatever the client asked for, and
+did this on the first deploy that ever reached it — the earlier deploys could
+not, because its stack name was wrong.
+
+`scripts/mcp_handshake.py` closes that gap by asking the endpoint before the
+parameter is passed. The check is the MCP handshake rule itself, so it needs no
+knowledge of what AgentCore requires: a server that supports the requested
+revision echoes it, and one that answers with a *different* version is saying
+it does not speak ours. Three outcomes, and the middle one is the point:
+
+| Outcome | Meaning | Action |
+|---|---|---|
+| `ok` | echoed the requested revision | wire the target |
+| `refused` | answered with another revision | skip it, naming both versions |
+| `unverified` | no answer, or one it could not read | **wire it anyway** |
+
+`unverified` deliberately does not skip. The probe runs unauthenticated from a
+CI runner while the Gateway calls with its own identity from its own network,
+so a probe failure is weak evidence about the Gateway. Dropping a working tool
+on it would be the silent-missing-tool failure this repository keeps hitting;
+letting it through means CloudFormation says so, loudly, in a message whose
+cause is now known.
+
+Two shapes matter and both are handled: an MCP server over HTTP may answer
+`initialize` as plain JSON or as an SSE `data:` frame, and a check reading only
+one would report every streaming server as unverified and wire it blind.
+
 **Each sibling's stack name is the one thing here nothing can derive.** Two of
 the four were guessed wrong and the gateway came up with two targets instead
 of four. The names share no convention, because each sibling's own deploy
