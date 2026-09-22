@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "short_post_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "post": {
+      "type": "string"
+    },
+    "char_count": {
+      "type": "integer"
+    },
+    "first_line": {
+      "type": "string"
+    },
+    "personal_claims_made": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "needs_source": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "post",
+    "first_line"
+  ]
+}

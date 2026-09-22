@@ -1,0 +1,139 @@
+{
+  "team": {
+    "name": "health_prep",
+    "version": "v1",
+    "owner": "Tarun Raja"
+  },
+  "globals": {
+    "north_star": "Turn what you are experiencing into a clinician's appointment that is not wasted.",
+    "default_channel": "personal",
+    "hard_constraints": [
+      "Never diagnose. Never name a condition as the cause. Never suggest a medicine, a dose, or stopping one.",
+      "This prepares a person to be seen; it does not substitute for being seen. Say so in every answer.",
+      "If anything reported could be an emergency, set seek_care_now and lead with it. Preparing questions for next week is the wrong answer to a symptom that needs today.",
+      "Report only what the person said. An inferred symptom becomes a fact in a consulting room.",
+      "This request may be a follow-up. When request.edit_instruction is present, request.previous_output is your own last answer: revise it to satisfy the instruction and change nothing else. Do not start over, and do not drop fields the instruction did not mention."
+    ],
+    "features": {
+      "gemini_research": false,
+      "explicit_rag": false
+    },
+    "rag": {
+      "mode": "none"
+    },
+    "artifact_store": {
+      "artifact_bucket_env": "ARTIFACT_BUCKET",
+      "dynamo_table_env": "DDB_TABLE"
+    },
+    "revision": {
+      "default_jump_to_step": "HP_log"
+    }
+  },
+  "agents": [
+    {
+      "id": "HP_log",
+      "name": "Symptom Log",
+      "role_id": "PBM-001",
+      "department_id": "DEPT-001",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "",
+          "us.amazon.nova-lite-v1:0": "",
+          "us.amazon.nova-pro-v1:0": "",
+          "us.amazon.nova-premier-v1:0": "",
+          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
+      },
+      "goal_template": "Structure exactly what was reported \u2014 what, since when, how often, what changes it \u2014 in the person's own terms. Add nothing they did not say; missing_detail is where a gap goes, not an assumption. Set seek_care_now true when anything reported is the kind of thing that should be seen urgently rather than at a scheduled appointment, and say plainly why. Do not name a cause: that is a clinician's job and guessing at one changes what the person says when they get there.",
+      "schema_ref": "symptom_log_v1"
+    },
+    {
+      "id": "HP_questions",
+      "name": "Appointment Prep",
+      "role_id": "PBM-003",
+      "department_id": "DEPT-003",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "",
+          "us.amazon.nova-lite-v1:0": "",
+          "us.amazon.nova-pro-v1:0": "",
+          "us.amazon.nova-premier-v1:0": "",
+          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
+      },
+      "goal_template": "Write the questions worth asking \u2014 the ones that get a useful answer in ten minutes and the ones people forget to ask. what_to_track_before is what would make the appointment sharper if recorded first. bring_with_you is documents, timelines, previous results. Fill this_is_not_advice with a plain sentence saying this is preparation for a clinician and not a substitute for one. If seek_care_now was set, the first question is how soon they are seen.",
+      "schema_ref": "care_questions_v1"
+    }
+  ],
+  "workflow": [
+    {
+      "step": "HP_log",
+      "inputs": [
+        "request"
+      ]
+    },
+    {
+      "step": "HP_questions",
+      "inputs": [
+        "request",
+        "HP_log.output"
+      ]
+    }
+  ],
+  "schemas": {
+    "symptom_log_v1": {
+      "path": "config/examples/schemas/symptom_log_v1.json"
+    },
+    "care_questions_v1": {
+      "path": "config/examples/schemas/care_questions_v1.json"
+    }
+  },
+  "request_schema": {
+    "summary": "Describe what you are experiencing. You get it structured and a set of questions for a clinician \u2014 never a diagnosis. Follow-up turns in the same chat revise the last answer rather than starting over.",
+    "fields": [
+      {
+        "name": "experiencing",
+        "label": "What is going on",
+        "type": "textarea",
+        "required": true,
+        "placeholder": "What you feel, since when, what makes it better or worse"
+      },
+      {
+        "name": "context",
+        "label": "Anything relevant",
+        "type": "text",
+        "required": false,
+        "placeholder": "e.g. existing conditions, recent changes, what you already tried"
+      },
+      {
+        "name": "edit_instruction",
+        "label": "Change to make",
+        "type": "text",
+        "required": false,
+        "placeholder": "Only on a follow-up \u2014 what to change about the last answer"
+      },
+      {
+        "name": "previous_output",
+        "label": "Previous answer",
+        "type": "hidden",
+        "required": false
+      },
+      {
+        "name": "previous_run_id",
+        "label": "Previous run",
+        "type": "hidden",
+        "required": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,142 @@
+{
+  "team": {
+    "name": "linkedin_quick_post",
+    "version": "v1",
+    "owner": "Tarun Raja"
+  },
+  "globals": {
+    "north_star": "One rough thought to one publishable post \u2014 in two turns, not five.",
+    "default_channel": "personal",
+    "hard_constraints": [
+      "The post is about the idea, not about the author. A reader who has never heard of Tarun must still get something.",
+      "Use experience only where VERIFIED_EXPERIENCE supplies it. With none, write from general expertise and claim no personal involvement \u2014 no projects, employers, metrics or outcomes.",
+      "If the thought is not worth a post, say so and stop. A weak post costs more than no post.",
+      "List every personal claim you made, so the person can check each one before publishing.",
+      "This request may be a follow-up. When request.edit_instruction is present, request.previous_output is your own last answer: revise it to satisfy the instruction and change nothing else. Do not start over, and do not drop fields the instruction did not mention."
+    ],
+    "features": {
+      "gemini_research": false,
+      "explicit_rag": true
+    },
+    "rag": {
+      "mode": "contextweave",
+      "top_k": 6,
+      "min_confidence": 0.5
+    },
+    "artifact_store": {
+      "artifact_bucket_env": "ARTIFACT_BUCKET",
+      "dynamo_table_env": "DDB_TABLE"
+    },
+    "revision": {
+      "default_jump_to_step": "LQP_angle"
+    }
+  },
+  "agents": [
+    {
+      "id": "LQP_angle",
+      "name": "Angle",
+      "role_id": "PBM-003",
+      "department_id": "DEPT-003",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "",
+          "us.amazon.nova-lite-v1:0": "",
+          "us.amazon.nova-pro-v1:0": "",
+          "us.amazon.nova-premier-v1:0": "",
+          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
+      },
+      "goal_template": "Find the one claim in this thought worth someone's attention, and the hook that earns the first line. Set evidence_available from whether VERIFIED_EXPERIENCE actually supports it \u2014 an empty block means nothing relevant was found, which is a real answer and not a blank to fill. If the thought is thin, set not_worth_posting and say why; that is a useful result.",
+      "schema_ref": "post_angle_v1"
+    },
+    {
+      "id": "LQP_writer",
+      "name": "Writer",
+      "role_id": "PBM-006",
+      "department_id": "DEPT-003",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "",
+          "us.amazon.nova-lite-v1:0": "",
+          "us.amazon.nova-pro-v1:0": "",
+          "us.amazon.nova-premier-v1:0": "",
+          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
+      },
+      "goal_template": "Write the post from the angle. Short paragraphs, no hashtag spam, no 'thoughts?' ending. first_line has to work alone \u2014 it is all most people see. Put every personal claim you made into personal_claims_made and anything you could not support into needs_source, so the person checks before publishing rather than after.",
+      "schema_ref": "short_post_v1"
+    }
+  ],
+  "workflow": [
+    {
+      "step": "LQP_angle",
+      "inputs": [
+        "request",
+        "rag_context"
+      ]
+    },
+    {
+      "step": "LQP_writer",
+      "inputs": [
+        "LQP_angle.output",
+        "rag_context"
+      ]
+    }
+  ],
+  "schemas": {
+    "post_angle_v1": {
+      "path": "config/examples/schemas/post_angle_v1.json"
+    },
+    "short_post_v1": {
+      "path": "config/examples/schemas/short_post_v1.json"
+    }
+  },
+  "request_schema": {
+    "summary": "A rough thought becomes a post. Two turns \u2014 use the visibility team when you want the full pipeline. Follow-up turns in the same chat revise the last answer rather than starting over.",
+    "fields": [
+      {
+        "name": "thought",
+        "label": "The rough thought",
+        "type": "textarea",
+        "required": true,
+        "placeholder": "Whatever you'd say out loud about it \u2014 half-formed is the point"
+      },
+      {
+        "name": "audience",
+        "label": "Who should care",
+        "type": "text",
+        "required": false,
+        "placeholder": "e.g. platform engineers on AWS"
+      },
+      {
+        "name": "edit_instruction",
+        "label": "Change to make",
+        "type": "text",
+        "required": false,
+        "placeholder": "Only on a follow-up \u2014 what to change about the last answer"
+      },
+      {
+        "name": "previous_output",
+        "label": "Previous answer",
+        "type": "hidden",
+        "required": false
+      },
+      {
+        "name": "previous_run_id",
+        "label": "Previous run",
+        "type": "hidden",
+        "required": false
+      }
+    ]
+  }
+}

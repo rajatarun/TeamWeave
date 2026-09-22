@@ -1,34 +1,34 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "term_decision_v1",
+  "title": "symptom_log_v1",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "term": {
+    "reported": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "timeline": {
       "type": "string"
     },
-    "exists_in_catalogue": {
+    "seek_care_now": {
       "type": "boolean"
     },
-    "existing_definition": {
+    "seek_care_reason": {
       "type": "string"
     },
-    "proposed_definition": {
-      "type": "string"
-    },
-    "duplicates_considered": {
+    "missing_detail": {
       "type": "array",
       "items": {
         "type": "string"
       }
-    },
-    "catalogue_reachable": {
-      "type": "boolean"
     }
   },
   "required": [
-    "term",
-    "exists_in_catalogue",
-    "catalogue_reachable"
+    "reported",
+    "seek_care_now"
   ]
 }

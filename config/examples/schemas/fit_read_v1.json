@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "fit_read_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "strong_matches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "partial_matches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "real_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "apply",
+        "apply_with_prep",
+        "stretch",
+        "skip"
+      ]
+    },
+    "honesty_note": {
+      "type": "string"
+    },
+    "evidence_source": {
+      "type": "string",
+      "enum": [
+        "verified_experience",
+        "general_only"
+      ]
+    }
+  },
+  "required": [
+    "verdict",
+    "real_gaps",
+    "evidence_source"
+  ]
+}

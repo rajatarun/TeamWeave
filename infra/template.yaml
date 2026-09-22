@@ -340,11 +340,12 @@ Globals:
         AGENTCORE_TEAM_RUNTIME_ARNS: !If
           - AgentCoreEnabled
           - !Sub
-            - '{"tarun_visibility_team":"${ArnTarunVisibilityTeam}","weave_api_caller":"${ArnWeaveApiCaller}","weave_data_steward":"${ArnWeaveDataSteward}","weave_site_auditor":"${ArnWeaveSiteAuditor}"}'
+            - '{"tarun_visibility_team":"${ArnTarunVisibilityTeam}","daily_operator":"${ArnDailyOperator}","linkedin_quick_post":"${ArnLinkedinQuickPost}","job_hunter":"${ArnJobHunter}","health_prep":"${ArnHealthPrep}"}'
             - ArnTarunVisibilityTeam: !GetAtt AgentCoreRuntimeTarunVisibilityTeam.AgentRuntimeArn
-              ArnWeaveApiCaller: !GetAtt AgentCoreRuntimeWeaveApiCaller.AgentRuntimeArn
-              ArnWeaveDataSteward: !GetAtt AgentCoreRuntimeWeaveDataSteward.AgentRuntimeArn
-              ArnWeaveSiteAuditor: !GetAtt AgentCoreRuntimeWeaveSiteAuditor.AgentRuntimeArn
+              ArnDailyOperator: !GetAtt AgentCoreRuntimeDailyOperator.AgentRuntimeArn
+              ArnLinkedinQuickPost: !GetAtt AgentCoreRuntimeLinkedinQuickPost.AgentRuntimeArn
+              ArnJobHunter: !GetAtt AgentCoreRuntimeJobHunter.AgentRuntimeArn
+              ArnHealthPrep: !GetAtt AgentCoreRuntimeHealthPrep.AgentRuntimeArn
           - "{}"
         # Route all AWS SDK calls through dual-stack endpoints so boto3 resolves
         # {service}.{region}.api.aws (returns AAAA records). Lambda ENIs with IPv6
@@ -2265,12 +2266,12 @@ Resources:
         # Which team's runtime this is, for the program's own logs and spans.
         AGENT_TEAM: "tarun_visibility_team"
 
-  AgentCoreRuntimeWeaveApiCaller:
+  AgentCoreRuntimeDailyOperator:
     Type: AWS::BedrockAgentCore::Runtime
     Condition: AgentCoreEnabled
     Properties:
-      AgentRuntimeName: "teamweave_weave_api_caller"
-      Description: "AgentCore runtime serving every agent of weave_api_caller."
+      AgentRuntimeName: "teamweave_daily_operator"
+      Description: "AgentCore runtime serving every agent of daily_operator."
       RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
       AgentRuntimeArtifact:
         CodeConfiguration:
@@ -2285,14 +2286,14 @@ Resources:
         NetworkMode: PUBLIC
       EnvironmentVariables:
         AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
-        AGENT_TEAM: "weave_api_caller"
+        AGENT_TEAM: "daily_operator"
 
-  AgentCoreRuntimeWeaveDataSteward:
+  AgentCoreRuntimeLinkedinQuickPost:
     Type: AWS::BedrockAgentCore::Runtime
     Condition: AgentCoreEnabled
     Properties:
-      AgentRuntimeName: "teamweave_weave_data_steward"
-      Description: "AgentCore runtime serving every agent of weave_data_steward."
+      AgentRuntimeName: "teamweave_linkedin_quick_post"
+      Description: "AgentCore runtime serving every agent of linkedin_quick_post."
       RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
       AgentRuntimeArtifact:
         CodeConfiguration:
@@ -2307,14 +2308,14 @@ Resources:
         NetworkMode: PUBLIC
       EnvironmentVariables:
         AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
-        AGENT_TEAM: "weave_data_steward"
+        AGENT_TEAM: "linkedin_quick_post"
 
-  AgentCoreRuntimeWeaveSiteAuditor:
+  AgentCoreRuntimeJobHunter:
     Type: AWS::BedrockAgentCore::Runtime
     Condition: AgentCoreEnabled
     Properties:
-      AgentRuntimeName: "teamweave_weave_site_auditor"
-      Description: "AgentCore runtime serving every agent of weave_site_auditor."
+      AgentRuntimeName: "teamweave_job_hunter"
+      Description: "AgentCore runtime serving every agent of job_hunter."
       RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
       AgentRuntimeArtifact:
         CodeConfiguration:
@@ -2329,7 +2330,29 @@ Resources:
         NetworkMode: PUBLIC
       EnvironmentVariables:
         AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
-        AGENT_TEAM: "weave_site_auditor"
+        AGENT_TEAM: "job_hunter"
+
+  AgentCoreRuntimeHealthPrep:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: AgentCoreEnabled
+    Properties:
+      AgentRuntimeName: "teamweave_health_prep"
+      Description: "AgentCore runtime serving every agent of health_prep."
+      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Code:
+            S3:
+              Bucket: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+              Prefix: !Ref AgentCoreRuntimeCodePrefix
+          Runtime: PYTHON_3_12
+          EntryPoint:
+            - app.py
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      EnvironmentVariables:
+        AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
+        AGENT_TEAM: "health_prep"
 
   # ── AgentCore Gateway ──────────────────────────────────────────────────────
   # Managed tool access for agents. AWS_IAM rather than CUSTOM_JWT: the

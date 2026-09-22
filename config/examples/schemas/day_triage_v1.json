@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "day_triage_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "today": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "this_week": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "not_yours": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "drop": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "today",
+    "this_week"
+  ]
+}
