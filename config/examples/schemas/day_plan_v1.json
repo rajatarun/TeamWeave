@@ -1,27 +1,26 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "api_call_review_v1",
+  "title": "day_plan_v1",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "verdict": {
-      "type": "string",
-      "enum": [
-        "safe_to_commit",
-        "needs_changes",
-        "refuse"
-      ]
-    },
-    "reasoning": {
+    "the_one_thing": {
       "type": "string"
     },
-    "risks": {
+    "why_that_one": {
+      "type": "string"
+    },
+    "blocks": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "object",
+        "additionalProperties": true
       }
     },
-    "what_a_person_must_check": {
+    "if_the_day_goes_wrong": {
+      "type": "string"
+    },
+    "parked": {
       "type": "array",
       "items": {
         "type": "string"
@@ -29,8 +28,7 @@
     }
   },
   "required": [
-    "verdict",
-    "reasoning",
-    "what_a_person_must_check"
+    "the_one_thing",
+    "blocks"
   ]
 }

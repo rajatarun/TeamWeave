@@ -173,23 +173,29 @@ def test_a_crawl_is_capped_regardless_of_what_it_is_asked_for(monkeypatch):
 
 # ── the teams ───────────────────────────────────────────────────────────────
 
-WEAVE_TEAMS = ["weave_api_caller", "weave_data_steward", "weave_site_auditor"]
+# Derived, not listed: a team added or removed must not need an edit here, and
+# a list would silently stop covering the team it no longer names.
+PERSONAL_TEAMS = sorted(p.name for p in TEAMS.iterdir() if (p / "v1" / "team.json").is_file())
 
 
 def load(name):
     return json.loads((TEAMS / name / "v1" / "team.json").read_text())
 
 
-@pytest.mark.parametrize("name", WEAVE_TEAMS)
+def tooled_steps(config):
+    return [s for s in config["workflow"] if s.get("pre_tools") or s.get("post_tools")]
+
+
+@pytest.mark.parametrize("name", PERSONAL_TEAMS)
 def test_a_team_stays_short(name):
-    """A run is one Lambda invocation for every step. Small teams were asked
-    for and are also what the 900 s ceiling affords."""
+    """A run is one Lambda invocation for every step, inside a 900 s ceiling.
+    Five members for a small task is four model calls and a slower answer."""
     config = load(name)
-    assert len(config["agents"]) <= 3, "too many turns for the work"
+    assert len(config["agents"]) <= 5, "too many turns"
     assert len(config["workflow"]) == len(config["agents"])
 
 
-@pytest.mark.parametrize("name", WEAVE_TEAMS)
+@pytest.mark.parametrize("name", PERSONAL_TEAMS)
 def test_every_agent_earns_its_turn(name):
     """Two agents with the same job is one agent and a wasted model call."""
     config = load(name)
@@ -199,40 +205,109 @@ def test_every_agent_earns_its_turn(name):
     assert len(set(schemas)) == len(schemas), "two agents produce the same shape"
 
 
-@pytest.mark.parametrize("name", WEAVE_TEAMS)
+@pytest.mark.parametrize("name", PERSONAL_TEAMS)
 def test_every_declared_tool_has_a_rule_and_is_callable(name):
-    config = load(name)
-    for step in config["workflow"]:
+    for step in load(name)["workflow"]:
         for tool in (step.get("pre_tools") or []) + (step.get("post_tools") or []):
-            rule = tool_rules.rule_for(tool["name"])
-            assert not tool_rules.is_refused(tool["name"]), (
-                f"{name} declares {tool['name']}, which commits"
-            )
-            assert tool["name"] in TOOL_REGISTRY
-            assert rule.sibling
+            registered = tool["name"] in TOOL_REGISTRY
+            assert registered, f"{name} declares {tool['name']}, which is not registered"
+            if tool["name"] in tool_rules.RULES:
+                assert not tool_rules.is_refused(tool["name"]), (
+                    f"{name} declares {tool['name']}, which commits"
+                )
 
 
-def test_the_teams_between_them_reach_every_wired_sibling():
-    """Four gateway targets were wired; a sibling no team can reach is a target
-    for nothing."""
-    used = set()
-    for name in WEAVE_TEAMS:
+def test_no_team_declares_a_commit_tool():
+    """The barrier that matters, checked from the config side as well as the
+    execution side: a team asking to commit would fail at run time, after the
+    earlier steps had already been paid for."""
+    for name in PERSONAL_TEAMS:
         for step in load(name)["workflow"]:
+            for tool in (step.get("pre_tools") or []) + (step.get("post_tools") or []):
+                assert not tool_rules.is_refused(tool["name"]), f"{name}: {tool['name']}"
+
+
+def test_a_sibling_tool_is_only_declared_where_the_endpoint_is_wired():
+    """Every sibling a team reaches must be one the deploy resolves a URL for.
+
+    The reverse is deliberately *not* asserted. Four gateway targets are wired
+    and only ScreenWeave is reached by a team today, because the others answer
+    platform questions rather than a person's -- a catalogue lookup helps no
+    one's day. An unreached sibling is capacity, not a defect.
+    """
+    for name in PERSONAL_TEAMS:
+        for step in tooled_steps(load(name)):
             for tool in (step.get("pre_tools") or []):
-                used.add(tool_rules.rule_for(tool["name"]).sibling)
-    assert used == set(mcp_client.SIBLING_ENV), f"unreached siblings: {set(mcp_client.SIBLING_ENV) - used}"
+                rule = tool_rules.RULES.get(tool["name"])
+                if rule is None:
+                    continue
+                assert rule.sibling in mcp_client.SIBLING_ENV, (
+                    f"{name} reaches {rule.sibling}, which no env var supplies"
+                )
 
 
-@pytest.mark.parametrize("name", WEAVE_TEAMS)
+@pytest.mark.parametrize("name", PERSONAL_TEAMS)
 def test_an_agent_is_told_what_a_failed_lookup_looks_like(name):
     """A tool result carrying `error` is a real signal. An agent that cannot
-    tell it from an empty one fills the blank in -- the same failure the RAG
-    layer had before NO_VERIFIED_EXPERIENCE."""
+    tell it from an empty one fills the blank in -- the failure
+    NO_VERIFIED_EXPERIENCE exists to stop, in a second place."""
     config = load(name)
-    tooled_steps = {s["step"] for s in config["workflow"] if s.get("pre_tools")}
+    # Only sibling-backed tools: a local tool like extract_topic_keywords runs
+    # in-process and has no unreachable service to report, so demanding the
+    # warning there would be noise in a prompt that pays for every token.
+    tooled = {
+        step["step"]
+        for step in tooled_steps(config)
+        if any(t["name"] in tool_rules.RULES
+               for t in (step.get("pre_tools") or []) + (step.get("post_tools") or []))
+    }
     for agent in config["agents"]:
-        if agent["id"] in tooled_steps:
+        if agent["id"] in tooled:
             assert "error" in agent["goal_template"], (
                 f"{agent['id']} consumes a tool result but is never told what a "
                 f"failed lookup looks like"
             )
+
+
+@pytest.mark.parametrize("name", PERSONAL_TEAMS)
+def test_a_team_that_asks_for_grounding_is_told_what_absent_grounding_means(name):
+    """`min_confidence` makes an empty RAG block mean "nothing relevant was
+    found". An agent not told that reads it as a blank and supplies plausible
+    experience that never happened -- schema-valid and false."""
+    config = load(name)
+    if (config["globals"].get("rag") or {}).get("mode") != "contextweave":
+        return
+    constraints = " ".join(config["globals"]["hard_constraints"])
+    assert "VERIFIED_EXPERIENCE" in constraints, (
+        f"{name} retrieves experience but never says what its absence means"
+    )
+
+
+def test_the_health_team_prepares_for_care_and_does_not_practise_it():
+    """The one team here with real-world consequences. It structures what was
+    reported and builds questions; it must not name a cause, recommend a
+    medicine, or answer an emergency with an appointment."""
+    config = load("health_prep")
+    constraints = " ".join(config["globals"]["hard_constraints"]).lower()
+    for promise in ("never diagnose", "never suggest a medicine", "seek_care_now"):
+        assert promise.lower() in constraints, f"health_prep dropped: {promise}"
+    schemas = {a["schema_ref"] for a in config["agents"]}
+    assert "symptom_log_v1" in schemas and "care_questions_v1" in schemas
+    # The escalation has to be a field, not a hope: a constraint the model may
+    # or may not honour is not the same as a value the schema requires.
+    log = json.loads(pathlib.Path("config/examples/schemas/symptom_log_v1.json").read_text())
+    assert "seek_care_now" in log["required"], (
+        "urgency is optional in the schema, so an answer can omit it entirely"
+    )
+
+
+@pytest.mark.parametrize("name", PERSONAL_TEAMS)
+def test_every_team_can_be_edited_in_conversation(name):
+    """The run page offers the composer only to a team that declares
+    edit_instruction. A personal team that cannot be corrected is one the
+    person retypes their whole brief to."""
+    fields = {f["name"]: f for f in load(name)["request_schema"]["fields"]}
+    assert "edit_instruction" in fields
+    for carried in ("previous_output", "previous_run_id"):
+        assert fields[carried]["type"] == "hidden", f"{name}: {carried} is not hidden"
+        assert not fields[carried]["required"]

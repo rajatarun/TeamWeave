@@ -1,0 +1,145 @@
+{
+  "team": {
+    "name": "daily_operator",
+    "version": "v1",
+    "owner": "Tarun Raja"
+  },
+  "globals": {
+    "north_star": "Turn everything in your head into the one thing worth doing next.",
+    "default_channel": "personal",
+    "hard_constraints": [
+      "Never invent a task that was not in the dump. A plan the person does not recognise is a plan they will not follow.",
+      "Say which of your assumptions would change the order if wrong.",
+      "No grounding is used here: this is about the person's own day, and nothing in a corpus knows it. Do not cite sources.",
+      "This request may be a follow-up. When request.edit_instruction is present, request.previous_output is your own last answer: revise it to satisfy the instruction and change nothing else. Do not start over, and do not drop fields the instruction did not mention."
+    ],
+    "features": {
+      "gemini_research": false,
+      "explicit_rag": false
+    },
+    "rag": {
+      "mode": "none"
+    },
+    "artifact_store": {
+      "artifact_bucket_env": "ARTIFACT_BUCKET",
+      "dynamo_table_env": "DDB_TABLE"
+    },
+    "revision": {
+      "default_jump_to_step": "DO_triage"
+    }
+  },
+  "agents": [
+    {
+      "id": "DO_triage",
+      "name": "Triage",
+      "role_id": "PBM-001",
+      "department_id": "DEPT-001",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "",
+          "us.amazon.nova-lite-v1:0": "",
+          "us.amazon.nova-pro-v1:0": "",
+          "us.amazon.nova-premier-v1:0": "",
+          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
+      },
+      "goal_template": "Sort the dump. Each item goes to today, this week, someone else's, or dropped \u2014 and every drop and delegation needs a one-line reason, because those are the calls the person will want to argue with. Keep their words; do not rewrite a task into something tidier than they said. If the dump is vague, put what you assumed in assumptions rather than guessing silently.",
+      "schema_ref": "day_triage_v1"
+    },
+    {
+      "id": "DO_plan",
+      "name": "Day Planner",
+      "role_id": "PBM-003",
+      "department_id": "DEPT-003",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": "",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_aliases": {
+          "us.amazon.nova-micro-v1:0": "",
+          "us.amazon.nova-lite-v1:0": "",
+          "us.amazon.nova-pro-v1:0": "",
+          "us.amazon.nova-premier-v1:0": "",
+          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
+          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
+        }
+      },
+      "goal_template": "Build the actual day from the triage. Pick the_one_thing \u2014 the single item that, done, makes the day a success even if nothing else happens \u2014 and say why it beats the others. Block the rest around it against the hours available. if_the_day_goes_wrong is the honest fallback: what still gets done when half the day disappears.",
+      "schema_ref": "day_plan_v1"
+    }
+  ],
+  "workflow": [
+    {
+      "step": "DO_triage",
+      "inputs": [
+        "request"
+      ]
+    },
+    {
+      "step": "DO_plan",
+      "inputs": [
+        "request",
+        "DO_triage.output"
+      ]
+    }
+  ],
+  "schemas": {
+    "day_triage_v1": {
+      "path": "config/examples/schemas/day_triage_v1.json"
+    },
+    "day_plan_v1": {
+      "path": "config/examples/schemas/day_plan_v1.json"
+    }
+  },
+  "request_schema": {
+    "summary": "Dump everything on your mind. You get it triaged and a day built around one thing that matters. Follow-up turns in the same chat revise the last answer rather than starting over.",
+    "fields": [
+      {
+        "name": "dump",
+        "label": "Everything on your mind",
+        "type": "textarea",
+        "required": true,
+        "placeholder": "Meetings, chores, the thing you've been avoiding, half-ideas \u2014 unsorted is fine"
+      },
+      {
+        "name": "hours",
+        "label": "Hours you actually have",
+        "type": "text",
+        "required": false,
+        "placeholder": "e.g. 5, fragmented"
+      },
+      {
+        "name": "fixed",
+        "label": "Already fixed in the day",
+        "type": "text",
+        "required": false,
+        "placeholder": "e.g. standup 9:30, dentist 3pm"
+      },
+      {
+        "name": "edit_instruction",
+        "label": "Change to make",
+        "type": "text",
+        "required": false,
+        "placeholder": "Only on a follow-up \u2014 what to change about the last answer"
+      },
+      {
+        "name": "previous_output",
+        "label": "Previous answer",
+        "type": "hidden",
+        "required": false
+      },
+      {
+        "name": "previous_run_id",
+        "label": "Previous run",
+        "type": "hidden",
+        "required": false
+      }
+    ]
+  }
+}

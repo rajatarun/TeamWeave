@@ -1,39 +1,37 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "api_call_plan_v1",
+  "title": "post_angle_v1",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "intent": {
+    "claim": {
       "type": "string"
     },
-    "method": {
+    "why_now": {
       "type": "string"
     },
-    "path": {
+    "hook": {
       "type": "string"
     },
-    "parameters": {
-      "type": "object",
-      "additionalProperties": true
-    },
-    "requires_human_commit": {
+    "evidence_available": {
       "type": "boolean"
     },
-    "commit_token": {
-      "type": "string"
-    },
-    "unresolved": {
+    "evidence": {
       "type": "array",
       "items": {
         "type": "string"
       }
+    },
+    "not_worth_posting": {
+      "type": "boolean"
+    },
+    "reason_if_not": {
+      "type": "string"
     }
   },
   "required": [
-    "intent",
-    "method",
-    "path",
-    "requires_human_commit"
+    "claim",
+    "hook",
+    "evidence_available"
   ]
 }

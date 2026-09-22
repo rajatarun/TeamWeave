@@ -1,32 +1,31 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "remediation_plan_v1",
+  "title": "application_note_v1",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "priority_order": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "quick_wins": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "needs_investigation": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "effort_note": {
+    "opening_line": {
       "type": "string"
+    },
+    "body": {
+      "type": "string"
+    },
+    "what_it_claims": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "do_not_send_if": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
-    "priority_order"
+    "opening_line",
+    "body",
+    "what_it_claims"
   ]
 }

@@ -1,26 +1,40 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "site_findings_v1",
+  "title": "posting_facts_v1",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "url": {
       "type": "string"
     },
-    "crawled": {
+    "fetched": {
       "type": "boolean"
     },
-    "session_id": {
+    "title": {
       "type": "string"
     },
-    "summary": {
+    "company": {
       "type": "string"
     },
-    "findings": {
+    "location": {
+      "type": "string"
+    },
+    "must_haves": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": true
+        "type": "string"
+      }
+    },
+    "nice_to_haves": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "red_flags": {
+      "type": "array",
+      "items": {
+        "type": "string"
       }
     },
     "evidence_source": {
@@ -33,8 +47,7 @@
   },
   "required": [
     "url",
-    "crawled",
-    "summary",
+    "fetched",
     "evidence_source"
   ]
 }

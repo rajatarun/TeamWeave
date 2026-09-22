@@ -587,6 +587,53 @@ sibling's stack actually resolves, so the mismatch deploys green until the day
 it does not. It also checks no two targets share a condition, which is the
 regression that would restore the original defect.
 
+### The personal teams
+
+These are the platform's point: four teams a person runs on their own day, not
+on the platform's plumbing. An earlier pass built a catalogue steward, an API
+call planner and a site auditor — all of which served TeamWeave and none of
+which made anyone's afternoon better. They were removed rather than left as
+clutter, each with its runtime and its map entry.
+
+| Team | Members | Grounding | What it answers |
+|---|---|---|---|
+| `daily_operator` | 2 | none | a brain dump → the one thing worth doing today |
+| `linkedin_quick_post` | 2 | ContextWeave | a rough thought → a publishable post, in two turns |
+| `job_hunter` | 3 | ScreenWeave crawl + ContextWeave | a posting URL → an honest fit read and an outreach note |
+| `health_prep` | 2 | none | symptoms → questions for a clinician, never a diagnosis |
+
+**Say which parts are grounded and which are reasoning.** An agent cannot
+choose to call a tool here, so a team is grounded only where a *pre-tool*
+fetches something: `job_hunter` really reads the posting, and it and
+`linkedin_quick_post` really read the author's corpus. `daily_operator` and
+`health_prep` ground in nothing, because nothing in a corpus knows what is in
+someone's head or body — and their constraints say so rather than letting an
+agent imply otherwise.
+
+**`job_hunter` is the one that earns three turns.** Reading a posting,
+matching it against a record, and writing to a person are three different
+jobs, and collapsing them produces a note that flatters the gaps. Its fit
+analyst is told that `skip` is a good answer: inflating a partial match buys
+an interview the person cannot survive. `application_note_v1` carries
+`what_it_claims` and `do_not_send_if` for the same reason — the person checks
+the claims before sending, not after.
+
+**`health_prep` prepares for care; it does not practise it.** Never a
+diagnosis, never a medicine or a dose, and an emergency is answered with
+"be seen now" rather than with questions for next week. That last one is a
+**required** field in `symptom_log_v1`, not a hope: a constraint the model may
+honour is weaker than a value the schema will not accept an answer without.
+`tests/test_weave_tools.py` holds all of it, and a mutation dropping any of
+them fails.
+
+The tool plumbing the removed teams introduced stays, because `job_hunter`
+uses it: `mcp_client` speaks MCP over HTTP, `tool_rules` says when each sibling
+tool applies, and the commit halves of DataDictionary and ToolWeave are refused
+in `execute_tool` and absent from `TOOL_REGISTRY`. Only ScreenWeave is reached
+by a team today. The other three gateway targets are capacity, not a defect,
+and the test asserts only that a sibling a team *does* reach has an endpoint
+wired — never the reverse.
+
 ### Teams that use the siblings' tools
 
 **The gateway is not the path, and cannot be yet.** `src/agentcore/agent.py`
@@ -613,47 +660,11 @@ two barriers, because removing one must not silently open the path. The refusal
 failures so one bad lookup cannot lose a run, and a *skipped* commit would
 report success for work never done.
 
-`propose` is allowed, and is the useful half: a run drafts the entry or the
-call and hands a person the token.
-
-| Team | Members | Siblings | What it answers |
-|---|---|---|---|
-| `weave_api_caller` | 2 | ToolWeave | prose → one reviewable API call, never fired |
-| `weave_data_steward` | 2 | DataDictionary, CipherWeave | does a term exist, and how must it be protected |
-| `weave_site_auditor` | 2 | ScreenWeave | what a page really contains, then a fix list |
-
-Two members each, distinct goals and distinct output schemas — a test fails two
-agents that share either, because that is one agent and a wasted model call.
-One worker invocation runs every step inside a 900 s Lambda, so short teams are
-what the ceiling affords as well as what was asked for. `crawl_site` caps depth
-and breadth in code rather than in config for the same reason.
-
 Every tooled agent is told what a failed lookup looks like: a result carrying
 `error` means the lookup did not happen, and an agent that cannot tell that from
 an empty one fills the blank in — the failure `NO_VERIFIED_EXPERIENCE` exists to
-stop, in a second place.
-
-### A conversation is a series of runs
-
-The run page takes follow-up edits. It is **not** a resumed pipeline: nothing in
-the worker reads `default_jump_to_step`, so there is no partial re-entry to ask
-for. Each follow-up is a whole new run carrying the previous answer and the
-edit, and the thread lives on the page. The UI says so rather than implying an
-edit is cheaper than a run, because it is not.
-
-`request_schema` gained a `hidden` field type for the continuation state —
-`previous_output`, `previous_run_id` — which the page carries and nobody types.
-Declared rather than smuggled in as undeclared extras, so the "a config that
-reads `request.X` must declare `X`" rule still covers them; the UI is required
-to skip rendering them, and a hidden field may not be `required`, or a first
-turn could never submit.
-
-The page offers the composer only to a team that **declares**
-`edit_instruction`. A team whose agents were never told what an edit is would
-receive one and ignore it, and the box would silently re-run the same request.
-A follow-up also revises the last **succeeded** turn, not the last turn: a
-failed run has no answer, and sending its absence would ask the team to revise
-nothing and quietly produce a fresh first draft.
+stop, in a second place. Only sibling-backed tools carry that requirement; a
+local tool has no unreachable service to report.
 
 ### A2A — how the rest of the platform reaches these agents
 
