@@ -201,11 +201,17 @@ them.
 Because the team now declares `contextweave`, `_validate_rag` **refuses** to
 load it when `CONTEXTWEAVE_URL` is empty rather than degrading, and the deploy
 resolves that URL from ContextWeave's own `APIEndpoint` stack output before
-`sam deploy` rather than hardcoding it. It tries both stack names the sibling
-repository disagrees about (`contextweave-rag-dev` in its samconfig,
-`expertise-rag-dev` in its CLAUDE.md) and fails the step naming both if
-neither resolves — at the parameter step, where the cause is visible, rather
-than three layers away at smoke-test time.
+`sam deploy` rather than hardcoding it — at the parameter step, where the
+cause is visible, rather than three layers away at smoke-test time.
+
+The stack is `contextweave-rag-prod`, named in the workflow's `env` block as
+`CONTEXTWEAVE_STACK_NAME` beside every other stack name. Neither name the
+sibling repository suggests is right: its samconfig says
+`contextweave-rag-dev` and its own CLAUDE.md says `expertise-rag-dev`. **One
+named stack, not a list of candidates** — falling back to a dev stack when
+prod is missing would point the live pipeline at a different knowledge layer
+and still report success, which is the same silent-wrong-source failure this
+section is about.
 
 ### Agent Runtime (substrate seam)
 
