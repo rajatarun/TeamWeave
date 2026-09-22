@@ -162,6 +162,51 @@ their backing store is unreachable.
 
 Client: `src/orchestrator/contextweave_client.py`; mode dispatch: `src/orchestrator/rag.py`.
 
+**`features.explicit_rag` gates every mode, not just the explicit one.** It
+sits above the mode dispatch in `build_rag_context` and returns `("", {})`
+before the dispatch is reached, so with it `false` the visibility team's
+declared `mode: "explicit"` was dead config and every agent turn ran
+ungrounded — the same "config says X, deployment does Y" shape as the image
+`model_id` and `AGENT_MODEL_ID`. The name is misleading and kept for now;
+`tests/test_grounding_instructions.py` pins the team's value so it cannot
+silently revert.
+
+**Grounding is conditional, and the absence of it is a statement.** The
+retrieved block used to be dumped under a bare `RAG_CONTEXT:` label with no
+instruction at all, which leaves an agent to infer its purpose — and produces
+opposite failures in the two directions:
+
+- with experience, the piece drifts into a career recital: the topic becomes a
+  frame for the author rather than the reverse;
+- with none, nothing forbids inventing some, so the agent supplies plausible
+  projects and outcomes that never happened. Nothing catches that, because a
+  fabricated anecdote is exactly as schema-valid as a real one.
+
+`min_confidence` is what makes "only when the experience is actually relevant"
+a *retrieval* decision rather than a request to the model: below the floor,
+`_contextweave_context` returns no context at all. So an empty block is a real
+signal — "nothing relevant was found" — and `prompt_builder` now says so out
+loud in a `NO_VERIFIED_EXPERIENCE` branch that names general expertise as a
+complete answer and forbids attributing projects, employers, incidents,
+metrics or outcomes to the author. The populated branch is labelled
+`VERIFIED_EXPERIENCE` and states that it is supporting evidence, not the
+subject: a reader who has never heard of the author must still come away with
+something.
+
+The team's hard constraints moved the same way. `"Prefer concrete examples
+from Tarun's work using RAG context"` was unconditional, so a run that
+retrieved nothing was still told to prefer personal examples — and supplied
+them.
+
+Because the team now declares `contextweave`, `_validate_rag` **refuses** to
+load it when `CONTEXTWEAVE_URL` is empty rather than degrading, and the deploy
+resolves that URL from ContextWeave's own `APIEndpoint` stack output before
+`sam deploy` rather than hardcoding it. It tries both stack names the sibling
+repository disagrees about (`contextweave-rag-dev` in its samconfig,
+`expertise-rag-dev` in its CLAUDE.md) and fails the step naming both if
+neither resolves — at the parameter step, where the cause is visible, rather
+than three layers away at smoke-test time.
+
 ### Agent Runtime (substrate seam)
 
 `bedrock_invoke.py` owns the retry policy, the Observatory gate and the
