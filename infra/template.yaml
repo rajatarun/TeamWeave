@@ -222,6 +222,24 @@ Parameters:
       ScreenWeave's MCP endpoint (https://.../mcp), published by that stack.
       Empty means no gateway target is created: a gateway with nothing behind
       it is infrastructure for nothing.
+  CipherWeaveMcpEndpoint:
+    Type: String
+    Default: ""
+    Description: >
+      CipherWeave's MCP endpoint (https://.../mcp), published by that stack as
+      CipherWeaveApiEndpoint. Empty means no target is created for it.
+  DataDictionaryMcpEndpoint:
+    Type: String
+    Default: ""
+    Description: >
+      DataDictionary's MCP endpoint (https://.../mcp), published by that stack
+      as DataDictionaryFunctionUrl. Empty means no target is created for it.
+  ToolWeaveMcpEndpoint:
+    Type: String
+    Default: ""
+    Description: >
+      ToolWeave's MCP endpoint (https://.../mcp), published by that stack as
+      ToolWeaveApiEndpoint. Empty means no target is created for it.
   A2AAgentVersion:
     Type: String
     Default: "1.0.0"
@@ -275,9 +293,23 @@ Conditions:
   HasSamAssumeRoleName: !Not [!Equals [!Ref SamAssumeRoleName, ""]]
   DeployWAF: !Equals [!Ref EnableWAF, "true"]
   AgentCoreEnabled: !Equals [!Ref EnableAgentCore, "true"]
-  AgentCoreGatewayTargetEnabled: !And
+  # One condition per target, never one shared switch. A single
+  # AgentCoreGatewayTargetEnabled gated every target on ScreenWeave's
+  # parameter, so a sibling that *was* configured would still get no target
+  # whenever ScreenWeave was not -- the crossed-wiring failure this template
+  # has already had once, with two teams' runtime substitutions.
+  ScreenWeaveTargetEnabled: !And
     - !Condition AgentCoreEnabled
     - !Not [!Equals [!Ref ScreenWeaveMcpEndpoint, ""]]
+  CipherWeaveTargetEnabled: !And
+    - !Condition AgentCoreEnabled
+    - !Not [!Equals [!Ref CipherWeaveMcpEndpoint, ""]]
+  DataDictionaryTargetEnabled: !And
+    - !Condition AgentCoreEnabled
+    - !Not [!Equals [!Ref DataDictionaryMcpEndpoint, ""]]
+  ToolWeaveTargetEnabled: !And
+    - !Condition AgentCoreEnabled
+    - !Not [!Equals [!Ref ToolWeaveMcpEndpoint, ""]]
   HasSiweAuthorizer: !Not [!Equals [!Ref SiweAuthorizerFunctionArn, ""]]
   HasDPOBucket: !Not [!Equals [!Ref DPOTrainingBucketName, ""]]
 
@@ -2266,9 +2298,14 @@ Resources:
       RoleArn: !GetAtt AgentCoreGatewayRole.Arn
       AuthorizerType: AWS_IAM
 
+  # The weave systems that are MCP servers, as gateway targets. Only those
+  # that speak MCP over *HTTP* can be one: a GatewayTarget takes an Endpoint,
+  # so a stdio server has nothing to point at. DeployWeave is stdio
+  # (`mcp.run()` with no transport) and is deliberately absent for that
+  # reason, not by oversight.
   ScreenWeaveGatewayTarget:
     Type: AWS::BedrockAgentCore::GatewayTarget
-    Condition: AgentCoreGatewayTargetEnabled
+    Condition: ScreenWeaveTargetEnabled
     Properties:
       Name: screenweave
       Description: ScreenWeave's MCP server -- crawl, visual QA and showcase video.
@@ -2277,6 +2314,42 @@ Resources:
         Mcp:
           McpServer:
             Endpoint: !Ref ScreenWeaveMcpEndpoint
+
+  CipherWeaveGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Condition: CipherWeaveTargetEnabled
+    Properties:
+      Name: cipherweave
+      Description: CipherWeave's MCP server -- secrets and gate integration.
+      GatewayIdentifier: !GetAtt AgentCoreGateway.GatewayIdentifier
+      TargetConfiguration:
+        Mcp:
+          McpServer:
+            Endpoint: !Ref CipherWeaveMcpEndpoint
+
+  DataDictionaryGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Condition: DataDictionaryTargetEnabled
+    Properties:
+      Name: datadictionary
+      Description: DataDictionary's MCP server -- the platform's term and schema catalogue.
+      GatewayIdentifier: !GetAtt AgentCoreGateway.GatewayIdentifier
+      TargetConfiguration:
+        Mcp:
+          McpServer:
+            Endpoint: !Ref DataDictionaryMcpEndpoint
+
+  ToolWeaveGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Condition: ToolWeaveTargetEnabled
+    Properties:
+      Name: toolweave
+      Description: ToolWeave's MCP server -- natural language to safe REST calls from OpenAPI specs.
+      GatewayIdentifier: !GetAtt AgentCoreGateway.GatewayIdentifier
+      TargetConfiguration:
+        Mcp:
+          McpServer:
+            Endpoint: !Ref ToolWeaveMcpEndpoint
 
 
 Outputs:

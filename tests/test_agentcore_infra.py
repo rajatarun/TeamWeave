@@ -58,25 +58,29 @@ def agentcore_resources(template):
     }
 
 
-# The substrate that is not per team: memory, the tool gateway and its target,
-# plus the stack-wide runtime that serves a team with none of its own.
+# The substrate that is neither per team nor per tool: memory, the tool
+# gateway, and the stack-wide runtime that serves a team with none of its own.
 SHARED_AGENTCORE_RESOURCES = {
-    "AgentCoreMemory", "AgentCoreRuntime", "AgentCoreGateway", "ScreenWeaveGatewayTarget",
+    "AgentCoreMemory", "AgentCoreRuntime", "AgentCoreGateway",
 }
 
 
 def test_the_template_declares_the_agentcore_substrate(template):
     """An inventory, so a new AgentCore resource is a deliberate addition.
 
-    Per-team runtimes are derived rather than listed — `tests/test_team_runtimes.py`
-    holds them to the teams in config/examples/teams, which is the coupling
-    that matters. Listing them here too would mean two places to edit and one
-    of them forgotten.
+    Per-team runtimes and per-sibling gateway targets are derived rather than
+    listed — `tests/test_team_runtimes.py` holds the runtimes to the teams in
+    config/examples/teams and `tests/test_gateway_targets.py` holds the targets
+    to the MCP endpoint parameters, which are the couplings that matter.
+    Listing them here too would mean two places to edit and one of them
+    forgotten.
     """
     declared = set(agentcore_resources(template))
     per_team = {n for n in declared if n.startswith("AgentCoreRuntime") and n != "AgentCoreRuntime"}
-    assert declared - per_team == SHARED_AGENTCORE_RESOURCES
+    per_tool = {n for n in declared if n.endswith("GatewayTarget")}
+    assert declared - per_team - per_tool == SHARED_AGENTCORE_RESOURCES
     assert per_team, "no per-team runtimes: every team would share one blast radius"
+    assert per_tool, "no gateway targets: the gateway is infrastructure for nothing"
 
 
 def test_every_agentcore_resource_matches_its_schema(template, schemas):
@@ -135,9 +139,16 @@ def test_everything_is_behind_the_feature_condition(template):
     for name in ("AgentCoreMemory", "AgentCoreRuntime", "AgentCoreRuntimeRole",
                  "AgentCoreGateway", "AgentCoreGatewayRole"):
         assert template["Resources"][name].get("Condition") == "AgentCoreEnabled", name
-    # The target is narrower still: a gateway with no endpoint behind it is
-    # infrastructure for nothing.
-    assert template["Resources"]["ScreenWeaveGatewayTarget"]["Condition"] == "AgentCoreGatewayTargetEnabled"
+    # Each target is narrower still: a target whose sibling published no
+    # endpoint is infrastructure pointing nowhere, so every one carries a
+    # condition of its own -- see tests/test_gateway_targets.py for which.
+    targets = [n for n in template["Resources"] if n.endswith("GatewayTarget")]
+    assert targets
+    for name in targets:
+        cond = template["Resources"][name].get("Condition")
+        assert cond in template["Conditions"], f"{name} has no declared condition"
+        assert cond != "AgentCoreEnabled", \
+            f"{name} is gated only on the substrate, so it deploys with no endpoint"
 
 
 def test_agentcore_is_the_default_substrate(template):
@@ -243,20 +254,24 @@ def test_the_gateway_needs_no_external_identity_provider(template):
 def test_the_target_points_at_an_https_mcp_endpoint(template, schemas):
     import re
 
-    cfg = template["Resources"]["ScreenWeaveGatewayTarget"]["Properties"]["TargetConfiguration"]
     endpoint_schema = schemas["AWS::BedrockAgentCore::GatewayTarget"]["definitions"]["McpServerTargetConfiguration"]
     assert "Endpoint" in endpoint_schema.get("required", []), "schema no longer requires Endpoint"
-    assert "McpServer" in cfg["Mcp"]
-    assert "Endpoint" in cfg["Mcp"]["McpServer"]
+    targets = [n for n in template["Resources"] if n.endswith("GatewayTarget")]
+    assert targets
+    for name in targets:
+        cfg = template["Resources"][name]["Properties"]["TargetConfiguration"]
+        assert "McpServer" in cfg["Mcp"], name
+        assert "Endpoint" in cfg["Mcp"]["McpServer"], name
 
 
 def test_no_gateway_target_without_an_endpoint(template):
-    # ScreenWeaveMcpEndpoint defaults to empty, so an ordinary enable does not
-    # create a target pointing nowhere.
-    assert template["Parameters"]["ScreenWeaveMcpEndpoint"]["Default"] == ""
-    cond = template["Conditions"]["AgentCoreGatewayTargetEnabled"]
-    assert "AgentCoreGatewayTargetEnabled" in template["Conditions"]
-    assert cond is not None
+    # Every MCP endpoint parameter defaults to empty, so an ordinary enable
+    # does not create a target pointing nowhere: a sibling the deploy could
+    # not resolve simply contributes no tool.
+    params = [n for n in template["Parameters"] if n.endswith("McpEndpoint")]
+    assert params, "no MCP endpoint parameters: the gateway has nothing to target"
+    for name in params:
+        assert template["Parameters"][name]["Default"] == "", name
 
 
 def test_the_gateway_role_keeps_the_confused_deputy_guards(template):
