@@ -505,6 +505,23 @@ Two shapes matter and both are handled: an MCP server over HTTP may answer
 `initialize` as plain JSON or as an SSE `data:` frame, and a check reading only
 one would report every streaming server as unverified and wire it blind.
 
+**The SAM Deploy step runs from `infra/`.** The probe was first called as
+`python scripts/mcp_handshake.py`, which is right from the repository root and
+resolves to `infra/scripts/...` there — so the deploy died mid-run with
+
+    python: can't open file '.../TeamWeave/infra/scripts/mcp_handshake.py'
+
+after it had already started. `REPO_ROOT` is captured before the `cd` and every
+repo-root path in that step is built on it.
+`tests/test_workflow_script_paths.py` resolves each `python <script>.py` in
+every workflow step against the directory that step actually runs in,
+following its `cd`s the way the shell does — offline, and the one check that
+could have caught this without deploying. The loop's own tests could not: they
+run bash in a temporary directory against a stub, so they exercise the
+branching and never the path. It also fails a step that uses `${REPO_ROOT}`
+without assigning it, since an unset variable expands to nothing and produces
+the same error from a path that reads as absolute.
+
 **Each sibling's stack name is the one thing here nothing can derive.** Two of
 the four were guessed wrong and the gateway came up with two targets instead
 of four. The names share no convention, because each sibling's own deploy
