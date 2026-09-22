@@ -448,30 +448,67 @@ jobs:
           # path in its output; the others publish a base URL, and
           # ToolWeave's own DataDictionary client shows the convention
           # (base.rstrip("/") + "/mcp").
+          #
+          # Each stack name is the one that sibling's own deploy creates, and
+          # they do not share a convention -- two of these were guessed wrong
+          # the first time and the gateway came up with two targets instead of
+          # four:
+          #   screenweave-dev         deploy.sh defaults ENV=dev, and there is
+          #                           no CI workflow to override it
+          #   cipherweave-prod        workflow: cipherweave-${stage:-prod}
+          #   data-dictionary-mcp-prod  workflow: data-dictionary-mcp-${STAGE:-prod}
+          #                           (its samconfig default_name has no suffix)
+          #   toolweave               samconfig, unsuffixed
           MCP_WIRED=()
           MCP_MISSING=()
           for spec in \
-            "screenweave-prod:McpEndpoint::ScreenWeaveMcpEndpoint" \
+            "screenweave-dev:McpEndpoint::ScreenWeaveMcpEndpoint" \
             "cipherweave-prod:CipherWeaveApiEndpoint:/mcp:CipherWeaveMcpEndpoint" \
-            "data-dictionary-mcp:DataDictionaryFunctionUrl:/mcp:DataDictionaryMcpEndpoint" \
+            "data-dictionary-mcp-prod:DataDictionaryFunctionUrl:/mcp:DataDictionaryMcpEndpoint" \
             "toolweave:ToolWeaveApiEndpoint:/mcp:ToolWeaveMcpEndpoint"; do
             mcp_stack="${spec%%:*}"; rest="${spec#*:}"
             mcp_output="${rest%%:*}"; rest="${rest#*:}"
             mcp_suffix="${rest%%:*}"; mcp_param="${rest#*:}"
 
-            mcp_url=$(aws cloudformation describe-stacks \
+            # Two failures that look identical in the log but are different
+            # bugs: a stack name that does not exist (wrong guess, or the
+            # sibling was never deployed) and a stack that exists but has no
+            # such output (wrong output key, or the sibling stopped publishing
+            # it). Reported as one "did not resolve" they cost a round trip to
+            # a human; separated they name their own fix.
+            mcp_stack_json=$(aws cloudformation describe-stacks \
               --stack-name "${mcp_stack}" \
               --region "${AWS_REGION}" \
-              --query "Stacks[0].Outputs[?OutputKey=='${mcp_output}'].OutputValue" \
-              --output text 2>/dev/null || true)
-            [ "${mcp_url}" = "None" ] && mcp_url=""
+              --output json 2>/dev/null) || mcp_stack_json=""
+
+            if [ -z "${mcp_stack_json}" ]; then
+              # Name the stacks that do exist and look close, so a wrong guess
+              # is fixed from this log rather than from a later question.
+              mcp_prefix="${mcp_stack%%-*}"
+              mcp_near=$(aws cloudformation list-stacks \
+                --region "${AWS_REGION}" \
+                --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE \
+                --query "StackSummaries[?starts_with(StackName, \`${mcp_prefix}\`)].StackName" \
+                --output text 2>/dev/null | tr '\t' ' ') || mcp_near=""
+              if [ -n "${mcp_near}" ]; then
+                MCP_MISSING+=("${mcp_param%McpEndpoint} (no stack '${mcp_stack}'; found: ${mcp_near})")
+              else
+                MCP_MISSING+=("${mcp_param%McpEndpoint} (no stack '${mcp_stack}', and none named ${mcp_prefix}* — not deployed)")
+              fi
+              continue
+            fi
+
+            mcp_url=$(printf '%s' "${mcp_stack_json}" \
+              | python -c "import json,sys;o=json.load(sys.stdin)['Stacks'][0].get('Outputs') or [];print(next((x['OutputValue'] for x in o if x['OutputKey']=='${mcp_output}'),''))" 2>/dev/null) || mcp_url=""
 
             if [ -n "${mcp_url}" ]; then
               mcp_url="${mcp_url%/}${mcp_suffix}"
               PARAM_OVERRIDES+=("${mcp_param}=${mcp_url}")
               MCP_WIRED+=("${mcp_param%McpEndpoint}")
             else
-              MCP_MISSING+=("${mcp_param%McpEndpoint} (${mcp_stack}.${mcp_output})")
+              mcp_keys=$(printf '%s' "${mcp_stack_json}" \
+                | python -c "import json,sys;o=json.load(sys.stdin)['Stacks'][0].get('Outputs') or [];print(' '.join(x['OutputKey'] for x in o))" 2>/dev/null) || mcp_keys=""
+              MCP_MISSING+=("${mcp_param%McpEndpoint} (stack '${mcp_stack}' exists but publishes no '${mcp_output}'; it has: ${mcp_keys:-none})")
             fi
           done
 
@@ -480,9 +517,9 @@ jobs:
           else
             echo "::warning::No MCP gateway targets resolved. The AgentCore gateway will be created with nothing behind it, which is infrastructure for nothing."
           fi
-          if [ ${#MCP_MISSING[@]} -gt 0 ]; then
-            echo "::warning::No MCP endpoint found for: ${MCP_MISSING[*]}. Those tools are simply absent from the gateway; deploy the sibling to add one."
-          fi
+          for missing in "${MCP_MISSING[@]}"; do
+            echo "::warning::No MCP endpoint for ${missing}. That tool is absent from the gateway; every other target is unaffected."
+          done
           [ -n "${LAMBDA_SUBNET_IDS}" ]            && PARAM_OVERRIDES+=("LambdaSubnetIds=${LAMBDA_SUBNET_IDS}")
           [ -n "${S3_VPCE_ID}" ]                   && PARAM_OVERRIDES+=("S3VpcEndpointId=${S3_VPCE_ID}")
           [ -n "${DYNAMODB_VPCE_ID}" ]             && PARAM_OVERRIDES+=("DynamoDbVpcEndpointId=${DYNAMODB_VPCE_ID}")
