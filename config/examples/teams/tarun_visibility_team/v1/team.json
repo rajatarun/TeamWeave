@@ -10,16 +10,17 @@
     "hard_constraints": [
       "No fabricated facts or citations.",
       "If any claim is uncertain, label NEEDS_SOURCE.",
-      "Prefer concrete examples from Tarun's work using RAG context."
+      "Use Tarun's own experience only where VERIFIED_EXPERIENCE supplies it; where it does not, write from general expertise and claim no personal involvement.",
+      "The piece is about the topic, not about Tarun. His experience is evidence for a point, never the subject of the article."
     ],
     "features": {
       "gemini_research": true,
-      "explicit_rag": false
+      "explicit_rag": true
     },
     "rag": {
-      "mode": "explicit",
-      "rag_env_key": "VECTOR_DB_TABLE",
-      "top_k": 1
+      "mode": "contextweave",
+      "top_k": 6,
+      "min_confidence": 0.5
     },
     "artifact_store": {
       "artifact_bucket_env": "ARTIFACT_BUCKET",

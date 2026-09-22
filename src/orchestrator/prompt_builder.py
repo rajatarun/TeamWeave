@@ -72,9 +72,44 @@ def build_prompt(
         parts.append(owner_profile_context)
         parts.append("")
 
+    # ── Grounding — and what to do when there is none ──────────────────────────
+    #
+    # The block used to be dumped under a bare "RAG_CONTEXT:" label with no
+    # instruction at all, which leaves the agent to infer what it is for. Two
+    # failure modes follow from that, in opposite directions:
+    #
+    #   * with retrieved experience, the piece drifts into a career recital --
+    #     the topic becomes a frame for the author rather than the reverse;
+    #   * with none, nothing says "do not invent any", so the agent supplies
+    #     plausible projects and outcomes that never happened. Nothing checks
+    #     that, because a fabricated anecdote is exactly as schema-valid as a
+    #     real one.
+    #
+    # The retrieval layer already decides *relevance*: contextweave mode drops
+    # an answer below `min_confidence` and returns no context at all. So an
+    # empty block here is a real signal -- "nothing relevant was found" -- and
+    # is worth saying out loud rather than leaving as an absence.
     if rag_context:
-        parts.append("RAG_CONTEXT:")
+        parts.append("VERIFIED_EXPERIENCE (retrieved from the author's own corpus):")
         parts.append(rag_context)
+        parts.append("")
+        parts.append("HOW TO USE IT:")
+        parts.append("- Draw on it only where it genuinely supports the point being made.")
+        parts.append("- It is supporting evidence, not the subject. The piece is about the "
+                     "topic; a reader who has never heard of the author must still come away "
+                     "with something useful.")
+        parts.append("- Do not stretch it to cover claims it does not support, and do not add "
+                     "experience that is not in it.")
+        parts.append("")
+    else:
+        parts.append("NO_VERIFIED_EXPERIENCE:")
+        parts.append("The knowledge layer returned nothing relevant enough for this topic.")
+        parts.append("- Write from general technical expertise instead. That is a complete, "
+                     "acceptable answer here — not a gap to paper over.")
+        parts.append("- Do NOT invent, imply or imagine personal experience: no projects, "
+                     "employers, incidents, metrics or outcomes attributed to the author.")
+        parts.append("- First person about analysis and opinion is fine. First person about "
+                     "things done is not.")
         parts.append("")
 
     # ── Prior step outputs — strip fields already shown above ─────────────────

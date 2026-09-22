@@ -174,7 +174,7 @@ class PromptBuilderIntegrationTests(unittest.TestCase):
         )
         return TeamConfig(team={}, globals=globals_obj, agents=[agent], workflow=[], schemas={}), agent
 
-    def test_contextweave_context_renders_under_rag_context(self):
+    def test_contextweave_context_renders_as_verified_experience(self):
         from src.orchestrator.contextweave_client import format_rag_context
         from src.orchestrator.prompt_builder import build_prompt
 
@@ -184,7 +184,8 @@ class PromptBuilderIntegrationTests(unittest.TestCase):
 
         prompt = build_prompt(team, agent, step_inputs, {}, rag_context, "", "")
 
-        self.assertIn("RAG_CONTEXT:\n[RAG #1] SOURCE: contextweave:answer", prompt)
+        self.assertIn("VERIFIED_EXPERIENCE", prompt)
+        self.assertIn("[RAG #1] SOURCE: contextweave:answer", prompt)
         self.assertIn("Neptune holds routing weights.", prompt)
 
     def test_rag_meta_is_not_exposed_to_the_agent(self):

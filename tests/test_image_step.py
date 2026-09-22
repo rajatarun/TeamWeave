@@ -292,6 +292,9 @@ def test_the_shipped_config_parses_with_its_modality(monkeypatch):
     )
     monkeypatch.setattr(config_loader, "_s3_get_json", lambda *a, **kw: doc)
     monkeypatch.setenv("CONFIG_BUCKET", "b")
+    # The shipped team declares rag.mode=contextweave, and _validate_rag
+    # refuses to load it with no URL rather than letting a run go ungrounded.
+    monkeypatch.setenv("CONTEXTWEAVE_URL", "https://contextweave.example/prod")
 
     cfg, _ = config_loader.load_team_config("tarun_visibility_team", "v1")
     by_modality = {}
@@ -569,6 +572,9 @@ def test_the_shipped_config_parses_with_its_provider(monkeypatch):
     )
     monkeypatch.setattr(config_loader, "_s3_get_json", lambda *a, **kw: doc)
     monkeypatch.setenv("CONFIG_BUCKET", "b")
+    # The shipped team declares rag.mode=contextweave, and _validate_rag
+    # refuses to load it with no URL rather than letting a run go ungrounded.
+    monkeypatch.setenv("CONTEXTWEAVE_URL", "https://contextweave.example/prod")
 
     cfg, _ = config_loader.load_team_config("tarun_visibility_team", "v1")
     image_agents = [a for a in cfg.agents if a.bedrock.modality == "image"]
