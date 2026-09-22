@@ -1,5 +1,7 @@
+import math
 import os
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 import boto3
@@ -41,6 +43,40 @@ class DbDao:
             return [cls._strip_empty_strings(x) for x in obj]
         return obj
 
+    @classmethod
+    def _to_dynamo_numbers(cls, obj: Any) -> Any:
+        """DynamoDB has no float type and boto3's resource refuses one outright.
+
+        This has to live here rather than at each call site, because what this
+        DAO writes is not a fixed set of fields: `inputs_json` and
+        `output_json` carry whatever the retrieval layer and the agents
+        produced. A run died on `rag_meta.confidence` -- one float, from
+        ContextWeave, nested two levels down in a step record -- and any agent
+        answering with a score, a ratio or a temperature would have done the
+        same. The error arrives from the SDK naming only the type, after the
+        model has been paid for and the work done.
+
+        `Decimal(str(x))` rather than `Decimal(x)`: the latter takes the full
+        binary expansion (`Decimal(0.1)` is 55 significant digits) and
+        DynamoDB accepts 38. Rounding to 8 d.p. matches `mcp_observatory`'s
+        `_to_decimal`, so the platform stores numbers one way.
+
+        A non-finite float is kept as its string form. `json.loads` accepts
+        `NaN` and `Infinity` by default, so an agent's output can carry one;
+        `Decimal("NaN")` is refused by the same serializer with a different
+        message, and dropping the key would lose the one value that explains
+        what went wrong.
+        """
+        if isinstance(obj, dict):
+            return {k: cls._to_dynamo_numbers(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [cls._to_dynamo_numbers(x) for x in obj]
+        if isinstance(obj, float):
+            if not math.isfinite(obj):
+                return str(obj)
+            return Decimal(str(round(obj, 8)))
+        return obj
+
     @staticmethod
     def _ensure_required_indexes(item: Dict[str, Any]) -> None:
         status = item.get("status")
@@ -53,7 +89,7 @@ class DbDao:
             item.pop("publishedAt", None)
 
     def _safe_put(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        cleaned = self._strip_empty_strings(item)
+        cleaned = self._to_dynamo_numbers(self._strip_empty_strings(item))
         self._ensure_required_indexes(cleaned)
         try:
             log.info("ddb_put", extra={"pk": cleaned.get("pk"), "sk": cleaned.get("sk"), "table": self.table_name})
