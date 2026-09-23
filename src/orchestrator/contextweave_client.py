@@ -53,6 +53,7 @@ QUERY_PATH = "/query-expertise"
 FEEDBACK_PATH = "/feedback"
 HEALTH_PATH = "/health"
 ROUTING_DECISIONS_PATH = "/routing-decisions"
+HEALTH_QUERY_PATH = "/health/query"
 
 # Matches the read timeout used for the other external JSON API (gemini.py);
 # ContextWeave runs a full RAG pipeline on a cache miss.
@@ -101,7 +102,8 @@ def _headers() -> Dict[str, str]:
     return headers
 
 
-def _post(path: str, body: Dict[str, Any], max_retries: int = _MAX_RETRIES) -> Optional[Dict[str, Any]]:
+def _post(path: str, body: Dict[str, Any], max_retries: int = _MAX_RETRIES,
+          bearer: str = "") -> Optional[Dict[str, Any]]:
     """POST JSON to ContextWeave; return the decoded body or None on failure.
 
     Retries transport errors and 5xx responses; a 4xx is a contract problem that
@@ -112,10 +114,14 @@ def _post(path: str, body: Dict[str, Any], max_retries: int = _MAX_RETRIES) -> O
         log.warning("contextweave_not_configured", extra={"required": ["CONTEXTWEAVE_URL"]})
         return None
 
+    headers = _headers()
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+
     req = urllib.request.Request(
         url + path,
         data=json.dumps(body).encode("utf-8"),
-        headers=_headers(),
+        headers=headers,
         method="POST",
     )
 
@@ -363,3 +369,40 @@ def format_rag_context(payload: Dict[str, Any]) -> str:
         blocks.append("---")
 
     return "\n".join(blocks).strip()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The health store
+# ─────────────────────────────────────────────────────────────────────────────
+
+def query_health_record(question: str, *, token: str, top_k: int = 6) -> Dict[str, Any]:
+    """Ask the person's own health record a question, as that person.
+
+    Unlike every other call in this module, this one **refuses** rather than
+    degrading when it is not configured. The rest of ContextWeave answers about
+    a public corpus, so "no context" is a worse answer and nothing more. This
+    route is the only authenticated one on that API, and a call without a token
+    is not a degraded read -- it is a request that should never have been made.
+    Returning "nothing found" for it would teach the caller that the record is
+    empty, which is a different and worse untruth than "I could not ask".
+
+    Returns the health API's own body on success, or `{"error": ...}` --
+    `weave_tools` promises every tool result carries one or the other, and an
+    agent that cannot tell a failed lookup from an empty one fills in the blank
+    itself.
+    """
+    if not token:
+        return {"error": "no caller token: the health record is read as the "
+                         "person who started the run, and this run carries no "
+                         "bearer token"}
+    question = str(question or "").strip()
+    if not question:
+        return {"error": "a question is required"}
+
+    body = _post(HEALTH_QUERY_PATH, {"question": question, "topK": int(top_k)},
+                 bearer=token)
+    if body is None:
+        # `_post` has already logged the path and status. Deliberately no
+        # detail here: a 4xx body from this route can quote the record.
+        return {"error": "the health record could not be reached"}
+    return body

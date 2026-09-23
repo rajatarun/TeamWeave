@@ -274,7 +274,14 @@ def run_team_pipeline(
     version: str,
     request_obj: Dict[str, Any],
     run_id: Optional[str] = None,
+    caller_token: str = "",
 ) -> Dict[str, Any]:
+    """`caller_token` is the bearer token the person presented to start this
+    run. It is handed to `execute_pre_tools` and to nothing else -- in
+    particular it never enters `step_inputs`, which `dao.put_step` persists,
+    nor any agent prompt. Only a tool whose rule declares
+    `needs_caller_token` ever receives it.
+    """
     run_id = run_id or str(uuid.uuid4())
     team_cfg, team_raw = load_team_config(team, version)
     dao = DbDao.from_team_config(team_raw)
@@ -342,7 +349,11 @@ def run_team_pipeline(
         )
 
         # ── Pre-tools — run before agent, inject results into step context ──
-        step_inputs = execute_pre_tools(step_def, step_inputs)
+        # The team and the caller's token are passed as arguments rather than
+        # placed in step_inputs: the tool results go into the step record, and
+        # a bearer token in a persisted record outlives the run that needed it.
+        step_inputs = execute_pre_tools(
+            step_def, step_inputs, team=team, caller_token=caller_token)
 
         # An image agent is a team member in team.json but not an agent *turn*:
         # Bedrock's image models do not implement Converse, which is all the
@@ -522,4 +533,8 @@ def handler(event, context):
     if not team or not version:
         raise ValueError("team and version are required in the event payload")
 
-    return run_team_pipeline(team, version, request_obj, run_id=event.get("run_id"))
+    return run_team_pipeline(
+        team, version, request_obj,
+        run_id=event.get("run_id"),
+        caller_token=str(event.get("caller_token") or ""),
+    )

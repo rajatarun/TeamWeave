@@ -47,10 +47,17 @@ from .tools.weave_tools import (
     lookup_data_element,
     plan_api_call,
     propose_data_element,
+    query_health_record,
     search_data_elements,
     site_metrics,
 )
-from .tool_rules import is_refused, refusal_message
+from .tool_rules import (
+    is_refused,
+    refusal_message,
+    requires_caller_token,
+    team_allowed,
+    team_refusal_message,
+)
 
 log = get_logger("tool_registry")
 
@@ -81,6 +88,9 @@ TOOL_REGISTRY: Dict[str, Callable[..., Any]] = {
     "crawl_site": crawl_site,
     "site_metrics": site_metrics,
     "plan_api_call": plan_api_call,
+    # Restricted to one team and callable only as the person who started the
+    # run; both are enforced in execute_tool, not here and not in team.json.
+    "query_health_record": query_health_record,
 }
 
 
@@ -154,11 +164,17 @@ def _build_tool_args(tool_cfg: Dict[str, Any], step_inputs: Dict[str, Any]) -> D
 # ---------------------------------------------------------------------------
 
 
-def execute_tool(name: str, args: Dict[str, Any]) -> Any:
+def execute_tool(name: str, args: Dict[str, Any], *,
+                 team: str = "", caller_token: str = "") -> Any:
     """
     Look up *name* in the registry and call it with *args* as kwargs.
 
     Raises KeyError if the tool is not registered.
+
+    `team` and `caller_token` come from the worker, never from the team config.
+    That is the point of passing them here rather than resolving them like any
+    other argument: a config is JSON in S3, edited without a deploy, so a
+    restriction or a credential expressed there is neither.
     """
     if is_refused(name):
         # Raised, not logged and skipped. execute_pre_tools swallows tool
@@ -166,14 +182,29 @@ def execute_tool(name: str, args: Dict[str, Any]) -> Any:
         # to commit and quietly did not would report success for work it never
         # did, which is worse than the run failing here.
         raise PermissionError(refusal_message(name))
+    if not team_allowed(name, team):
+        raise PermissionError(team_refusal_message(name, team))
     if name not in TOOL_REGISTRY:
         raise KeyError(f"Tool '{name}' is not registered. Available: {list(TOOL_REGISTRY)}")
+
+    call_args = dict(args)
+    if requires_caller_token(name):
+        # Overwritten, not defaulted: a config that set `caller_token` in its
+        # args would otherwise choose the identity the call is made under.
+        call_args["caller_token"] = caller_token
+    elif "caller_token" in call_args:
+        # A tool with no rule saying it needs one has no business receiving it.
+        call_args.pop("caller_token")
+
     fn = TOOL_REGISTRY[name]
-    log.info("tool_execute name=%s args_keys=%s", name, list(args))
-    return fn(**args)
+    # The token is never a logged argument. `list(args)` prints key names only,
+    # and the key is added after this line for exactly that reason.
+    log.info("tool_execute name=%s team=%s args_keys=%s", name, team, list(args))
+    return fn(**call_args)
 
 
-def execute_pre_tools(step_def: Dict[str, Any], step_inputs: Dict[str, Any]) -> Dict[str, Any]:
+def execute_pre_tools(step_def: Dict[str, Any], step_inputs: Dict[str, Any], *,
+                      team: str = "", caller_token: str = "") -> Dict[str, Any]:
     """
     Run every tool listed under ``step_def["pre_tools"]``.
 
@@ -192,7 +223,7 @@ def execute_pre_tools(step_def: Dict[str, Any], step_inputs: Dict[str, Any]) -> 
         name = tool_cfg.get("name", "")
         try:
             args = _build_tool_args(tool_cfg, step_inputs)
-            result = execute_tool(name, args)
+            result = execute_tool(name, args, team=team, caller_token=caller_token)
             tool_results[name] = result
             log.info("pre_tool_succeeded name=%s", name)
         except Exception:

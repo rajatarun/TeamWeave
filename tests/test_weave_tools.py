@@ -143,7 +143,14 @@ def test_every_rule_says_when_and_when_not():
         assert rule.use_when.strip(), f"{name} has no use_when"
         assert rule.never_when.strip(), f"{name} has no never_when"
         assert rule.effect in {tool_rules.READ, tool_rules.PROPOSE, tool_rules.COMMIT}
-        assert rule.sibling in mcp_client.SIBLING_ENV, f"{name} names unknown sibling"
+        assert rule.transport in {tool_rules.MCP, tool_rules.HTTP}
+        # Whichever map matches the transport -- a rule naming a sibling in
+        # neither points at a service nothing can supply an address for.
+        known = (mcp_client.SIBLING_ENV if rule.transport == tool_rules.MCP
+                 else tool_rules.HTTP_SIBLING_ENV)
+        assert rule.sibling in known, (
+            f"{name} names sibling '{rule.sibling}', which no {rule.transport} "
+            f"address is configured for")
 
 
 def test_an_unknown_tool_names_the_rules_table():
@@ -241,8 +248,11 @@ def test_a_sibling_tool_is_only_declared_where_the_endpoint_is_wired():
                 rule = tool_rules.RULES.get(tool["name"])
                 if rule is None:
                     continue
-                assert rule.sibling in mcp_client.SIBLING_ENV, (
-                    f"{name} reaches {rule.sibling}, which no env var supplies"
+                known = (mcp_client.SIBLING_ENV if rule.transport == tool_rules.MCP
+                         else tool_rules.HTTP_SIBLING_ENV)
+                assert rule.sibling in known, (
+                    f"{name} reaches {rule.sibling} over {rule.transport}, "
+                    f"which no env var supplies"
                 )
 
 

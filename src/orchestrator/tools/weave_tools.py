@@ -83,3 +83,23 @@ def site_metrics(session_id: str = "", **_ignored: Any) -> Dict[str, Any]:
 def plan_api_call(prompt: str = "", **_ignored: Any) -> Dict[str, Any]:
     """Turn prose into a concrete API call plan, without making the call."""
     return _run("plan_api_call", {"prompt": str(prompt or "")})
+
+
+# ── ContextWeave: the person's own health record ────────────────────────────
+
+def query_health_record(question: str = "", caller_token: str = "",
+                        top_k: int = 6, **_ignored: Any) -> Dict[str, Any]:
+    """Ask the health store, over HTTP rather than MCP, as the caller.
+
+    `caller_token` is injected by `execute_tool` from the bearer token the
+    person presented; it is deliberately not something a team config can
+    supply, because a config is JSON in S3 and a credential named there would
+    be a credential anyone with write access could point somewhere else.
+    """
+    from ..contextweave_client import query_health_record as _query
+
+    rule = rule_for("query_health_record")
+    result = _query(str(question or ""), token=str(caller_token or ""),
+                    top_k=int(top_k or 6))
+    result.setdefault("used_for", rule.use_when)
+    return result

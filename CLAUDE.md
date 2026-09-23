@@ -600,15 +600,20 @@ clutter, each with its runtime and its map entry.
 | `daily_operator` | 2 | none | a brain dump → the one thing worth doing today |
 | `linkedin_quick_post` | 2 | ContextWeave | a rough thought → a publishable post, in two turns |
 | `job_hunter` | 3 | ScreenWeave crawl + ContextWeave | a posting URL → an honest fit read and an outreach note |
-| `health_prep` | 2 | none | symptoms → questions for a clinician, never a diagnosis |
+| `health_prep` | 2 | ContextWeave health store | symptoms → questions for a clinician, never a diagnosis |
 
 **Say which parts are grounded and which are reasoning.** An agent cannot
 choose to call a tool here, so a team is grounded only where a *pre-tool*
 fetches something: `job_hunter` really reads the posting, and it and
-`linkedin_quick_post` really read the author's corpus. `daily_operator` and
-`health_prep` ground in nothing, because nothing in a corpus knows what is in
-someone's head or body — and their constraints say so rather than letting an
-agent imply otherwise.
+`linkedin_quick_post` really read the author's corpus. `health_prep` reads the
+person's own health record — a *separate* store from that corpus, and the
+section below is about why that separation survives being wired to.
+`daily_operator` grounds in nothing, because nothing in a corpus knows what is
+in someone's head — and its constraints say so rather than letting an agent
+imply otherwise. Neither grounded team may treat a retrieval as a history it
+is free to supply: a fabricated medical timeline is exactly as schema-valid as
+a real one, so both the team constraint and the consuming agent's
+`goal_template` name what `error` and `found: false` mean.
 
 **`job_hunter` is the one that earns three turns.** Reading a posting,
 matching it against a record, and writing to a person are three different
@@ -617,6 +622,50 @@ analyst is told that `skip` is a good answer: inflating a partial match buys
 an interview the person cannot survive. `application_note_v1` carries
 `what_it_claims` and `do_not_send_if` for the same reason — the person checks
 the claims before sending, not after.
+
+**`health_prep` reads the person's own health record, as that person.**
+ContextWeave keeps medical records in their own database, behind their own
+role, behind the only authorizer on that API — precisely so a content team
+asking about "work under pressure" cannot retrieve a chunk of a discharge
+summary. Wiring a tool to that store puts the property back at risk in two
+ways, so `query_health_record` carries two fields no other rule has, and each
+answers one of them:
+
+- **`needs_caller_token`** — there is no service credential. The call is made
+  with the bearer token the person presented when they started the run, so the
+  identity ContextWeave authorises is the identity whose record it is. Both
+  APIs sit behind the *same* SIWE authorizer, so the token that got them into
+  TeamWeave already validates there: passing it on is the absence of a
+  credential rather than a new one. A token in the worker's environment would
+  mean any run could read the record — ambient authority over exactly the data
+  that should have none.
+- **`only_teams=("health_prep",)`** — a team config is JSON in S3, edited with
+  no deploy and no review. Adding this tool to `linkedin_quick_post` there
+  would otherwise be enough to put a medical record in a draft post. The
+  allowlist is checked in `execute_tool` against the team the *worker* passes
+  down, so both barriers must be removed and only one of them is reachable
+  without a commit. `execute_post_tools` passes no team, so a post-tool
+  declaring it is refused by construction rather than by remembering to.
+
+The token is an argument to `execute_pre_tools`, never a member of
+`step_inputs` — `dao.put_step` persists those, and a bearer token in a
+persisted record outlives the run that needed it. It is overwritten rather
+than defaulted on the way in, because a config that set `caller_token` in its
+`args` would otherwise choose the identity the record is read under, and a
+tool whose rule does not ask for one has it stripped.
+
+What it costs, said plainly: the token travels in the Step Functions execution
+input and is retained in execution history. The JWT's own TTL bounds it. The
+alternative — a service credential — is worse in a way no TTL fixes.
+
+Unlike every other ContextWeave call, this one **refuses** rather than
+degrading when there is no token. The rest of that service answers about a
+public corpus, where "no context" is merely a worse answer; returning
+"nothing found" here would tell the agent the person's records are empty,
+which is a different and worse untruth than "I could not ask".
+
+`A2A message:send` cannot start this team — it sends `brief`/`skill_id` rather
+than `team`/`version`/`request` — so no token is plumbed there.
 
 **`health_prep` prepares for care; it does not practise it.** Never a
 diagnosis, never a medicine or a dose, and an emergency is answered with

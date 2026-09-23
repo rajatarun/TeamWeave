@@ -52,6 +52,35 @@ def _json_body(event: Dict[str, Any]) -> Dict[str, Any]:
         return {}
 
 
+def _bearer_token(event: Dict[str, Any]) -> str:
+    """The token the caller already presented to reach this endpoint.
+
+    Every route on this API sits behind the SIWE authorizer, and ContextWeave's
+    health routes sit behind the *same* one -- so the token that got the person
+    in here is the token that authorises reading their own record. Passing it
+    on is therefore not a new credential: it is the absence of one. A service
+    token in the worker's environment would let any run read the record, which
+    is ambient authority over exactly the data that should have none.
+
+    What it costs, said plainly: the token travels in the Step Functions
+    execution input and is retained in execution history for as long as AWS
+    keeps it. It is not written into any step record, and the JWT's own TTL
+    bounds it.
+
+    Header casing is not guaranteed across API Gateway payload versions, so
+    the lookup is case-insensitive rather than trusting one spelling.
+    """
+    headers = event.get("headers") or {}
+    raw = ""
+    for key, value in headers.items():
+        if str(key).lower() == "authorization":
+            raw = str(value or "")
+            break
+    if raw.lower().startswith("bearer "):
+        return raw[7:].strip()
+    return raw.strip()
+
+
 def _start_async_execution(state_machine_arn: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     run_id = run_ids.new_run_id()
     payload_with_run_id = {**payload, "run_id": run_id}
@@ -201,7 +230,14 @@ def handler(event, context):
         try:
             return _start_async_execution(
                 state_machine_arn,
-                {"team": team, "version": version, "request": request_obj},
+                {
+                    "team": team,
+                    "version": version,
+                    "request": request_obj,
+                    # Only a tool whose rule declares `needs_caller_token` ever
+                    # sees this, and no step record carries it.
+                    "caller_token": _bearer_token(event),
+                },
             )
         except ClientError as exc:
             return _resp(500, {"error": exc.response.get("Error", {}).get("Message", str(exc))})

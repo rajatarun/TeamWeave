@@ -29,16 +29,33 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 READ, PROPOSE, COMMIT = "read", "propose", "commit"
+MCP, HTTP = "mcp", "http"
+
+# Siblings reached over their own HTTP API rather than over MCP, and the
+# variable that seeds the address. `mcp_client.SIBLING_ENV` is the MCP half;
+# a rule must name a sibling in whichever map matches its transport, or it
+# points at a service nothing can supply an address for.
+HTTP_SIBLING_ENV = {"contextweave": "CONTEXTWEAVE_URL"}
 
 
 @dataclass(frozen=True)
 class ToolRule:
     tool: str          # the name a team.json step declares
     sibling: str
-    mcp_tool: str      # the tool as that sibling names it
+    mcp_tool: str      # the operation as that sibling names it
     effect: str        # read | propose | commit
     use_when: str
     never_when: str
+    transport: str = MCP
+    # Empty means any team may declare it. A non-empty tuple is enforced in
+    # `execute_tool` against the team the *worker* passes down, not against
+    # anything in the config -- team configs live in S3 and are edited without
+    # a deploy, so a restriction expressed only there is not a restriction.
+    only_teams: tuple = ()
+    # The tool is called as the person who started the run, with the bearer
+    # token they presented. There is no service credential to fall back to:
+    # see `query_health_record` below for why that is the whole design.
+    needs_caller_token: bool = False
 
 
 RULES: Dict[str, ToolRule] = {rule.tool: rule for rule in [
@@ -124,6 +141,44 @@ RULES: Dict[str, ToolRule] = {rule.tool: rule for rule in [
         use_when="never from a pipeline step; a person holds the token",
         never_when="always -- refused at execution",
     ),
+
+    # ── ContextWeave: the person's own health record ────────────────────────
+    #
+    # The only tool here that reads something about a *person* rather than
+    # about the platform, and the two extra fields are why it can exist at all.
+    #
+    # ContextWeave keeps medical records in their own database, behind their
+    # own role, behind the only authorizer on that API -- precisely so that a
+    # content team asking about "work under pressure" cannot retrieve a chunk
+    # of a discharge summary. Wiring a tool to it puts that back at risk in two
+    # ways, and each has its own barrier:
+    #
+    #   `needs_caller_token`  There is no service credential. The call is made
+    #       with the bearer token the person presented when they started the
+    #       run, so the identity ContextWeave authorises is the identity whose
+    #       record it is. A token in the worker's environment would mean *any*
+    #       run could read the record, which is ambient authority over exactly
+    #       the data that should have none.
+    #
+    #   `only_teams`  A team config is JSON in S3, edited with no deploy and no
+    #       review. Adding this tool to `linkedin_quick_post` there would
+    #       otherwise be enough to put a medical record into a draft post. The
+    #       allowlist is checked in code against the team the worker is
+    #       running, so both barriers have to be removed, and only one of them
+    #       is reachable without a commit.
+    ToolRule(
+        tool="query_health_record",
+        sibling="contextweave", mcp_tool="POST /health/query", effect=READ,
+        transport=HTTP,
+        only_teams=("health_prep",),
+        needs_caller_token=True,
+        use_when="a health step needs what the person's own uploaded records "
+                 "actually say -- a previous result, a date, a prescribed "
+                 "change -- rather than the model's guess at their history",
+        never_when="any team that is not preparing this person for care; and "
+                   "never to answer a clinical question, which the record "
+                   "cannot settle and this platform must not attempt",
+    ),
 ]}
 
 
@@ -155,4 +210,26 @@ def refusal_message(tool: str) -> str:
         f"prompt -- a pipeline step is that caller. Use "
         f"{', '.join(tools_by_effect(PROPOSE)) or 'the propose half'} and hand "
         f"the token to a person."
+    )
+
+
+def requires_caller_token(tool: str) -> bool:
+    """True for a tool that must be called as the person, or not at all."""
+    return tool in RULES and RULES[tool].needs_caller_token
+
+
+def team_allowed(tool: str, team: str) -> bool:
+    rule = RULES.get(tool)
+    if rule is None or not rule.only_teams:
+        return True
+    return team in rule.only_teams
+
+
+def team_refusal_message(tool: str, team: str) -> str:
+    rule = RULES[tool]
+    return (
+        f"'{tool}' reads {rule.sibling}.{rule.mcp_tool} and is restricted to "
+        f"{', '.join(rule.only_teams)}; this run is team '{team or '<unset>'}'. "
+        f"The restriction is in code rather than in team.json because team "
+        f"configs are edited in S3 without a deploy."
     )
