@@ -18,9 +18,12 @@ botocore>=1.43.92
 PyYAML>=6.0
 
 pytest>=8.0
-# Ships the published CloudFormation resource schemas, which
-# tests/test_agentcore_infra.py checks the template against. Without it that
-# test skips, and a skipped test in CI is not a test.
+# Ships the published CloudFormation resource schemas.
+# tests/test_agentcore_infra.py checks AgentCore resources against them, and
+# tests/test_template_lint.py runs the linter on infra/template.yaml so an
+# error such as E3034 fails pytest rather than the later deploy-time
+# `sam validate --lint`. Without the package the AgentCore test skips, and
+# a skipped test in CI is not a test.
 cfn-lint
 
 # tests/test_agentcore_entrypoint.py boots the real AgentCore entrypoint over
