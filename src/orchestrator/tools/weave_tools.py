@@ -89,17 +89,29 @@ def plan_api_call(prompt: str = "", **_ignored: Any) -> Dict[str, Any]:
 
 def query_health_record(question: str = "", caller_token: str = "",
                         top_k: int = 6, **_ignored: Any) -> Dict[str, Any]:
-    """Ask the health store, over HTTP rather than MCP, as the caller.
+    """Ask the person's health records, as that person.
 
     `caller_token` is injected by `execute_tool` from the bearer token the
     person presented; it is deliberately not something a team config can
     supply, because a config is JSON in S3 and a credential named there would
     be a credential anyone with write access could point somewhere else.
+
+    When ``HEALTH_KNOWLEDGE_BASE_ID`` is set, the excerpts come from the
+    Bedrock knowledge base over ContextWeave's health bucket. The token is
+    still required first: Retrieve is an IAM call, and without the gate a
+    run with nobody behind it would read the record. When the base is unset,
+    the same token is the bearer on the health API.
     """
     from ..contextweave_client import query_health_record as _query
+    from ..health_kb import retrieve
 
     rule = rule_for("query_health_record")
-    result = _query(str(question or ""), token=str(caller_token or ""),
-                    top_k=int(top_k or 6))
+    token = str(caller_token or "")
+    if not token.strip():
+        result = _query(str(question or ""), token=token, top_k=int(top_k or 6))
+    else:
+        result = retrieve(str(question or ""), top_k=int(top_k or 6))
+        if result is None:
+            result = _query(str(question or ""), token=token, top_k=int(top_k or 6))
     result.setdefault("used_for", rule.use_when)
     return result

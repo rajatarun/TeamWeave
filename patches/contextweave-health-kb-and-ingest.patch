@@ -1,0 +1,104 @@
+diff --git a/src/health_api/handler.py b/src/health_api/handler.py
+index fc00090..61a821a 100644
+--- a/src/health_api/handler.py
++++ b/src/health_api/handler.py
+@@ -25,7 +25,9 @@ import logging
+ import os
+ from typing import Any
+ 
+-from ..shared import health_db
++from .layout import shared_module
++
++health_db = shared_module("health_db")
+ 
+ logger = logging.getLogger(__name__)
+ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+@@ -90,7 +92,7 @@ def query(body: dict, *, bedrock=None, embed=None) -> dict:
+     # embedding stack being importable, and a test must not have to import
+     # Bedrock and the observability wrapper to check a disclaimer.
+     if embed is None:
+-        from ..shared.embedder import embed_text as embed
++        embed = shared_module("embedder").embed_text
+ 
+     embedding = embed(question)
+     if embedding is None:
+diff --git a/src/health_api/ingest.py b/src/health_api/ingest.py
+index fa501c6..0ce534d 100644
+--- a/src/health_api/ingest.py
++++ b/src/health_api/ingest.py
+@@ -16,7 +16,9 @@ import os
+ from typing import Any
+ from urllib.parse import unquote_plus
+ 
+-from ..shared import health_db
++from .layout import shared_module
++
++health_db = shared_module("health_db")
+ 
+ logger = logging.getLogger(__name__)
+ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+@@ -65,7 +67,7 @@ def ingest_object(bucket: str, key: str, *, s3=None, embed=None) -> dict:
+     # and the observability wrapper, and a *withdrawal* needs none of that.
+     # Deleting a record must not depend on the embedding stack being healthy.
+     if embed is None:
+-        from ..shared.embedder import embed_texts as embed
++        embed = shared_module("embedder").embed_texts
+ 
+     vectors = embed(pieces)
+     rows = [(c, v) for c, v in zip(pieces, vectors) if v is not None]
+diff --git a/src/health_api/layout.py b/src/health_api/layout.py
+new file mode 100644
+index 0000000..edb6efe
+--- /dev/null
++++ b/src/health_api/layout.py
+@@ -0,0 +1,23 @@
++"""Load `shared` under both package layouts this module is imported in.
++
++Lambda sets `CodeUri` to `src/` and the handler to `health_api.ingest`.
++`health_api` is then the top-level package, and `from ..shared` raises
++`ImportError: attempted relative import beyond top-level package` — the
++function never starts.
++
++Tests import `src.health_api`, where `shared` really is the sibling
++`src.shared` and the relative import is the one that resolves. Both have to
++keep working: a fix that only satisfies the test layout is how this shipped.
++"""
++from __future__ import annotations
++
++import importlib
++from types import ModuleType
++
++
++def shared_module(name: str) -> ModuleType:
++    package = __package__ or ""
++    if "." in package:
++        parent = package.rsplit(".", 1)[0]
++        return importlib.import_module(f"{parent}.shared.{name}")
++    return importlib.import_module(f"shared.{name}")
+diff --git a/tests/test_health_store.py b/tests/test_health_store.py
+index 4e8aac7..365ec4d 100644
+--- a/tests/test_health_store.py
++++ b/tests/test_health_store.py
+@@ -338,3 +338,22 @@ def test_ingest_cannot_write_to_the_health_bucket():
+                   (st["Action"] if isinstance(st["Action"], list) else [st["Action"]])
+                   if a.startswith("s3:")]
+     assert s3_actions == ["s3:GetObject"], s3_actions
++
++
++def test_the_handler_imports_when_health_api_is_top_level():
++    """The Lambda layout: CodeUri is src/, handler is health_api.ingest.
++
++    Importing the package as src.health_api — what the unit tests do — makes
++    `from ..shared` legal. The runtime does not import it that way, and that
++    is the ImportModuleError.
++    """
++    import subprocess
++    import sys
++
++    completed = subprocess.run(
++        [sys.executable, "-c", "import health_api.ingest, health_api.handler"],
++        cwd=REPO / "src",
++        capture_output=True,
++        text=True,
++    )
++    assert completed.returncode == 0, completed.stderr

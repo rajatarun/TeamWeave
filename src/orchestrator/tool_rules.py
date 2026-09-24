@@ -153,12 +153,15 @@ RULES: Dict[str, ToolRule] = {rule.tool: rule for rule in [
     # of a discharge summary. Wiring a tool to it puts that back at risk in two
     # ways, and each has its own barrier:
     #
-    #   `needs_caller_token`  There is no service credential. The call is made
-    #       with the bearer token the person presented when they started the
-    #       run, so the identity ContextWeave authorises is the identity whose
-    #       record it is. A token in the worker's environment would mean *any*
-    #       run could read the record, which is ambient authority over exactly
-    #       the data that should have none.
+    #   `needs_caller_token`  The lookup does not run unless the run carries
+    #       the bearer token the person presented. When HEALTH_KNOWLEDGE_BASE_ID
+    #       is set, the excerpts come from Retrieve against that one base —
+    #       the index of ContextWeave's health bucket — and the token is the
+    #       gate in front of the call. Bedrock does not accept it as a
+    #       credential. When the base is unset, the same token is the bearer
+    #       on POST /health/query, which is the identity ContextWeave
+    #       authorises. A token stored in the worker's environment would mean
+    #       any run could read the record.
     #
     #   `only_teams`  A team config is JSON in S3, edited with no deploy and no
     #       review. Adding this tool to `linkedin_quick_post` there would

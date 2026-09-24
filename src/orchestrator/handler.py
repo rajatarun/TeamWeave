@@ -6,7 +6,7 @@ from .logger import get_logger
 from .config_loader import load_team_config
 from .prompt_builder import build_prompt
 from .bedrock_invoke import invoke_agent
-from .storage import save_artifact
+from .storage import request_text, save_artifact
 from .rag import get_rag_context
 from .gemini import gemini_research_brief
 from .profile_context import get_owner_profile_context
@@ -192,7 +192,7 @@ def _run_team_pipeline(team: str, version: str, request_obj: Dict[str, Any]) -> 
                 )
                 out_json = _build_transform_fallback(raw_text, transform_error)
 
-        artifact_uri = save_artifact(run_id, step_id, out_json)
+        artifact_uri = save_artifact(run_id, step_id, out_json, summary=request_text(request_obj))
         dao.put_step(run_id, step_id, "SUCCEEDED", step_inputs, out_json, error=None, artifact_uri=artifact_uri)
 
         outputs[step_id] = out_json

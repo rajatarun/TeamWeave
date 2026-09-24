@@ -40,8 +40,8 @@
       "bedrock": {
         "agentId": "",
         "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_id": "us.amazon.nova-lite-v1:0",
+        "shadow_model_id": "us.amazon.nova-pro-v1:0",
         "model_aliases": {
           "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
@@ -51,7 +51,7 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Find the one claim in this thought worth someone's attention, and the hook that earns the first line. Set evidence_available from whether VERIFIED_EXPERIENCE actually supports it \u2014 an empty block means nothing relevant was found, which is a real answer and not a blank to fill. If the thought is thin, set not_worth_posting and say why; that is a useful result.",
+      "goal_template": "Find the one claim in this thought worth someone's attention, and the hook that earns the first line. Do not hand the thought back in cleaner words: name the claim, who it is for, and the argument the post will make that the rough note did not already contain. Set evidence_available from whether VERIFIED_EXPERIENCE actually supports it \u2014 an empty block means nothing relevant was found, which is a real answer and not a blank to fill. If the thought is thin, set not_worth_posting and say why; that is a useful result.",
       "schema_ref": "post_angle_v1"
     },
     {
@@ -62,8 +62,8 @@
       "bedrock": {
         "agentId": "",
         "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_id": "us.amazon.nova-lite-v1:0",
+        "shadow_model_id": "us.amazon.nova-pro-v1:0",
         "model_aliases": {
           "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
@@ -73,7 +73,7 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Write the post from the angle. Short paragraphs, no hashtag spam, no 'thoughts?' ending. first_line has to work alone \u2014 it is all most people see. Put every personal claim you made into personal_claims_made and anything you could not support into needs_source, so the person checks before publishing rather than after.",
+      "goal_template": "Write the post from the angle. It has to add a consequence, a structure, or a concrete move the rough thought did not already spell out \u2014 a paraphrase of the input is not a post. Short paragraphs, no hashtag spam, no 'thoughts?' ending. first_line has to work alone \u2014 it is all most people see. Put every personal claim you made into personal_claims_made and anything you could not support into needs_source, so the person checks before publishing rather than after.",
       "schema_ref": "short_post_v1"
     }
   ],
