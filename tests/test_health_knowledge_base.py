@@ -320,13 +320,18 @@ def test_a_sync_already_running_is_not_a_failure(monkeypatch):
     monkeypatch.setenv("HEALTH_DATA_SOURCE_ID", "DSHEALTH")
 
     class Client:
+        def list_ingestion_jobs(self, **kwargs):
+            return {"ingestionJobSummaries": []}
+
         def start_ingestion_job(self, **kwargs):
             raise ClientError(
                 {"Error": {"Code": "ConflictException", "Message": "running"}},
                 "StartIngestionJob",
             )
 
-    assert health_kb.start_sync(client=Client()) == {"kbSync": "already-running"}
+    # Deferred, not started. The running job does not see an object that
+    # landed after it began, so this result must not be treated as done.
+    assert health_kb.start_sync(client=Client()) == {"kbSync": "deferred"}
 
 
 def test_the_sync_handler_does_not_log_the_object_key(monkeypatch):
@@ -340,10 +345,13 @@ def test_the_sync_handler_does_not_log_the_object_key(monkeypatch):
     monkeypatch.setattr(health_kb.log, "warning", lambda *a, **k: logged.append((a, k)))
 
     class Client:
+        def list_ingestion_jobs(self, **kwargs):
+            return {"ingestionJobSummaries": []}
+
         def start_ingestion_job(self, **kwargs):
             return {"ingestionJob": {"ingestionJobId": "job"}}
 
-    monkeypatch.setattr(health_kb, "_client", lambda service: Client())
+    monkeypatch.setattr(health_kb, "_client", lambda service, **_kwargs: Client())
 
     class Context:
         def get_remaining_time_in_millis(self):

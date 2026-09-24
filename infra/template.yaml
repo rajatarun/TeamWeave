@@ -2775,8 +2775,17 @@ Resources:
                   - logs:PutLogEvents
                 Resource: !GetAtt HealthKbSyncLogGroup.Arn
               - Effect: Allow
-                Action: bedrock:StartIngestionJob
+                Action:
+                  - bedrock:StartIngestionJob
+                  - bedrock:ListIngestionJobs
                 Resource: !GetAtt HealthKnowledgeBase.KnowledgeBaseArn
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource: !GetAtt HealthKbSyncQueue.Arn
 
   # Same generated name as the provision group. This function never ran on
   # the failed deploy, so its default group is the less likely leftover;
@@ -2803,14 +2812,51 @@ Resources:
         - arm64
       MemorySize: 256
       Timeout: 120
+      # One running start. A second invocation would be another
+      # StartIngestionJob while the first is still talking to Bedrock.
+      ReservedConcurrentExecutions: 1
       Environment:
         Variables:
           HEALTH_KNOWLEDGE_BASE_ID: !Ref HealthKnowledgeBase
           HEALTH_DATA_SOURCE_ID: !GetAtt HealthKnowledgeBase.DataSourceId
 
+  # No QueueName. A rolled-back queue leaves the name behind, and the next
+  # changeset fails ResourceExistenceCheck on an Add of that same name.
+  # Object events land here instead of on the function: one message per
+  # object, one batch per minute, one ingestion job.
+  HealthKbSyncQueue:
+    Type: AWS::SQS::Queue
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      VisibilityTimeout: 360
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  # SourceAccount, not the rule ARN. The rule target is this queue, so a
+  # policy that names the rule and a rule that depends on the policy is a
+  # cycle, and EventBridge refuses the target until the policy exists.
+  HealthKbSyncQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      Queues:
+        - !Ref HealthKbSyncQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt HealthKbSyncQueue.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
   HealthKbSyncRule:
     Type: AWS::Events::Rule
     Condition: HealthKnowledgeBaseEnabled
+    DependsOn: HealthKbSyncQueuePolicy
     Properties:
       Description: Re-index ContextWeave's health bucket when a record is uploaded or removed.
       EventPattern:
@@ -2826,23 +2872,28 @@ Resources:
       State: ENABLED
       Targets:
         - Id: HealthKbSync
-          Arn: !GetAtt HealthKbSyncFunction.Arn
+          Arn: !GetAtt HealthKbSyncQueue.Arn
 
-  HealthKbSyncPermission:
-    Type: AWS::Lambda::Permission
+  HealthKbSyncMapping:
+    Type: AWS::Lambda::EventSourceMapping
     Condition: HealthKnowledgeBaseEnabled
     Properties:
-      Action: lambda:InvokeFunction
+      EventSourceArn: !GetAtt HealthKbSyncQueue.Arn
       FunctionName: !Ref HealthKbSyncFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt HealthKbSyncRule.Arn
+      BatchSize: 100
+      MaximumBatchingWindowInSeconds: 60
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+      ScalingConfig:
+        MaximumConcurrency: 1
 
   # ── Portfolio knowledge base ───────────────────────────────────────────────
   # The documents are this stack's bucket. ContextWeave has a health bucket
   # and no portfolio equivalent, so this section creates the bucket, the
   # knowledge base, and the connector. Upload CSV, PDF, and brokerage
   # statements to PortfolioBucket. The deploy starts one ingestion job;
-  # later uploads and deletes re-index through EventBridge.
+  # later uploads land on PortfolioKbSyncQueue and one invocation starts
+  # one ingestion job. See HealthKbSyncQueue for why it is a queue.
   #
   # The embedding is the same Nova managed base as health: custom embedding,
   # amazon.nova-2-multimodal-embeddings-v1:0, dimensions 1024, FLOAT32.
@@ -3060,8 +3111,17 @@ Resources:
                   - logs:PutLogEvents
                 Resource: !GetAtt PortfolioKbSyncLogGroup.Arn
               - Effect: Allow
-                Action: bedrock:StartIngestionJob
+                Action:
+                  - bedrock:StartIngestionJob
+                  - bedrock:ListIngestionJobs
                 Resource: !GetAtt PortfolioKnowledgeBase.KnowledgeBaseArn
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource: !GetAtt PortfolioKbSyncQueue.Arn
 
   PortfolioKbSyncLogGroup:
     Type: AWS::Logs::LogGroup
@@ -3082,13 +3142,43 @@ Resources:
         - arm64
       MemorySize: 256
       Timeout: 120
+      # One running start. Bulk uploads used to invoke this once per object
+      # and Bedrock throttled StartIngestionJob.
+      ReservedConcurrentExecutions: 1
       Environment:
         Variables:
           PORTFOLIO_KNOWLEDGE_BASE_ID: !Ref PortfolioKnowledgeBase
           PORTFOLIO_DATA_SOURCE_ID: !GetAtt PortfolioKnowledgeBase.DataSourceId
 
+  # No QueueName. See HealthKbSyncQueue: a fixed name is what
+  # ResourceExistenceCheck rejects after a rollback.
+  PortfolioKbSyncQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 360
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  PortfolioKbSyncQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref PortfolioKbSyncQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt PortfolioKbSyncQueue.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
   PortfolioKbSyncRule:
     Type: AWS::Events::Rule
+    DependsOn: PortfolioKbSyncQueuePolicy
     Properties:
       Description: Re-index the portfolio bucket when a statement is uploaded or removed.
       EventPattern:
@@ -3104,15 +3194,19 @@ Resources:
       State: ENABLED
       Targets:
         - Id: PortfolioKbSync
-          Arn: !GetAtt PortfolioKbSyncFunction.Arn
+          Arn: !GetAtt PortfolioKbSyncQueue.Arn
 
-  PortfolioKbSyncPermission:
-    Type: AWS::Lambda::Permission
+  PortfolioKbSyncMapping:
+    Type: AWS::Lambda::EventSourceMapping
     Properties:
-      Action: lambda:InvokeFunction
+      EventSourceArn: !GetAtt PortfolioKbSyncQueue.Arn
       FunctionName: !Ref PortfolioKbSyncFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt PortfolioKbSyncRule.Arn
+      BatchSize: 100
+      MaximumBatchingWindowInSeconds: 60
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+      ScalingConfig:
+        MaximumConcurrency: 1
 
 
 Outputs:
