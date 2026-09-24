@@ -147,3 +147,157 @@ def test_the_workflow_takes_its_own_timestamp():
     assert "${DEPLOY_STARTED_AT}" in dump_step["run"]
     assert "github.run_started_at" not in dump_step["run"]
     assert names.index("Record when this deploy started") < names.index("SAM Deploy")
+
+
+# ── early validation has no stack event ────────────────────────────────────
+
+def test_a_validation_error_from_an_earlier_change_set_is_not_reported():
+    old = NOW - timedelta(hours=3)
+    summaries = [{
+        "Status": "FAILED",
+        "ChangeSetName": "samcli-deploy-old",
+        "CreationTime": old,
+        "StatusReason": "AWS::EarlyValidation::ResourceExistenceCheck",
+    }]
+    events = [{
+        "EventId": "old",
+        "EventType": "VALIDATION_ERROR",
+        "Timestamp": old,
+        "LogicalResourceId": "HealthKbProvisionLogGroup",
+        "ValidationStatusReason": "already exists",
+    }]
+    assert dump.failed_change_sets_since(summaries, NOW) == []
+    assert dump.validation_events_since(events, NOW) == []
+
+
+def test_a_create_failed_stack_event_is_not_treated_as_early_validation():
+    # DescribeEvents with FailedEvents also returns provisioning failures.
+    # Those already print from the stack stream; printing them again would
+    # look like a second failure.
+    event = {
+        "EventType": "STACK_EVENT",
+        "ResourceStatus": "CREATE_FAILED",
+        "LogicalResourceId": "HealthKnowledgeBase",
+        "ResourceStatusReason": "parameter validation failed",
+        "Timestamp": NOW,
+    }
+    assert dump.is_early_validation(event) is False
+    assert dump.validation_events_since([event], NOW) == []
+
+
+def _client(pages_by_operation, calls=None):
+    from unittest import mock
+
+    cfn = mock.Mock()
+    cfn.describe_stacks.return_value = {
+        "Stacks": [{"StackStatus": "UPDATE_ROLLBACK_COMPLETE"}]
+    }
+
+    def get_paginator(operation):
+        paginator = mock.Mock()
+
+        def paginate(**kwargs):
+            if calls is not None:
+                calls.append((operation, kwargs))
+            return pages_by_operation.get(operation, [{}])
+
+        paginator.paginate.side_effect = paginate
+        return paginator
+
+    cfn.get_paginator.side_effect = get_paginator
+    return cfn
+
+
+def test_a_failed_changeset_names_the_resource_when_no_stack_event_does(monkeypatch, capsys):
+    """The SAM waiter only prints the hook name. The resource is on DescribeEvents."""
+    validation = {
+        "EventId": "evt-1",
+        "EventType": "VALIDATION_ERROR",
+        "Timestamp": NOW + timedelta(minutes=5),
+        "LogicalResourceId": "HealthKbProvisionLogGroup",
+        "ResourceType": "AWS::Logs::LogGroup",
+        "PhysicalResourceId": "/aws/lambda/tarun-content-team-HealthKbProvisionFunction",
+        "ValidationName": "AWS::EarlyValidation::ResourceExistenceCheck",
+        "ValidationStatus": "FAILED",
+        "ValidationStatusReason": (
+            "Resource of type 'AWS::Logs::LogGroup' with identifier "
+            "'/aws/lambda/tarun-content-team-HealthKbProvisionFunction' already exists."
+        ),
+        "ValidationPath": "/Resources/HealthKbProvisionLogGroup/Properties/LogGroupName",
+    }
+    # Returned for the stack read and again for the change set. Same EventId,
+    # so the resource is printed once.
+    calls = []
+    cfn = _client({
+        "describe_stack_events": [{"StackEvents": []}],
+        "list_change_sets": [{"Summaries": [{
+            "Status": "FAILED",
+            "ChangeSetName": "samcli-deploy-230",
+            "ChangeSetId": "arn:aws:cloudformation:us-east-1:1:changeSet/samcli-deploy-230/abc",
+            "CreationTime": NOW + timedelta(minutes=4),
+            "StatusReason": (
+                "The following hook(s)/validation failed: "
+                "[AWS::EarlyValidation::ResourceExistenceCheck]"
+            ),
+        }]}],
+        "describe_events": [{"OperationEvents": [validation]}],
+    }, calls)
+    monkeypatch.setattr(dump.boto3, "client", lambda *a, **kw: cfn)
+    monkeypatch.setattr(dump.sys, "argv", [
+        "dump", "tarun-content-team", "--since", "2026-09-20T18:00:00Z", "--region", "us-east-1",
+    ])
+
+    assert dump.main() == 0
+    out = capsys.readouterr().out
+    assert "No resource failed in this run" not in out
+    assert "HealthKbProvisionLogGroup" in out
+    assert "AWS::Logs::LogGroup" in out
+    assert "AWS::EarlyValidation::ResourceExistenceCheck" in out
+    assert "already exists" in out
+    assert "/Resources/HealthKbProvisionLogGroup/Properties/LogGroupName" in out
+    assert out.count("already exists") == 1
+    change_set_reads = [kwargs for operation, kwargs in calls if kwargs.get("ChangeSetName")]
+    assert change_set_reads, "validation events for a failed changeset are not on the stack stream"
+    assert change_set_reads[0]["Filters"] == {"FailedEvents": True}
+    assert change_set_reads[0]["ChangeSetName"].endswith("/abc")
+
+
+def test_describe_events_access_denied_is_printed_and_does_not_fail(monkeypatch, capsys):
+    from unittest import mock
+    from botocore.exceptions import ClientError
+
+    denied = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "not allowed to DescribeEvents"}},
+        "DescribeEvents",
+    )
+    cfn = mock.Mock()
+    cfn.describe_stacks.return_value = {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_COMPLETE"}]}
+
+    def get_paginator(operation):
+        paginator = mock.Mock()
+        if operation == "describe_events":
+            paginator.paginate.side_effect = denied
+        elif operation == "list_change_sets":
+            paginator.paginate.return_value = [{"Summaries": [{
+                "Status": "FAILED",
+                "ChangeSetName": "samcli-deploy-230",
+                "CreationTime": NOW + timedelta(minutes=1),
+                "StatusReason": "The following hook(s)/validation failed: [AWS::EarlyValidation::ResourceExistenceCheck]",
+            }]}]
+        else:
+            paginator.paginate.return_value = [{"StackEvents": []}]
+        return paginator
+
+    cfn.get_paginator.side_effect = get_paginator
+    monkeypatch.setattr(dump.boto3, "client", lambda *a, **kw: cfn)
+    monkeypatch.setattr(dump.sys, "argv", [
+        "dump", "tarun-content-team", "--since", "2026-09-20T18:00:00Z", "--region", "us-east-1",
+    ])
+
+    assert dump.main() == 0
+    out = capsys.readouterr().out
+    assert "AccessDenied" in out
+    assert "describe-events" in out
+    assert "--stack-name tarun-content-team" in out
+    assert "No resource failed in this run" not in out
+    assert "ResourceExistenceCheck" in out
