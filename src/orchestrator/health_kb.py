@@ -8,10 +8,11 @@ not embed. The base is a managed knowledge base built with
 ``bedrock-agent-runtime:Retrieve`` with ``managedSearchConfiguration``.
 ``vectorSearchConfiguration`` is the self-managed shape and does not apply.
 
-``query_health_record`` is the only caller of :func:`retrieve`, and it
+``query_health_record`` calls :func:`retrieve` for the health base and
 refuses the call unless the run carries the person's token and the team is
 ``health_prep``. The token is not sent to Bedrock. It is the gate in front
 of an IAM call that would otherwise be ambient authority over the record.
+``portfolio_kb`` calls the same function with an explicit knowledge base id.
 """
 from __future__ import annotations
 
@@ -86,16 +87,24 @@ def _assert_managed_retrieve(client) -> None:
         )
 
 
-def retrieve(question: str, *, top_k: int = 6, client=None) -> Optional[Dict[str, Any]]:
-    """Excerpts from the health base, or None when no base is configured.
+def retrieve(question: str, *, top_k: int = 6, client=None,
+             kb_id: Optional[str] = None, log_label: str = "health_kb") -> Optional[Dict[str, Any]]:
+    """Excerpts from a managed knowledge base, or None when no base is configured.
 
     None is the signal to use the health API. A configured base that fails
     returns ``{"error": ...}`` and does not fall through, because an empty
     record and a base that could not be asked are different answers. The
     service's own message is not returned: it can echo an object key, and
     the key of a health document is itself identifying.
+
+    ``kb_id`` defaults to the health base. The portfolio tool passes its own
+    id; an explicit empty string is "not configured" and does not fall
+    through to the health base.
     """
-    kb_id = knowledge_base_id()
+    if kb_id is None:
+        kb_id = knowledge_base_id()
+    else:
+        kb_id = str(kb_id).strip()
     if not kb_id:
         return None
     question = str(question or "").strip()
@@ -116,8 +125,12 @@ def retrieve(question: str, *, top_k: int = 6, client=None) -> Optional[Dict[str
             },
         )
     except (ClientError, BotoCoreError):
-        log.warning("health_kb_retrieve_failed")
-        return {"error": "the health knowledge base could not be reached"}
+        log.warning("%s_retrieve_failed", log_label)
+        # The service message can echo an object key. Say which base failed
+        # and nothing about which object was asked for.
+        if log_label == "health_kb":
+            return {"error": "the health knowledge base could not be reached"}
+        return {"error": "the portfolio knowledge base could not be reached"}
 
     excerpts: List[Dict[str, str]] = []
     for item in (response or {}).get("retrievalResults") or []:
@@ -131,7 +144,7 @@ def retrieve(question: str, *, top_k: int = 6, client=None) -> Optional[Dict[str
             "sourceKey": str(location.get("uri") or ""),
             "content": text,
         })
-    log.info("health_kb_retrieve", extra={"count": len(excerpts)})
+    log.info("%s_retrieve", log_label, extra={"count": len(excerpts)})
     return {
         "found": bool(excerpts),
         "excerpts": excerpts,
@@ -139,15 +152,25 @@ def retrieve(question: str, *, top_k: int = 6, client=None) -> Optional[Dict[str
     }
 
 
-def start_sync(*, client=None) -> Dict[str, str]:
-    """Ask the base to re-read the health bucket.
+def start_sync(*, client=None, kb_id: Optional[str] = None,
+               source_id: Optional[str] = None) -> Dict[str, str]:
+    """Ask a base to re-read its bucket.
 
     A job already running is not a failure: it reads the bucket as it is,
     including the object that just landed. Any other failure is re-raised so
     EventBridge retries it. The message is not logged; see :func:`retrieve`.
+
+    Omitted ids are the health base. An explicit empty string stays empty,
+    so a portfolio sync with no id does not start a job on the health base.
     """
-    kb_id = knowledge_base_id()
-    source_id = data_source_id()
+    if kb_id is None:
+        kb_id = knowledge_base_id()
+    else:
+        kb_id = str(kb_id).strip()
+    if source_id is None:
+        source_id = data_source_id()
+    else:
+        source_id = str(source_id).strip()
     if not kb_id or not source_id:
         log.warning("health_kb_sync_unconfigured")
         return {}

@@ -1,3 +1,5 @@
+import json
+import re
 from typing import Any, Dict
 
 from jsonschema import Draft202012Validator, validate
@@ -5,6 +7,22 @@ from jsonschema.exceptions import ValidationError
 
 
 HEALTH_INSIGHTS = "health_insights_v1"
+FINANCIAL_INSIGHTS = "financial_insights_v1"
+INSIGHT_TITLES = frozenset({HEALTH_INSIGHTS, FINANCIAL_INSIGHTS})
+
+# "not a guaranteed return" is a disclaimer. A claim is what is left after
+# those denials are removed.
+_GUARANTEE = re.compile(
+    r"guaranteed?(?:[\s-]+(?:a\s+)?)?(?:return|profit|gain)s?",
+    re.IGNORECASE,
+)
+# "not a guaranteed return" and "does not promise a guaranteed profit" are
+# disclaimers. A few words may sit between the negation and the claim.
+_GUARANTEE_DENIED = re.compile(
+    r"\b(?:not|no|never|without)\b(?:\s+\w+){0,6}\s+guaranteed?"
+    r"(?:[\s-]+(?:a\s+)?)?(?:return|profit|gain)s?",
+    re.IGNORECASE,
+)
 
 # One repair pass. The previous schema required a list of questions, so a
 # model still produces one; accepting that as schema-valid is how the team
@@ -63,13 +81,25 @@ def output_is_mostly_questions(output: Dict[str, Any]) -> bool:
     return any(_is_question(str(gap)) for gap in gaps)
 
 
+def _claims_guaranteed_return(output: Dict[str, Any]) -> bool:
+    if not isinstance(output, dict):
+        return False
+    text = _GUARANTEE_DENIED.sub(" ", json.dumps(output))
+    return _GUARANTEE.search(text) is not None
+
+
 def validate_output(output: Dict[str, Any], schema: Dict[str, Any]) -> None:
     Draft202012Validator.check_schema(schema)
     validate(instance=output, schema=schema)
-    if schema.get("title") == HEALTH_INSIGHTS and output_is_mostly_questions(output):
+    title = schema.get("title")
+    if title in INSIGHT_TITLES and output_is_mostly_questions(output):
         raise ValidationError(
-            "health insights are mostly questions; write findings and actions, "
+            "insights are mostly questions; write findings and actions, "
             "and state missing information as observations in data_gaps"
+        )
+    if title == FINANCIAL_INSIGHTS and _claims_guaranteed_return(output):
+        raise ValidationError(
+            "financial insights must not claim a guaranteed return"
         )
 
 
@@ -90,7 +120,7 @@ def settle_health_insights(output: Dict[str, Any], schema: Dict[str, Any], trans
     question list, or a body missing those fields — goes through ``transform``
     once. If that repair is still questions, it is not accepted.
     """
-    if not isinstance(schema, dict) or schema.get("title") != HEALTH_INSIGHTS:
+    if not isinstance(schema, dict) or schema.get("title") not in INSIGHT_TITLES:
         return output, True
     if _health_insights_ok(output, schema):
         return output, True

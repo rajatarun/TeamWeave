@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "financial_record_v1",
+  "description": "What the portfolio knowledge base and the web search returned. Observations, not questions.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "searched": {
+      "type": "array",
+      "description": "Portfolio retrieval queries, copied from tool_results.query_portfolio.queries.",
+      "items": {"type": "string"}
+    },
+    "web_searched": {
+      "type": "array",
+      "description": "Web queries, copied from tool_results.web_search.queries.",
+      "items": {"type": "string"}
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "sourceKey from a portfolio excerpt, or url from a web result."
+          },
+          "date": {"type": "string"},
+          "value": {"type": "string"},
+          "kind": {
+            "type": "string",
+            "enum": ["portfolio", "web"]
+          }
+        },
+        "required": ["source", "date", "value", "kind"]
+      }
+    },
+    "data_gaps": {
+      "type": "array",
+      "description": "What the searches did not contain, stated as observations.",
+      "items": {"type": "string"}
+    }
+  },
+  "required": ["summary", "searched", "web_searched", "evidence", "data_gaps"]
+}

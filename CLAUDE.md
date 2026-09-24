@@ -589,7 +589,7 @@ regression that would restore the original defect.
 
 ### The personal teams
 
-These are the platform's point: four teams a person runs on their own day, not
+These are the platform's point: five teams a person runs on their own day, not
 on the platform's plumbing. An earlier pass built a catalogue steward, an API
 call planner and a site auditor — all of which served TeamWeave and none of
 which made anyone's afternoon better. They were removed rather than left as
@@ -601,6 +601,7 @@ clutter, each with its runtime and its map entry.
 | `linkedin_quick_post` | 2 | ContextWeave | a rough thought → a publishable post, in two turns |
 | `job_hunter` | 3 | ScreenWeave crawl + ContextWeave | a posting URL → an honest fit read and an outreach note |
 | `health_prep` | 2 | ContextWeave health store | symptoms plus the person's records → insights and suggestions, never a diagnosis |
+| `financial_advisors` | 2 | portfolio knowledge base + live web search | a focus plus uploaded statements → insights and suggestions, with URLs and dates, never a guaranteed return |
 
 **Say which parts are grounded and which are reasoning.** An agent cannot
 choose to call a tool here, so a team is grounded only where a *pre-tool*
@@ -610,10 +611,13 @@ person's own health record — a *separate* store from that corpus, and the
 section below is about why that separation survives being wired to.
 `daily_operator` grounds in nothing, because nothing in a corpus knows what is
 in someone's head — and its constraints say so rather than letting an agent
-imply otherwise. Neither grounded team may treat a retrieval as a history it
-is free to supply: a fabricated medical timeline is exactly as schema-valid as
-a real one, so both the team constraint and the consuming agent's
-`goal_template` name what `error` and `found: false` mean.
+imply otherwise. `financial_advisors` reads two live sources before it writes:
+the portfolio knowledge base, and a web search that has to come back with a
+URL and the day it was retrieved. A grounded team may not treat a retrieval
+as a history it is free to supply: a fabricated medical timeline, a fabricated
+holding, and a fabricated price are exactly as schema-valid as real ones, so
+the team constraint and the consuming agent's `goal_template` name what
+`error` and `found: false` mean.
 
 **`job_hunter` is the one that earns three turns.** Reading a posting,
 matching it against a record, and writing to a person are three different
@@ -677,11 +681,65 @@ than a value the schema will not accept an answer without.
 `tests/test_weave_tools.py` holds all of it, and a mutation dropping any of
 them fails.
 
+**`financial_advisors` reads uploaded statements and the live web.** The
+deliverable is `financial_insights_v1`: insights and suggestions, each insight
+citing evidence. A portfolio citation is the statement's S3 key, the date it
+states, and the value. A web citation is the URL and `retrieved_on`. A list
+of questions fails validation and is repaired once, the same path as
+`health_insights_v1`. `safety_note` is one short sentence — not personalized
+financial advice; do your own research — and a guaranteed return fails
+validation even when the rest of the object is schema-shaped. `data_gaps`
+are observations. `follow_ups` is optional and capped at two.
+
+Both steps run `query_portfolio` and `web_search` before the turn. The
+portfolio call fans out across holdings, allocation, cost basis, performance,
+and risk. The web call fans out across the person's words, markets, news, and
+rates. One result is stored per tool name, so the fan-out is inside the tool.
+`only_teams=("financial_advisors",)` is the barrier. There is no caller
+token: the bucket is the account's uploads, and a missing bearer would make
+every run look like the lookup failed.
+
+The portfolio bucket is **created by this stack**. ContextWeave publishes the
+health bucket; it does not publish a portfolio bucket. The name is
+`${AWS::StackName}-portfolios-${AWS::AccountId}` (`PortfolioBucketName`).
+It is encrypted with SSE-S3, versioned, and blocked from public access.
+Upload CSV, PDF, or brokerage statements after the stack exists:
+
+```bash
+eval "$(python scripts/stack_env.py --stack tarun-content-team --format sh)"
+aws s3 cp ./statement.pdf "s3://${TEAMWEAVE_PORTFOLIO_BUCKET}/statement.pdf"
+```
+
+The knowledge base is the same managed Nova base as health:
+`amazon.nova-2-multimodal-embeddings-v1:0`, custom embedding, 1024
+dimensions, FLOAT32, data source name `portfolio-s3`. Supplemental storage
+is its own bucket (`${AWS::StackName}-portfolio-mm-${AWS::AccountId}`),
+because `HealthMultimodalBucket` exists only when the ContextWeave health
+import is present and the supplemental URI is a bucket, not a prefix.
+Extracted media is not a second copy of the statements. The deploy starts
+one ingestion job from `PortfolioKnowledgeBaseId` and
+`PortfolioDataSourceId`; later uploads and deletes re-index through
+EventBridge. Grant the Nova embedding model in the Bedrock console before
+that job can succeed. A failed job warns and does not roll the stack back.
+Creating the base itself is unconditional, so a `CreateKnowledgeBase`
+failure fails the deploy.
+
+Web search is Gemini `google_search` grounding (`WEB_SEARCH_PROVIDER=gemini`).
+There is no other search tool in the pipeline, and the research brief's
+Gemini call discards the citations this tool keeps. The key is the existing
+secret `GeminiSecretArn` / `GEMINI_SECRET_ARN`, JSON `{"key":"..."}` or the
+raw key. `WebSearchSecretArn` / `WEB_SEARCH_SECRET_ARN` overrides that secret
+for this tool only. Neither value is hardcoded. With no secret, the tool
+returns `error` and the agent is told not to invent prices, rates, or
+headlines. See `docs/portfolios.md`.
+
 The tool plumbing the removed teams introduced stays, because `job_hunter`
 uses it: `mcp_client` speaks MCP over HTTP, `tool_rules` says when each sibling
 tool applies, and the commit halves of DataDictionary and ToolWeave are refused
 in `execute_tool` and absent from `TOOL_REGISTRY`. Only ScreenWeave is reached
-by a team today. The other three gateway targets are capacity, not a defect,
+over MCP by a team today. `financial_advisors` reaches the portfolio base and
+Gemini web search, which are not gateway targets. The other three gateway
+targets are capacity, not a defect,
 and the test asserts only that a sibling a team *does* reach has an endpoint
 wired — never the reverse.
 
