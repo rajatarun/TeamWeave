@@ -2503,6 +2503,33 @@ Resources:
   # Marengo Embed 3.0 emits 512-d vectors. A wider index accepts the stack and
   # fails the first ingestion, which is why the dimension is written here
   # rather than left to a default.
+  #
+  # The same model refuses to create a knowledge base that has no multimodal
+  # storage destination: "you must specify a multimodal storage destination."
+  # That destination holds media extracted during ingestion. It is not the
+  # document source, and it is not this index. AWS recommends a bucket of its
+  # own so extracted files are not ingested again as if they were records.
+
+  HealthMultimodalBucket:
+    Type: AWS::S3::Bucket
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      BucketName: !Sub "tw-health-mm-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
 
   HealthVectorBucket:
     Type: AWS::S3Vectors::VectorBucket
@@ -2568,6 +2595,24 @@ Resources:
               - Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub "arn:${AWS::Partition}:s3:::${HealthDocsBucketName}/*"
+              # Write access is only for the multimodal destination. The health
+              # document bucket stays read-only: extracted media must not be
+              # written back into the records ContextWeave owns.
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt HealthMultimodalBucket.Arn
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "${HealthMultimodalBucket.Arn}/*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -2585,6 +2630,13 @@ Resources:
         Type: VECTOR
         VectorKnowledgeBaseConfiguration:
           EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0"
+          # Required for twelvelabs.marengo-embed-3-0-v1:0. The URI is an s3://
+          # location, not a bucket ARN. One location, which is all the API allows.
+          SupplementalDataStorageConfiguration:
+            SupplementalDataStorageLocations:
+              - SupplementalDataStorageLocationType: S3
+                S3Location:
+                  URI: !Sub "s3://${HealthMultimodalBucket}/"
       StorageConfiguration:
         Type: S3_VECTORS
         S3VectorsConfiguration:
