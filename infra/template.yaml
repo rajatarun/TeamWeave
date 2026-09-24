@@ -2499,18 +2499,17 @@ Resources:
   # same way ContextWeaveUrl is. This section indexes that bucket for
   # health_prep. It does not create a second copy of the records.
   #
-  # twelvelabs.marengo-embed-3-0-v1:0 is not supported on a self-managed
-  # VECTOR knowledge base (S3 Vectors + vectorKnowledgeBaseConfiguration).
-  # CreateKnowledgeBase returns 400: "The specified embedding model is not
-  # supported." The model is a custom multimodal embedding on a managed
-  # knowledge base, and a managed base owns the vector store — there is no
-  # index to declare here.
+  # amazon.nova-2-multimodal-embeddings-v1:0 is a custom embedding on a
+  # managed knowledge base: dimensions 3072 and embeddingDataType FLOAT32.
+  # The modelConfiguration document is TwelveLabs Marengo's path, and
+  # Marengo is the only model on it. A managed base owns the vector store,
+  # so there is no S3 Vectors index to declare here.
   #
-  # AWS::Bedrock::KnowledgeBase cannot express that body. Its managed
-  # configuration has no supplementalDataStorageConfiguration and no
-  # modelConfiguration document. CreateKnowledgeBase takes embeddingDataType
-  # FLOAT32 (BINARY is the other accepted value; FLOAT is rejected).
+  # AWS::Bedrock::KnowledgeBase cannot express supplemental storage, which
+  # a native multimodal model requires for extracted media.
   # HealthKbProvisionFunction calls CreateKnowledgeBase with that body.
+  # Changing EmbeddingModelArn deletes the base and creates it again:
+  # UpdateKnowledgeBase cannot change the embedding model.
   #
   # The multimodal bucket holds media extracted during ingestion. It is not
   # the document source. A bucket of its own keeps extracted files from being
@@ -2561,7 +2560,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: bedrock:InvokeModel
-                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0"
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-2-multimodal-embeddings-v1:0"
               - Effect: Allow
                 Action:
                   - s3:ListBucket
@@ -2690,7 +2689,7 @@ Resources:
       KnowledgeBaseName: !Sub "health-registry-${AWS::StackName}"
       Description: Index of ContextWeave's health bucket for the health_prep team.
       RoleArn: !GetAtt HealthKnowledgeBaseRole.Arn
-      EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0"
+      EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-2-multimodal-embeddings-v1:0"
       MultimodalBucket: !Ref HealthMultimodalBucket
       DocsBucketName: !Ref HealthDocsBucketName
       DocsBucketOwnerAccountId: !Ref AWS::AccountId
@@ -2876,7 +2875,7 @@ Outputs:
     Condition: HealthKnowledgeBaseEnabled
     Description: >
       Bedrock knowledge base over ContextWeave's health bucket, embedded with
-      twelvelabs.marengo-embed-3-0-v1:0. Absent when that bucket was not
+      amazon.nova-2-multimodal-embeddings-v1:0. Absent when that bucket was not
       published, which is how a harness tells "health is off" from "the base
       failed".
     Value: !Ref HealthKnowledgeBase
