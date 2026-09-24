@@ -35,6 +35,14 @@
       "items": {
         "type": "string"
       }
+    },
+    "intent": {
+      "type": "string",
+      "description": "triage when they dumped tasks; plan, explore, or decide when they asked for that work."
+    },
+    "read_as": {
+      "type": "string",
+      "description": "One sentence on what they asked. Not a copy of the request."
     }
   },
   "required": [
