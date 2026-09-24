@@ -124,6 +124,31 @@ def test_marengo_declares_a_multimodal_storage_destination(template):
     assert not docs_write
 
 
+def test_health_lambdas_do_not_reuse_a_name_a_rollback_leaves_behind(template):
+    """ResourceExistenceCheck rejects an Add whose name already exists.
+
+    The provision function ran. The rollback deleted the function and then
+    ``/aws/lambda/<FunctionName>``. A log line still in flight puts that
+    group back, outside the stack, and the next changeset fails before any
+    resource event exists. These two take generated names and log to the
+    group the stack creates. The reference is a Ref, so the check sees an
+    in-stack group rather than a string that has to exist already.
+    """
+    for group_name, function_name, role_name in (
+        ("HealthKbProvisionLogGroup", "HealthKbProvisionFunction", "HealthKbProvisionRole"),
+        ("HealthKbSyncLogGroup", "HealthKbSyncFunction", "HealthKbSyncRole"),
+    ):
+        group = template["Resources"][group_name]["Properties"]
+        assert "LogGroupName" not in group
+        assert group["RetentionInDays"] == 30
+        function = template["Resources"][function_name]["Properties"]
+        assert "FunctionName" not in function
+        assert function["LoggingConfig"]["LogGroup"] == {"__fn__": "Ref", "__arg__": group_name}
+        rendered = str(template["Resources"][role_name])
+        assert "logs:CreateLogGroup" not in rendered
+        assert group_name in rendered
+
+
 def test_the_base_embeds_with_marengo(template):
     assert EMBEDDING_MODEL_ID in TEMPLATE
     kb = template["Resources"]["HealthKnowledgeBase"]["Properties"]
