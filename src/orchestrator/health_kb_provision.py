@@ -4,15 +4,14 @@
 knowledge base ("the specified embedding model is not supported"). It is
 accepted as a custom multimodal embedding on a managed base: ``type``
 ``MANAGED``, ``embeddingModelType`` ``CUSTOM``, ``embeddingDataType``
-``FLOAT``, a ``modelConfiguration`` document, and a supplemental S3 location
+``FLOAT32``, a ``modelConfiguration`` document, and a supplemental S3 location
 for extracted media.
 
 ``AWS::Bedrock::KnowledgeBase`` does not expose that shape. Its managed
 configuration has no supplemental storage and no ``modelConfiguration``
-document, and its embedding data type enum is ``FLOAT32`` or ``BINARY``.
-This function is the custom resource that calls ``CreateKnowledgeBase``
-with the documented body. The managed base owns the vector store, so there
-is no S3 Vectors index to create.
+document. This function is the custom resource that calls
+``CreateKnowledgeBase`` with the documented body. The managed base owns the
+vector store, so there is no S3 Vectors index to create.
 
 The Lambda runtime's botocore does not know that body. Parameter validation
 fails in the client and Bedrock never sees the request. The function is
@@ -72,10 +71,10 @@ def supplemental_uri(bucket: str) -> str:
 def knowledge_base_configuration(model_arn: str, multimodal_bucket: str) -> Dict[str, Any]:
     """The CreateKnowledgeBase body Marengo accepts.
 
-    ``embeddingDataType`` is ``FLOAT``. The managed-configuration enum in
-    CloudFormation lists ``FLOAT32`` and ``BINARY``; the user guide for this
-    model says ``FLOAT``, and that is the value the API is called with.
-    Dimensions are absent on purpose: a managed base owns its index.
+    ``embeddingDataType`` is ``FLOAT32``. CreateKnowledgeBase rejects
+    ``FLOAT``: the member must be ``FLOAT32`` or ``BINARY``. Marengo's
+    vectors are floating point, so the value is ``FLOAT32``. Dimensions
+    are absent on purpose: a managed base owns its index.
     """
     return {
         "type": "MANAGED",
@@ -84,7 +83,7 @@ def knowledge_base_configuration(model_arn: str, multimodal_bucket: str) -> Dict
             "embeddingModelArn": model_arn,
             "embeddingModelConfiguration": {
                 "bedrockEmbeddingModelConfiguration": {
-                    "embeddingDataType": "FLOAT",
+                    "embeddingDataType": "FLOAT32",
                     "modelConfiguration": {
                         "version": "1",
                         "audio": {

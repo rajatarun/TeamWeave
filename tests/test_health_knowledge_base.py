@@ -381,7 +381,7 @@ def test_the_create_body_is_the_documented_managed_shape():
             "embeddingModelArn": MODEL_ARN,
             "embeddingModelConfiguration": {
                 "bedrockEmbeddingModelConfiguration": {
-                    "embeddingDataType": "FLOAT",
+                    "embeddingDataType": "FLOAT32",
                     "modelConfiguration": {
                         "version": "1",
                         "audio": {
@@ -456,6 +456,11 @@ def test_the_create_body_is_the_documented_managed_shape():
     managed = service.shape_for("ManagedKnowledgeBaseConfiguration").members
     assert "supplementalDataStorageConfiguration" in managed
     assert "modelConfiguration" in service.shape_for("BedrockEmbeddingModelConfiguration").members
+    # ParamValidator does not enforce this enum, which is how FLOAT reached
+    # Bedrock and came back as a ValidationException. The value has to be a
+    # member of the set the service documents.
+    data_type = configuration["managedKnowledgeBaseConfiguration"]["embeddingModelConfiguration"]["bedrockEmbeddingModelConfiguration"]["embeddingDataType"]
+    assert data_type in service.shape_for("EmbeddingDataType").enum
     assert "MANAGED_KNOWLEDGE_BASE_CONNECTOR" in service.shape_for("DataSourceType").enum
     assert "managedSearchConfiguration" in runtime.shape_for("KnowledgeBaseRetrievalConfiguration").members
 
@@ -555,7 +560,7 @@ def test_create_calls_the_managed_api_and_returns_the_ids(monkeypatch):
     assert create["knowledgeBaseConfiguration"]["type"] == "MANAGED"
     managed = create["knowledgeBaseConfiguration"]["managedKnowledgeBaseConfiguration"]
     assert managed["embeddingModelArn"].endswith(EMBEDDING_MODEL_ID)
-    assert managed["embeddingModelConfiguration"]["bedrockEmbeddingModelConfiguration"]["embeddingDataType"] == "FLOAT"
+    assert managed["embeddingModelConfiguration"]["bedrockEmbeddingModelConfiguration"]["embeddingDataType"] == "FLOAT32"
     assert managed["supplementalDataStorageConfiguration"]["storageLocations"][0]["s3Location"]["uri"] == (
         "s3://tw-health-mm-239571291755-us-east-1/"
     )
