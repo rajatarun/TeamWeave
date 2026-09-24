@@ -57,8 +57,10 @@ def test_the_other_personal_teams_are_told_to_produce_the_work():
     assert "paraphrase of the input is not a post" in writer["goal_template"]
     fit = next(a for a in _load("job_hunter")["agents"] if a["id"] == "JH_fit")
     assert "restates the posting is not a fit read" in fit["goal_template"]
-    questions = next(a for a in _load("health_prep")["agents"] if a["id"] == "HP_questions")
-    assert "not a question" in questions["goal_template"]
+    insights = next(a for a in _load("health_prep")["agents"] if a["id"] == "HP_insights")
+    assert "not an insight" in insights["goal_template"]
+    assert "suggestions" in insights["goal_template"]
+    assert "do not echo the request" in insights["goal_template"]
     log = next(a for a in _load("health_prep")["agents"] if a["id"] == "HP_log")
     assert "error" in log["goal_template"]
     assert "knowledge base" in log["goal_template"]

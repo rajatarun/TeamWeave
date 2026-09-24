@@ -148,10 +148,14 @@ def test_the_restriction_is_not_expressed_only_in_the_team_config():
 # ── the wiring, in both directions ──────────────────────────────────────────
 
 def test_health_prep_declares_the_tool():
-    steps = {s["step"]: s for s in TEAM_JSON["workflow"]}
-    pre = steps["HP_log"].get("pre_tools") or []
-    assert [t["name"] for t in pre] == ["query_health_record"]
-    assert pre[0]["args"]["source_key"] == "request.experiencing"
+    """Both steps retrieve. The insights step used to see only the log, so it
+    wrote questions from a paraphrase and never from the records."""
+    assert [s["step"] for s in TEAM_JSON["workflow"]] == ["HP_log", "HP_insights"]
+    for step in TEAM_JSON["workflow"]:
+        pre = step.get("pre_tools") or []
+        assert [t["name"] for t in pre] == ["query_health_record"], step["step"]
+        assert pre[0]["args"]["source_key"] == "request.experiencing"
+        assert pre[0]["args"]["facets"] is True
 
 
 def test_no_other_team_declares_it():
