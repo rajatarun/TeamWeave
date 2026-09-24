@@ -54,6 +54,9 @@ OPTIONAL_OUTPUTS = {
     "TEAMWEAVE_SHARED_STACK": "SharedStackName",
     "TEAMWEAVE_API_ACCESS_LOG_GROUP_ARN": "ApiGatewayAccessLogGroupArn",
     "TEAMWEAVE_OPENAPI_SPEC": "OpenApiSpecPath",
+    "TEAMWEAVE_PORTFOLIO_BUCKET": "PortfolioBucketName",
+    "TEAMWEAVE_PORTFOLIO_KNOWLEDGE_BASE_ID": "PortfolioKnowledgeBaseId",
+    "TEAMWEAVE_PORTFOLIO_DATA_SOURCE_ID": "PortfolioDataSourceId",
 }
 
 

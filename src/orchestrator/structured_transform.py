@@ -47,7 +47,8 @@ def transform_json_to_schema(
 
     normalized_target_schema = normalize_target_schema(target_schema)
     health_rule = ""
-    if isinstance(target_schema, dict) and target_schema.get("title") == "health_insights_v1":
+    title = target_schema.get("title") if isinstance(target_schema, dict) else ""
+    if title == "health_insights_v1":
         # The repair used to map a question list onto whatever fields the
         # schema had. This schema's fields are insights and suggestions, and
         # a repaired question list is the failure the schema exists to stop.
@@ -56,6 +57,15 @@ def transform_json_to_schema(
             "Write statements. Do not write questions. data_gaps are observations "
             "about missing records. follow_ups has at most two items and is not "
             "the substance.\n"
+        )
+    elif title == "financial_insights_v1":
+        health_rule = (
+            "This answer is insights and suggestions grounded in the uploaded "
+            "portfolio and in web results. Portfolio evidence cites an S3 source, "
+            "date, and value. Web evidence cites a URL and the retrieval date. "
+            "Write statements. Do not write questions. Do not claim a guaranteed "
+            "return. data_gaps are observations. follow_ups has at most two items "
+            "and is not the substance.\n"
         )
     prompt = f"""Transform the input JSON into the target schema.
 Map fields as best as you can.
