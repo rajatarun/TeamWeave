@@ -789,8 +789,10 @@ def test_only_the_callers_bundle_a_botocore_that_knows_managed_bases():
     """The runtime copy rejects the body before Bedrock sees it.
 
     src/requirements.txt stays free of boto3 so the other functions keep
-    the runtime SDK. The two callers install a pin whose model accepts the
-    managed body. 1.43.32 is not that pin: it knows the managed type and
+    the runtime SDK. The callers install a pin whose model accepts the
+    managed body: the worker, the health provision function, and the
+    portfolio provision function, which is a second caller of the same
+    handler. 1.43.32 is not that pin: it knows the managed type and
     still rejects the supplemental storage location.
     """
     pinned = (REPO / "src" / "requirements-bedrock-kb.txt").read_text()
@@ -808,7 +810,11 @@ def test_only_the_callers_bundle_a_botocore_that_knows_managed_bases():
         name, deps = line.split(":", 1)
         recipes[name.removeprefix("build-")] = deps
     bundled = {name for name, deps in recipes.items() if "install-bedrock-kb-sdk" in deps}
-    assert bundled == {"WorkerFunction", "HealthKbProvisionFunction"}
+    assert bundled == {
+        "WorkerFunction",
+        "HealthKbProvisionFunction",
+        "PortfolioKbProvisionFunction",
+    }
 
 
 def test_the_provision_client_model_accepts_the_body_it_sends():

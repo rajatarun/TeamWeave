@@ -8,7 +8,12 @@
 	build-ObservatoryMetricsFunction \
 	build-AgentMetricsDashboardFunction \
 	build-UnifiedObservabilityFunction \
-	build-ConversationFunction
+	build-ConversationFunction \
+	build-A2AFunction \
+	build-HealthKbSyncFunction \
+	build-HealthKbProvisionFunction \
+	build-PortfolioKbSyncFunction \
+	build-PortfolioKbProvisionFunction
 
 package-lambda:
 	python -m pip install -r src/requirements.txt -t "$(ARTIFACTS_DIR)" \
@@ -26,9 +31,11 @@ package-lambda:
 # before the request is signed, and its Retrieve client does the same to
 # managedSearchConfiguration. 1.43.32 added the managed type; 1.43.92 is
 # the first model that also describes Marengo's modelConfiguration document
-# and the supplemental storage location. Installed only into the two
-# functions that call those APIs. Every other function keeps the runtime
-# copy — src/requirements.txt does not ship a second one.
+# and the supplemental storage location. Installed only into the functions
+# that call those APIs: the worker (Retrieve) and both knowledge-base
+# provision functions (CreateKnowledgeBase). The portfolio provision
+# function is the second caller of the same handler. Every other function
+# keeps the runtime copy — src/requirements.txt does not ship a second one.
 install-bedrock-kb-sdk:
 	python -m pip install -r src/requirements-bedrock-kb.txt -t "$(ARTIFACTS_DIR)" \
 		--python-version 3.12 \
@@ -62,3 +69,7 @@ build-A2AFunction: package-lambda
 build-HealthKbSyncFunction: package-lambda
 
 build-HealthKbProvisionFunction: package-lambda install-bedrock-kb-sdk
+
+build-PortfolioKbSyncFunction: package-lambda
+
+build-PortfolioKbProvisionFunction: package-lambda install-bedrock-kb-sdk

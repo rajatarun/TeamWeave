@@ -35,7 +35,15 @@ MCP, HTTP = "mcp", "http"
 # variable that seeds the address. `mcp_client.SIBLING_ENV` is the MCP half;
 # a rule must name a sibling in whichever map matches its transport, or it
 # points at a service nothing can supply an address for.
-HTTP_SIBLING_ENV = {"contextweave": "CONTEXTWEAVE_URL"}
+# portfolio is this stack's knowledge base id, not an HTTP URL: the tool
+# retrieves with IAM. websearch is the Gemini secret the live search reads.
+# Both are addresses the deploy can supply, which is what the sibling check
+# is holding.
+HTTP_SIBLING_ENV = {
+    "contextweave": "CONTEXTWEAVE_URL",
+    "portfolio": "PORTFOLIO_KNOWLEDGE_BASE_ID",
+    "websearch": "GEMINI_SECRET_ARN",
+}
 
 
 @dataclass(frozen=True)
@@ -181,6 +189,37 @@ RULES: Dict[str, ToolRule] = {rule.tool: rule for rule in [
         never_when="any team that is not preparing this person for care; and "
                    "never to answer a clinical question, which the record "
                    "cannot settle and this platform must not attempt",
+    ),
+
+    # ── This stack's portfolio bucket, and a live web search ────────────────
+    #
+    # The documents are uploads to a bucket this stack creates. There is no
+    # ContextWeave store and no per-person bearer: the allowlist is the
+    # barrier. A token requirement here would make every run look like a
+    # failed lookup, because nothing in the request is an identity the
+    # bucket checks.
+    ToolRule(
+        tool="query_portfolio",
+        sibling="portfolio", mcp_tool="bedrock:Retrieve", effect=READ,
+        transport=HTTP,
+        only_teams=("financial_advisors",),
+        use_when="a financial step needs holdings, allocation, cost basis, "
+                 "performance, or concentration from the uploaded statements "
+                 "rather than the model's guess at the portfolio",
+        never_when="any team that is not the financial advisors team; a "
+                   "portfolio in a draft post is the same leak the health "
+                   "allowlist exists to stop",
+    ),
+    ToolRule(
+        tool="web_search",
+        sibling="websearch", mcp_tool="gemini.google_search", effect=READ,
+        transport=HTTP,
+        only_teams=("financial_advisors",),
+        use_when="a financial step needs a current price, rate, yield, or "
+                 "headline, with the URL and the day it was retrieved",
+        never_when="the figure is already in the uploaded statement, or any "
+                   "team that would treat a live page as background for a "
+                   "post; and never to promise a return",
     ),
 ]}
 

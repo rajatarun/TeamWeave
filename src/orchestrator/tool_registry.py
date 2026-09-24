@@ -48,8 +48,10 @@ from .tools.weave_tools import (
     plan_api_call,
     propose_data_element,
     query_health_record,
+    query_portfolio,
     search_data_elements,
     site_metrics,
+    web_search,
 )
 from .tool_rules import (
     is_refused,
@@ -91,6 +93,12 @@ TOOL_REGISTRY: Dict[str, Callable[..., Any]] = {
     # Restricted to one team and callable only as the person who started the
     # run; both are enforced in execute_tool, not here and not in team.json.
     "query_health_record": query_health_record,
+    # Restricted to financial_advisors. The portfolio base is this stack's
+    # bucket, so there is no caller token; the allowlist is the barrier.
+    # Web search cites Gemini Google Search grounding and reads the same
+    # Gemini secret the research brief already uses.
+    "query_portfolio": query_portfolio,
+    "web_search": web_search,
 }
 
 

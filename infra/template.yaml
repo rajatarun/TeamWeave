@@ -89,7 +89,17 @@ Parameters:
   GeminiSecretArn:
     Type: String
     Default: ""
-    Description: (Optional) Secrets Manager ARN storing Gemini API key JSON (e.g. {"key":"..."})
+    Description: >-
+      Secrets Manager ARN storing the Gemini API key, as {"key":"..."} or the
+      raw key. The research brief and financial_advisors web search both read
+      it. Empty means live web citations are not configured.
+  WebSearchSecretArn:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional Secrets Manager ARN that overrides GeminiSecretArn for
+      financial_advisors web search only. Same JSON shape. Empty keeps the
+      Gemini secret.
   DdbTableName:
     Type: String
     Default: ""
@@ -301,6 +311,7 @@ Conditions:
   CreateArtifactBucket: !Equals [!Ref ArtifactBucketName, ""]
   CreateDdbTable: !Equals [!Ref DdbTableName, ""]
   HasGeminiSecret: !Not [!Equals [!Ref GeminiSecretArn, ""]]
+  HasWebSearchSecret: !Not [!Equals [!Ref WebSearchSecretArn, ""]]
   HasVpcConfig: !And
     - !Not [!Equals [!Ref VpcId, ""]]
     - !Not [!Equals [!Ref RdsSecurityGroupId, ""]]
@@ -362,12 +373,13 @@ Globals:
         AGENTCORE_TEAM_RUNTIME_ARNS: !If
           - AgentCoreEnabled
           - !Sub
-            - '{"tarun_visibility_team":"${ArnTarunVisibilityTeam}","daily_operator":"${ArnDailyOperator}","linkedin_quick_post":"${ArnLinkedinQuickPost}","job_hunter":"${ArnJobHunter}","health_prep":"${ArnHealthPrep}"}'
+            - '{"tarun_visibility_team":"${ArnTarunVisibilityTeam}","daily_operator":"${ArnDailyOperator}","linkedin_quick_post":"${ArnLinkedinQuickPost}","job_hunter":"${ArnJobHunter}","health_prep":"${ArnHealthPrep}","financial_advisors":"${ArnFinancialAdvisors}"}'
             - ArnTarunVisibilityTeam: !GetAtt AgentCoreRuntimeTarunVisibilityTeam.AgentRuntimeArn
               ArnDailyOperator: !GetAtt AgentCoreRuntimeDailyOperator.AgentRuntimeArn
               ArnLinkedinQuickPost: !GetAtt AgentCoreRuntimeLinkedinQuickPost.AgentRuntimeArn
               ArnJobHunter: !GetAtt AgentCoreRuntimeJobHunter.AgentRuntimeArn
               ArnHealthPrep: !GetAtt AgentCoreRuntimeHealthPrep.AgentRuntimeArn
+              ArnFinancialAdvisors: !GetAtt AgentCoreRuntimeFinancialAdvisors.AgentRuntimeArn
           - "{}"
         # Route all AWS SDK calls through dual-stack endpoints so boto3 resolves
         # {service}.{region}.api.aws (returns AAAA records). Lambda ENIs with IPv6
@@ -626,6 +638,12 @@ Resources:
                   Action: [secretsmanager:GetSecretValue]
                   Resource: !Ref GeminiSecretArn
                 - !Ref "AWS::NoValue"
+              - !If
+                - HasWebSearchSecret
+                - Effect: Allow
+                  Action: [secretsmanager:GetSecretValue]
+                  Resource: !Ref WebSearchSecretArn
+                - !Ref "AWS::NoValue"
               - Effect: Allow
                 Action: [secretsmanager:GetSecretValue]
                 Resource: !Ref VectorDbSecret
@@ -644,6 +662,13 @@ Resources:
                     - bedrock:Retrieve
                   Resource: !GetAtt HealthKnowledgeBase.KnowledgeBaseArn
                 - !Ref "AWS::NoValue"
+              # The portfolio base always exists: the bucket is this stack's.
+              # Scoped to its ARN so Retrieve cannot read some other base.
+              # The team allowlist still decides whether a run may ask.
+              - Effect: Allow
+                Action:
+                  - bedrock:Retrieve
+                Resource: !GetAtt PortfolioKnowledgeBase.KnowledgeBaseArn
 
   TriggerRole:
     Type: AWS::IAM::Role
@@ -1501,6 +1526,16 @@ Resources:
             - HealthKnowledgeBaseEnabled
             - !Ref HealthKnowledgeBase
             - ""
+          # financial_advisors retrieves from this base before the turn.
+          # Set only on the worker: the excerpts are a pre-tool, not a
+          # runtime concern. Web search uses Gemini Google Search grounding.
+          # The key is GEMINI_SECRET_ARN unless WebSearchSecretArn overrides it.
+          PORTFOLIO_KNOWLEDGE_BASE_ID: !Ref PortfolioKnowledgeBase
+          WEB_SEARCH_PROVIDER: gemini
+          WEB_SEARCH_SECRET_ARN: !If
+            - HasWebSearchSecret
+            - !Ref WebSearchSecretArn
+            - !Ref "AWS::NoValue"
           GEMINI_LAMBDA_ARN: !GetAtt GeminiResearchFunction.Arn
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
           OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTableName
@@ -2395,6 +2430,28 @@ Resources:
         AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
         AGENT_TEAM: "health_prep"
 
+  AgentCoreRuntimeFinancialAdvisors:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: AgentCoreEnabled
+    Properties:
+      AgentRuntimeName: "teamweave_financial_advisors"
+      Description: "AgentCore runtime serving every agent of financial_advisors. The worker retrieves the portfolio and the web before the turn; this runtime does not."
+      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Code:
+            S3:
+              Bucket: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+              Prefix: !Ref AgentCoreRuntimeCodePrefix
+          Runtime: PYTHON_3_12
+          EntryPoint:
+            - app.py
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      EnvironmentVariables:
+        AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
+        AGENT_TEAM: "financial_advisors"
+
   # ── AgentCore Gateway ──────────────────────────────────────────────────────
   # Managed tool access for agents. AWS_IAM rather than CUSTOM_JWT: the
   # authorizer types include one that needs no external identity provider, and
@@ -2780,6 +2837,283 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt HealthKbSyncRule.Arn
 
+  # ── Portfolio knowledge base ───────────────────────────────────────────────
+  # The documents are this stack's bucket. ContextWeave has a health bucket
+  # and no portfolio equivalent, so this section creates the bucket, the
+  # knowledge base, and the connector. Upload CSV, PDF, and brokerage
+  # statements to PortfolioBucket. The deploy starts one ingestion job;
+  # later uploads and deletes re-index through EventBridge.
+  #
+  # The embedding is the same Nova managed base as health: custom embedding,
+  # amazon.nova-2-multimodal-embeddings-v1:0, dimensions 1024, FLOAT32.
+  # HealthKbProvisionFunction's handler is shared. This function is a second
+  # caller because the health one exists only when ContextWeave published a
+  # health bucket, and a portfolio must still be created when that import is
+  # empty.
+  #
+  # Supplemental storage is a bucket, not a prefix. HealthMultimodalBucket
+  # exists only when the health import is present, so the portfolio base has
+  # its own bucket for extracted media. That bucket is not a data source.
+  # Writing extracted files back into PortfolioBucket would ingest them again
+  # as if they were statements.
+
+  PortfolioBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-portfolios-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  PortfolioMultimodalBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-portfolio-mm-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  PortfolioKnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Role the portfolio knowledge base assumes to read uploaded statements and write extracted media.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+      Policies:
+        - PolicyName: portfolio-kb
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-2-multimodal-embeddings-v1:0"
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !GetAtt PortfolioBucket.Arn
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${PortfolioBucket.Arn}/*"
+              # Write access is only for extracted media. The statement
+              # bucket stays read-only so ingestion cannot rewrite an upload.
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt PortfolioMultimodalBucket.Arn
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "${PortfolioMultimodalBucket.Arn}/*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
+
+  # Not in the VPC. bedrock-agent is IPv4-only, and this function's whole
+  # job is CreateKnowledgeBase. No FunctionName and no LogGroupName: a
+  # rolled-back create leaves those names behind, and the next changeset
+  # fails ResourceExistenceCheck before any resource event exists.
+  PortfolioKbProvisionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-portfolio-kb-provision-role"
+      Description: Creates the managed portfolio knowledge base. It cannot read the statements.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: portfolio-kb-provision
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt PortfolioKbProvisionLogGroup.Arn
+              - Effect: Allow
+                Action:
+                  - bedrock:CreateKnowledgeBase
+                  - bedrock:ListKnowledgeBases
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - bedrock:GetKnowledgeBase
+                  - bedrock:UpdateKnowledgeBase
+                  - bedrock:DeleteKnowledgeBase
+                  - bedrock:CreateDataSource
+                  - bedrock:GetDataSource
+                  - bedrock:UpdateDataSource
+                  - bedrock:DeleteDataSource
+                  - bedrock:ListDataSources
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt PortfolioKnowledgeBaseRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: bedrock.amazonaws.com
+
+  PortfolioKbProvisionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+
+  PortfolioKbProvisionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../
+      Handler: src/orchestrator/health_kb_provision.handler
+      Role: !GetAtt PortfolioKbProvisionRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref PortfolioKbProvisionLogGroup
+      Architectures:
+        - arm64
+      MemorySize: 256
+      Timeout: 900
+
+  # Ref is the knowledge base id. GetAtt KnowledgeBaseArn and DataSourceId
+  # are the attributes the function returns.
+  PortfolioKnowledgeBase:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt PortfolioKbProvisionFunction.Arn
+      KnowledgeBaseName: !Sub "portfolios-${AWS::StackName}"
+      Description: Index of this stack's portfolio bucket for the financial_advisors team.
+      RoleArn: !GetAtt PortfolioKnowledgeBaseRole.Arn
+      EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-2-multimodal-embeddings-v1:0"
+      MultimodalBucket: !Ref PortfolioMultimodalBucket
+      DocsBucketName: !Ref PortfolioBucket
+      DocsBucketOwnerAccountId: !Ref AWS::AccountId
+      DataSourceName: portfolio-s3
+      DataSourceDescription: This stack's portfolio bucket. Statements uploaded here are the source.
+
+  PortfolioKbSyncRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-portfolio-kb-sync-role"
+      Description: Starts an ingestion job when the portfolio bucket changes. It cannot read the statements.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: portfolio-kb-sync
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt PortfolioKbSyncLogGroup.Arn
+              - Effect: Allow
+                Action: bedrock:StartIngestionJob
+                Resource: !GetAtt PortfolioKnowledgeBase.KnowledgeBaseArn
+
+  PortfolioKbSyncLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+
+  PortfolioKbSyncFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../
+      Handler: src/orchestrator/portfolio_kb.sync_handler
+      Role: !GetAtt PortfolioKbSyncRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref PortfolioKbSyncLogGroup
+      Architectures:
+        - arm64
+      MemorySize: 256
+      Timeout: 120
+      Environment:
+        Variables:
+          PORTFOLIO_KNOWLEDGE_BASE_ID: !Ref PortfolioKnowledgeBase
+          PORTFOLIO_DATA_SOURCE_ID: !GetAtt PortfolioKnowledgeBase.DataSourceId
+
+  PortfolioKbSyncRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Re-index the portfolio bucket when a statement is uploaded or removed.
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+          - Object Deleted
+        detail:
+          bucket:
+            name:
+              - !Ref PortfolioBucket
+      State: ENABLED
+      Targets:
+        - Id: PortfolioKbSync
+          Arn: !GetAtt PortfolioKbSyncFunction.Arn
+
+  PortfolioKbSyncPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PortfolioKbSyncFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt PortfolioKbSyncRule.Arn
+
 
 Outputs:
   HttpApiUrl:
@@ -2883,6 +3217,22 @@ Outputs:
     Condition: HealthKnowledgeBaseEnabled
     Description: Managed S3 connector of the health knowledge base. The bucket is ContextWeave's.
     Value: !GetAtt HealthKnowledgeBase.DataSourceId
+
+  PortfolioBucketName:
+    Description: >-
+      S3 bucket for portfolio uploads (CSV, PDF, brokerage statements).
+      Encrypted, versioned, public access blocked. Objects are indexed into
+      PortfolioKnowledgeBaseId. The stack name is part of the bucket name, so
+      it must stay lowercase and the full name must stay within 63 characters.
+    Value: !Ref PortfolioBucket
+  PortfolioKnowledgeBaseId:
+    Description: >-
+      Bedrock knowledge base over PortfolioBucketName, embedded with
+      amazon.nova-2-multimodal-embeddings-v1:0 at 1024 dimensions, FLOAT32.
+    Value: !Ref PortfolioKnowledgeBase
+  PortfolioDataSourceId:
+    Description: Managed S3 connector of the portfolio knowledge base. The data source name is portfolio-s3.
+    Value: !GetAtt PortfolioKnowledgeBase.DataSourceId
 
   OpenApiSpecPath:
     Value: openapi/teamweave.yaml

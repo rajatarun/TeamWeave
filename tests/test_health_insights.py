@@ -151,7 +151,8 @@ def test_a_repair_that_is_still_questions_is_not_accepted():
 def test_the_worker_settles_health_insights_instead_of_always_rewriting():
     worker = (REPO / "src/orchestrator/worker_handler.py").read_text()
     assert "settle_health_insights" in worker
-    assert 'step_schema.get("title") == "health_insights_v1"' in worker
+    assert "INSIGHT_TITLES" in worker
+    assert "health_insights_v1" in (REPO / "src/orchestrator/schema_validate.py").read_text()
 
 
 def test_prompts_include_the_kb_grounding_instructions():
