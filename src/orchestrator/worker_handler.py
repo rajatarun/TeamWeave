@@ -20,7 +20,7 @@ from .models import StepFailed
 from .profile_context import get_owner_profile_context
 from .prompt_builder import build_prompt
 from .rag import get_rag_context_with_meta
-from .storage import presign, save_artifact, save_bytes
+from .storage import presign, request_text, run_folder, save_artifact, save_bytes
 from .structured_transform import transform_json_to_schema
 from .tool_registry import execute_post_tools, execute_pre_tools
 
@@ -110,6 +110,7 @@ def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any
     extension = {"image/jpeg": "jpg", "image/webp": "webp"}.get(content_type, "png")
     uri = save_bytes(
         run_id, step_id, result["bytes"], extension=extension, content_type=content_type,
+        summary=request_text((step_inputs or {}).get("request")),
     )
     log.info("image_step_complete step=%s run_id=%s uri=%s", step_id, run_id, uri)
     return {
@@ -324,6 +325,9 @@ def run_team_pipeline(
     outputs: Dict[str, Any] = {}
     supervisor_brief: Dict[str, Any] = {}
     schema_valid = True
+    # One name for every artifact of this run. Computed from the request, not
+    # the run id, so a person can find it in the bucket.
+    run_summary = request_text(request_obj)
 
     workflow = team_raw.get("workflow") or []
 
@@ -362,7 +366,7 @@ def run_team_pipeline(
         if getattr(agent.bedrock, "modality", "text") == "image":
             out_json = _run_image_step(agent, step_id, run_id, step_inputs)
             out_json = execute_post_tools(step_def, out_json, step_inputs)
-            artifact_uri = save_artifact(run_id, step_id, out_json)
+            artifact_uri = save_artifact(run_id, step_id, out_json, summary=run_summary)
             dao.put_step(run_id, step_id, "SUCCEEDED", step_inputs, out_json,
                          error=None, artifact_uri=artifact_uri)
             outputs[step_id] = out_json
@@ -450,7 +454,7 @@ def run_team_pipeline(
         # ── Post-tools — enrich/transform agent output after schema coercion ─
         out_json = execute_post_tools(step_def, out_json, step_inputs)
 
-        artifact_uri = save_artifact(run_id, step_id, out_json)
+        artifact_uri = save_artifact(run_id, step_id, out_json, summary=run_summary)
         dao.put_step(
             run_id, step_id, "SUCCEEDED", step_inputs, out_json, error=None, artifact_uri=artifact_uri
         )
@@ -475,12 +479,23 @@ def run_team_pipeline(
     if schema_valid:
         contextweave_client.maybe_send_valid_output_feedback(rag_meta.get("query_id", ""))
 
+    run_title = run_folder(run_id, run_summary)
     dao.put_run_meta(
         run_id,
         "SUCCEEDED",
-        {"team": team, "version": version, "owner": owner, "steps": list(outputs.keys())},
+        {
+            "team": team, "version": version, "owner": owner,
+            "steps": list(outputs.keys()),
+            "run_title": run_title,
+        },
     )
-    return {"run_id": run_id, "status": "SUCCEEDED", "steps": outputs, "owner": owner}
+    return {
+        "run_id": run_id,
+        "run_title": run_title,
+        "status": "SUCCEEDED",
+        "steps": outputs,
+        "owner": owner,
+    }
 
 
 def handler(event, context):
