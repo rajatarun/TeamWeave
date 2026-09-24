@@ -14,7 +14,13 @@ from src.orchestrator.models import AgentConfig, BedrockRef, TeamConfig, TeamGlo
 from src.orchestrator.prompt_builder import build_prompt
 
 TEAMS = Path("config/examples/teams")
-PERSONAL = ("daily_operator", "linkedin_quick_post", "job_hunter", "health_prep")
+PERSONAL = (
+    "daily_operator",
+    "linkedin_quick_post",
+    "job_hunter",
+    "health_prep",
+    "financial_advisors",
+)
 
 
 def _load(name: str) -> dict:
@@ -64,6 +70,10 @@ def test_the_other_personal_teams_are_told_to_produce_the_work():
     log = next(a for a in _load("health_prep")["agents"] if a["id"] == "HP_log")
     assert "error" in log["goal_template"]
     assert "knowledge base" in log["goal_template"]
+    insights = next(a for a in _load("financial_advisors")["agents"] if a["id"] == "FA_insights")
+    assert "do not echo the request" in insights["goal_template"]
+    assert "not an insight" in insights["goal_template"]
+    assert "retrieved_on" in insights["goal_template"]
 
 
 def test_personal_teams_are_not_left_on_the_smallest_model():

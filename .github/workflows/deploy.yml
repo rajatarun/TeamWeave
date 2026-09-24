@@ -626,6 +626,34 @@ jobs:
             --data-source-id "${DS_ID}" \
             || echo "::warning::Could not start ingestion for knowledge base ${KB_ID}. Grant amazon.nova-2-multimodal-embeddings-v1:0 in the Bedrock console and start the job. The data source is already ContextWeave's health bucket."
 
+      - name: Sync the portfolio knowledge base
+        # Same reason as the health job: objects already in the bucket are
+        # not an S3 event. A failure is a warning. Model access is granted in
+        # the Bedrock console, and a missing grant must not roll back a stack
+        # whose data source is already the portfolio bucket.
+        run: |
+          KB_ID=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='PortfolioKnowledgeBaseId'].OutputValue" \
+            --output text 2>/dev/null || true)
+          DS_ID=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='PortfolioDataSourceId'].OutputValue" \
+            --output text 2>/dev/null || true)
+          [ "${KB_ID}" = "None" ] && KB_ID=""
+          [ "${DS_ID}" = "None" ] && DS_ID=""
+          if [ -z "${KB_ID}" ] || [ -z "${DS_ID}" ]; then
+            echo "::warning::No portfolio knowledge base on this stack. Nothing was indexed."
+            exit 0
+          fi
+          aws bedrock-agent start-ingestion-job \
+            --region "${AWS_REGION}" \
+            --knowledge-base-id "${KB_ID}" \
+            --data-source-id "${DS_ID}" \
+            || echo "::warning::Could not start ingestion for knowledge base ${KB_ID}. Grant amazon.nova-2-multimodal-embeddings-v1:0 in the Bedrock console and start the job. Upload statements to the portfolio bucket after the base exists."
+
       - name: Smoke-test the AgentCore runtime
         # A green deploy says CloudFormation created the runtime. It does not
         # say the program inside it boots, so this invokes it once for real.

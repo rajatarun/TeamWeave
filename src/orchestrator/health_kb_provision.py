@@ -143,10 +143,16 @@ def data_source_configuration(bucket_name: str, account_id: str) -> Dict[str, An
     }
 
 
-def data_source_fields(bucket_name: str, account_id: str) -> Dict[str, Any]:
+def data_source_fields(bucket_name: str, account_id: str, *,
+                       name: str = DATA_SOURCE_NAME,
+                       description: str = "") -> Dict[str, Any]:
+    source_name = str(name or DATA_SOURCE_NAME).strip() or DATA_SOURCE_NAME
+    text = str(description or "").strip() or (
+        "ContextWeave's health document bucket. This stack does not create it."
+    )
     return {
-        "name": DATA_SOURCE_NAME,
-        "description": "ContextWeave's health document bucket. This stack does not create it.",
+        "name": source_name,
+        "description": text,
         "dataDeletionPolicy": "DELETE",
         "dataSourceConfiguration": data_source_configuration(bucket_name, account_id),
         "vectorIngestionConfiguration": {
@@ -295,12 +301,13 @@ def _find_kb(client, name: str) -> Optional[str]:
     return None
 
 
-def _find_data_source(client, kb_id: str) -> Optional[str]:
+def _find_data_source(client, kb_id: str, name: str = DATA_SOURCE_NAME) -> Optional[str]:
     def fetch(**kwargs):
         return client.list_data_sources(knowledgeBaseId=kb_id, **kwargs)
 
+    wanted = str(name or DATA_SOURCE_NAME).strip() or DATA_SOURCE_NAME
     for item in _pages(fetch, "dataSourceSummaries"):
-        if item.get("name") == DATA_SOURCE_NAME:
+        if item.get("name") == wanted:
             return str(item.get("dataSourceId") or "") or None
     return None
 
@@ -385,12 +392,22 @@ def _update_kb(client, kb_id: str, props: Dict[str, Any]) -> None:
     client.update_knowledge_base(**kwargs)
 
 
+def _source_name(props: Dict[str, Any]) -> str:
+    return str(props.get("DataSourceName") or DATA_SOURCE_NAME).strip() or DATA_SOURCE_NAME
+
+
 def _ensure_data_source(client, kb_id: str, props: Dict[str, Any], event: Dict[str, Any], context: Any) -> str:
+    # Absent on the health resource, which keeps the name it has always used.
+    # The portfolio resource sets its own so the two connectors are not the
+    # same name on two bases.
+    name = _source_name(props)
     fields = data_source_fields(
         str(props["DocsBucketName"]).strip(),
         str(props["DocsBucketOwnerAccountId"]).strip(),
+        name=name,
+        description=str(props.get("DataSourceDescription") or ""),
     )
-    existing = _find_data_source(client, kb_id)
+    existing = _find_data_source(client, kb_id, name)
     if existing:
         client.update_data_source(knowledgeBaseId=kb_id, dataSourceId=existing, **fields)
         data_source_id = existing

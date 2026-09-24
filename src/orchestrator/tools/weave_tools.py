@@ -240,3 +240,39 @@ def query_health_record(question: str = "", caller_token: str = "",
     result = _lookup_one(text, token, k)
     result.setdefault("used_for", rule.use_when)
     return result
+
+
+def query_portfolio(question: str = "", top_k: int = 6, facets: Any = None,
+                    **_ignored: Any) -> Dict[str, Any]:
+    """Holdings, allocation, cost basis, performance, and concentration.
+
+    One call fans out when ``facets`` is set, because a second pre_tool with
+    the same name would replace the first. There is no caller token: the
+    bucket is the account's uploads, and the team allowlist is the barrier.
+    """
+    from ..portfolio_kb import search
+
+    rule = rule_for("query_portfolio")
+    result = search(
+        str(question or "").strip(),
+        top_k=int(top_k or 6),
+        facets=_facets_enabled(facets),
+    )
+    if isinstance(result, dict):
+        result.setdefault("used_for", rule.use_when)
+    return result
+
+
+def web_search(query: str = "", facets: Any = None, **_ignored: Any) -> Dict[str, Any]:
+    """Current pages, with URL and the day they were retrieved.
+
+    The provider and the key come from the environment. This function does
+    not embed a credential.
+    """
+    from ..web_search import search
+
+    rule = rule_for("web_search")
+    result = search(str(query or "").strip(), facets=_facets_enabled(facets))
+    if isinstance(result, dict):
+        result.setdefault("used_for", rule.use_when)
+    return result

@@ -21,7 +21,7 @@ from .profile_context import get_owner_profile_context
 from .prompt_builder import build_prompt
 from .rag import get_rag_context_with_meta
 from .storage import presign, request_text, run_folder, save_artifact, save_bytes
-from .schema_validate import settle_health_insights
+from .schema_validate import INSIGHT_TITLES, settle_health_insights
 from .structured_transform import transform_json_to_schema
 from .tool_registry import execute_post_tools, execute_pre_tools
 
@@ -439,7 +439,7 @@ def run_team_pipeline(
         log.info("enrichment_complete step=%s run_id=%s", step_id, run_id)
         # ──────────────────────────────────────────────────────────────────────
 
-        if step_schema and step_schema.get("title") == "health_insights_v1":
+        if step_schema and step_schema.get("title") in INSIGHT_TITLES:
             # The deliverable used to be a required list of questions, and the
             # generic transform rewrites every answer whether or not it already
             # matches. A valid insights answer is kept. A question list is
