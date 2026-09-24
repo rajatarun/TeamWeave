@@ -326,7 +326,7 @@ pk: RUN#{uuid}   sk: STEP#{step_id}
 status:       RUNNING | SUCCEEDED | FAILED
 inputs:       { resolved step inputs }
 output:       { agent JSON output }
-artifact_uri: s3://bucket/runs/{uuid}/{step}.json
+artifact_uri: s3://bucket/runs/{summary}-{suffix}/{step}.json
 error:        string (if FAILED)
 ```
 
@@ -394,7 +394,7 @@ ttl:                         epoch seconds (90-day expiry)
 ```
 
 ### S3: Step Artifacts
-**Path:** `runs/{run_id}/{step_id}.json`
+**Path:** `runs/{summary}-{short_run_suffix}/{step_id}.json` — the folder is a summary of the prompt plus a short unique suffix, not the raw run id. The object metadata carries `run-id`.
 
 Contains the raw JSON output from the Bedrock agent for that step, validated against the step's JSON Schema.
 

@@ -115,7 +115,7 @@ Each handler normalises the API Gateway event via helpers (`_method`, `_path`, `
 
 **Files:** `src/orchestrator/storage.py`
 
-`save_artifact()` is a thin facade over S3: it constructs the key path (`runs/{run_id}/{step_id}.json`), serialises to JSON, and calls `put_object`.
+`save_artifact()` is a thin facade over S3: it constructs the key path (`runs/{summary}-{suffix}/{step_id}.json`), serialises to JSON, and calls `put_object`. The folder is a summary of the prompt, not the raw run id.
 
 ---
 
@@ -254,7 +254,7 @@ Observatory metric items carry a DynamoDB TTL of 90 days for automatic cleanup w
 
 **Files:** `infra/template.yaml`, `src/orchestrator/storage.py`
 
-Step output JSON is stored at `s3://{bucket}/runs/{run_id}/{step_id}.json`. S3 lifecycle rules transition objects to IA after 30 days, GLACIER after 90 days, and expire them after 365 days.
+Step output JSON is stored at `s3://{bucket}/runs/{summary}-{suffix}/{step_id}.json`. S3 lifecycle rules transition objects to IA after 30 days, GLACIER after 90 days, and expire them after 365 days. The `runs/` prefix is unchanged.
 
 ---
 

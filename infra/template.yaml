@@ -21,7 +21,7 @@ Parameters:
   ArtifactBucketName:
     Type: String
     Default: ""
-    Description: S3 bucket for run artifacts (runs/{run_id}/{step_id}.json)
+    Description: S3 bucket for run artifacts (runs/{summary}-{suffix}/{step_id}.json)
   TeamConfigPrefix:
     Type: String
     Default: teams
