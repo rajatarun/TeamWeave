@@ -39,8 +39,8 @@
       "bedrock": {
         "agentId": "",
         "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_id": "us.amazon.nova-lite-v1:0",
+        "shadow_model_id": "us.amazon.nova-pro-v1:0",
         "model_aliases": {
           "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
@@ -61,8 +61,8 @@
       "bedrock": {
         "agentId": "",
         "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_id": "us.amazon.nova-lite-v1:0",
+        "shadow_model_id": "us.amazon.nova-pro-v1:0",
         "model_aliases": {
           "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
@@ -72,7 +72,7 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Match the requirements against VERIFIED_EXPERIENCE \u2014 the person's actual record. Strong match, partial, or a real gap, and say which for each must-have. The verdict is for them, not for the employer: 'skip' is a good answer when the gaps are the job. Set evidence_source to 'general_only' when the corpus returned nothing, and lower your confidence accordingly rather than assuming the fit.",
+      "goal_template": "Do the comparison. A verdict that restates the posting is not a fit read. Match each must-have against VERIFIED_EXPERIENCE \u2014 the person's actual record \u2014 and say strong, partial, or a real gap. The verdict is for them, not for the employer: 'skip' is a good answer when the gaps are the job. Set evidence_source to 'general_only' when the corpus returned nothing, and lower your confidence accordingly rather than assuming the fit.",
       "schema_ref": "fit_read_v1"
     },
     {
@@ -83,8 +83,8 @@
       "bedrock": {
         "agentId": "",
         "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_id": "us.amazon.nova-lite-v1:0",
+        "shadow_model_id": "us.amazon.nova-pro-v1:0",
         "model_aliases": {
           "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
@@ -94,7 +94,7 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Write the note that goes with the application: an opening line that is about them and not about wanting a job, then a short body leading with the strongest verified match. Put every claim it makes into what_it_claims. do_not_send_if lists the conditions that make this note wrong \u2014 an unverified claim, a gap too large, a verdict of skip.",
+      "goal_template": "Write the note they could send. Do not summarise the posting back to them. Opening line is about the employer and not about wanting a job; the body leads with the strongest verified match and names a specific thing from the role, not a generic interest. Put every claim it makes into what_it_claims. do_not_send_if lists the conditions that make this note wrong \u2014 an unverified claim, a gap too large, a verdict of skip.",
       "schema_ref": "application_note_v1"
     }
   ],

@@ -30,6 +30,14 @@ def build_prompt(
     parts.append("Do not ask follow-up questions. If inputs are incomplete, make reasonable assumptions and continue.")
     parts.append("You are generating content — not describing what you would do. Produce the actual output.")
     parts.append("")
+    parts.append("DO THE WORK:")
+    parts.append("The REQUEST is the assignment, not the answer. Read what is being asked — "
+                 "sort a list, plan, explore, compare, decide, or write — and produce that.")
+    parts.append("Restating, lightly rewording, or mirroring the request is a failed turn, "
+                 "including when a schema field could hold a copy of it.")
+    parts.append("Preserve the person's wording only in a field whose goal explicitly asks "
+                 "for their words. Everywhere else, the value is the work.")
+    parts.append("")
 
     # ── Request / topic — explicit, not buried in INPUTS_JSON ─────────────────
     request_obj = step_inputs.get("request") or {}

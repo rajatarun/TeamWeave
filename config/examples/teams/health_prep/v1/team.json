@@ -11,7 +11,7 @@
       "Never diagnose. Never name a condition as the cause. Never suggest a medicine, a dose, or stopping one.",
       "This prepares a person to be seen; it does not substitute for being seen. Say so in every answer.",
       "If anything reported could be an emergency, set seek_care_now and lead with it. Preparing questions for next week is the wrong answer to a symptom that needs today.",
-      "tool_results.query_health_record is what the person's own uploaded records say. found false means nothing in their records is relevant; an error key means the lookup did not happen. Neither is permission to invent a history — with no retrieved record, report only what they told you in this request. Never present a retrieved value as a diagnosis or as a clinician's opinion: it is a past record, not an answer about now.",
+      "tool_results.query_health_record is the health knowledge base: excerpts of the person's own uploaded records. found false means nothing in their records is relevant; an error key means the lookup did not happen. Neither is permission to invent a history — with no retrieved record, report only what they told you in this request. Never present a retrieved value as a diagnosis or as a clinician's opinion: it is a past record, not an answer about now.",
       "Report only what the person said. An inferred symptom becomes a fact in a consulting room.",
       "This request may be a follow-up. When request.edit_instruction is present, request.previous_output is your own last answer: revise it to satisfy the instruction and change nothing else. Do not start over, and do not drop fields the instruction did not mention."
     ],
@@ -39,8 +39,8 @@
       "bedrock": {
         "agentId": "",
         "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_id": "us.amazon.nova-lite-v1:0",
+        "shadow_model_id": "us.amazon.nova-pro-v1:0",
         "model_aliases": {
           "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
@@ -50,7 +50,7 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Structure exactly what was reported — what, since when, how often, what changes it — in the person's own terms. Add nothing they did not say; missing_detail is where a gap goes, not an assumption. Set seek_care_now true when anything reported is the kind of thing that should be seen urgently rather than at a scheduled appointment, and say plainly why. Do not name a cause: that is a clinician's job and guessing at one changes what the person says when they get there. tool_results.query_health_record holds what the person's own uploaded records say: an error key means the lookup did not happen and found false means nothing in their records is relevant. Neither is a history you may supply — with no retrieved record, log only what they told you here.",
+      "goal_template": "Turn what was reported into a log a clinician can scan: separate items, a timeline, and the gaps. Do not paste their paragraph back as one item, and do not add anything they did not say — missing_detail is where a gap goes, not an assumption. Set seek_care_now true when anything reported is the kind of thing that should be seen urgently rather than at a scheduled appointment, and say plainly why. Do not name a cause: that is a clinician's job and guessing at one changes what the person says when they get there. tool_results.query_health_record is the health knowledge base over their uploaded records: an error key means the lookup did not happen and found false means nothing in their records is relevant. Neither is a history you may supply — with no retrieved record, log only what they told you here.",
       "schema_ref": "symptom_log_v1"
     },
     {
@@ -61,8 +61,8 @@
       "bedrock": {
         "agentId": "",
         "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_id": "us.amazon.nova-lite-v1:0",
+        "shadow_model_id": "us.amazon.nova-pro-v1:0",
         "model_aliases": {
           "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
@@ -72,7 +72,7 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Write the questions worth asking — the ones that get a useful answer in ten minutes and the ones people forget to ask. what_to_track_before is what would make the appointment sharper if recorded first. bring_with_you is documents, timelines, previous results. Fill this_is_not_advice with a plain sentence saying this is preparation for a clinician and not a substitute for one. If seek_care_now was set, the first question is how soon they are seen.",
+      "goal_template": "Write the questions worth asking a clinician — each one something they can answer in the room. Restating a symptom as 'is it true that I have this?' is not a question; derive what would change the visit: timing, triggers, what to track, what to bring. what_to_track_before is what would make the appointment sharper if recorded first. bring_with_you is documents, timelines, previous results. Fill this_is_not_advice with a plain sentence saying this is preparation for a clinician and not a substitute for one. If seek_care_now was set, the first question is how soon they are seen. Use only the log and what they reported; do not invent history the log does not contain.",
       "schema_ref": "care_questions_v1"
     }
   ],
