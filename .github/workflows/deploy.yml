@@ -857,8 +857,10 @@ jobs:
         # last three deploys' rollbacks into a log whose own deploy had
         # succeeded -- which reads exactly like the current run failing and
         # sends you to debug something already fixed. "No resource failed in
-        # this run" is the useful answer: the deploy was fine, look at the
-        # rest of the job.
+        # this run" is the useful answer when the deploy was fine.
+        # A changeset that fails early validation never writes a stack
+        # resource event, so the script also reads DescribeEvents and lists
+        # FAILED change sets. That is the text that names the resource.
         run: |
           python3 scripts/dump_stack_failures.py \
             "${STACK_NAME}" "${SHARED_STACK_NAME}" "${BEDROCK_AGENTS_STACK_NAME}" \

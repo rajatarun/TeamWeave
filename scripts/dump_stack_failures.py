@@ -18,6 +18,13 @@ So this takes the moment the run started and shows only what failed at or
 after it. When a stack has no failures in that window it says so in one line,
 which is itself the answer: the deploy was fine and the failure was somewhere
 else in the job.
+
+A changeset that fails early validation never writes a stack resource event.
+``describe_stack_events`` then reports that nothing failed, and the only text
+in the SAM log is the hook name. ``DescribeEvents`` is the call that carries
+``ValidationStatusReason`` and ``ValidationPath`` for that hook. A failed
+change set is listed too, because those events hang off the change set rather
+than the stack.
 """
 from __future__ import annotations
 
@@ -54,17 +61,96 @@ def parse_since(value: str) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def at_or_after(stamp: Any, since: datetime) -> bool:
+    # A missing timestamp is kept. Dropping a failure is worse than showing
+    # one extra, and a comparison against a non-datetime would raise.
+    if isinstance(stamp, datetime) and stamp < since:
+        return False
+    return True
+
+
 def failures_since(events: List[Dict[str, Any]], since: datetime) -> List[Dict[str, Any]]:
     out = []
     for event in events:
         status = str(event.get("ResourceStatus") or "")
         if FAILED not in status:
             continue
-        stamp = event.get("Timestamp")
-        if isinstance(stamp, datetime) and stamp < since:
+        if not at_or_after(event.get("Timestamp"), since):
             continue
         out.append(event)
     return out
+
+
+def is_early_validation(event: Dict[str, Any]) -> bool:
+    """A hook failure, not a resource CREATE_FAILED.
+
+    DescribeEvents with FailedEvents also returns ordinary provisioning
+    failures. Those are already on the stack event stream. The ones that
+    are not are validation and hook results, and they are the reason a
+    changeset can fail with no stack events at all.
+    """
+    if event.get("EventType") == "VALIDATION_ERROR":
+        return True
+    if event.get("ValidationName") or event.get("ValidationStatusReason") or event.get("ValidationPath"):
+        return True
+    if event.get("HookType") or event.get("HookStatusReason"):
+        return True
+    return False
+
+
+def validation_events_since(events: List[Dict[str, Any]], since: datetime) -> List[Dict[str, Any]]:
+    out = []
+    for event in events:
+        if not is_early_validation(event):
+            continue
+        stamp = event.get("Timestamp") or event.get("StartTime")
+        if not at_or_after(stamp, since):
+            continue
+        out.append(event)
+    return out
+
+
+def failed_change_sets_since(summaries: List[Dict[str, Any]], since: datetime) -> List[Dict[str, Any]]:
+    out = []
+    for summary in summaries:
+        if summary.get("Status") != FAILED:
+            continue
+        if not at_or_after(summary.get("CreationTime"), since):
+            continue
+        out.append(summary)
+    return out
+
+
+def format_validation_event(event: Dict[str, Any]) -> List[str]:
+    logical = event.get("LogicalResourceId") or "(no logical id)"
+    resource_type = event.get("ResourceType") or ""
+    name = event.get("ValidationName") or event.get("HookType") or event.get("EventType") or ""
+    reason = (
+        event.get("ValidationStatusReason")
+        or event.get("HookStatusReason")
+        or event.get("ResourceStatusReason")
+        or ""
+    )
+    path = event.get("ValidationPath") or ""
+    physical = event.get("PhysicalResourceId") or ""
+    lines = [f"  {logical}  {resource_type}  {name}".rstrip()]
+    if physical:
+        lines.append(f"      identifier: {physical}")
+    if reason:
+        lines.append(f"      {reason}")
+    if path:
+        lines.append(f"      path: {path}")
+    return lines
+
+
+def _error_text(exc: BaseException) -> str:
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        err = response.get("Error") or {}
+        code = err.get("Code") or ""
+        message = err.get("Message") or str(exc)
+        return f"{code}: {message}" if code else message
+    return str(exc)
 
 
 def stack_status(cfn, stack: str) -> str:
@@ -84,7 +170,102 @@ def collect(cfn, stack: str) -> List[Dict[str, Any]]:
     return events[:MAX_EVENTS]
 
 
-def report(cfn, stack: str, since: datetime) -> None:
+def _paginate(cfn, operation: str, **kwargs) -> List[Dict[str, Any]]:
+    pages = []
+    for page in cfn.get_paginator(operation).paginate(**kwargs):
+        pages.append(page)
+        if len(pages) >= 20:
+            break
+    return pages
+
+
+def early_findings(cfn, stack: str, since: datetime, region: str | None = None) -> List[str]:
+    """Validation and hook failures for this run.
+
+    Never raises. The step that explains a failure must not become a second
+    failure, including when the deployer role cannot call DescribeEvents.
+    """
+    try:
+        return _early_findings(cfn, stack, since, region)
+    except Exception as exc:
+        where = f" --region {region}" if region else ""
+        return [
+            f"  could not read early-validation events: {_error_text(exc)}",
+            "  A failed changeset has no stack resource events. DescribeEvents "
+            "is what names the resource.",
+            "  aws cloudformation describe-events "
+            f"--stack-name {stack} --filters FailedEvents=true{where}",
+        ]
+
+
+def _early_findings(cfn, stack: str, since: datetime, region: str | None) -> List[str]:
+    lines: List[str] = []
+    summaries: List[Dict[str, Any]] = []
+    try:
+        for page in _paginate(cfn, "list_change_sets", StackName=stack):
+            summaries.extend(page.get("Summaries", []))
+    except ClientError as exc:
+        lines.append(f"  could not list change sets: {_error_text(exc)}")
+
+    recent = failed_change_sets_since(summaries, since)[:5]
+    for summary in recent:
+        name = summary.get("ChangeSetName") or summary.get("ChangeSetId") or "(unnamed)"
+        lines.append(f"  change set {name}  FAILED")
+        reason = summary.get("StatusReason")
+        if reason:
+            lines.append(f"      {reason}")
+
+    events: List[Dict[str, Any]] = []
+    describe_failed = False
+    try:
+        for page in _paginate(
+            cfn, "describe_events", StackName=stack, Filters={"FailedEvents": True}
+        ):
+            events.extend(page.get("OperationEvents", []))
+    except (ClientError, AttributeError) as exc:
+        describe_failed = True
+        where = f" --region {region}" if region else ""
+        lines.append(f"  could not read DescribeEvents for {stack}: {_error_text(exc)}")
+        lines.append(
+            "  A failed changeset has no stack resource events. DescribeEvents "
+            "is what names the resource."
+        )
+        lines.append(
+            "  aws cloudformation describe-events "
+            f"--stack-name {stack} --filters FailedEvents=true{where}"
+        )
+
+    if not describe_failed:
+        for summary in recent:
+            change_set = summary.get("ChangeSetId") or summary.get("ChangeSetName")
+            if not change_set:
+                continue
+            try:
+                for page in _paginate(
+                    cfn,
+                    "describe_events",
+                    StackName=stack,
+                    ChangeSetName=change_set,
+                    Filters={"FailedEvents": True},
+                ):
+                    events.extend(page.get("OperationEvents", []))
+            except (ClientError, AttributeError) as exc:
+                lines.append(
+                    f"  could not read DescribeEvents for change set {change_set}: {_error_text(exc)}"
+                )
+
+    seen = set()
+    for event in validation_events_since(events, since):
+        event_id = event.get("EventId")
+        if event_id:
+            if event_id in seen:
+                continue
+            seen.add(event_id)
+        lines.extend(format_validation_event(event))
+    return lines
+
+
+def report(cfn, stack: str, since: datetime, region: str | None = None) -> None:
     status = stack_status(cfn, stack)
     print(f"::group::{stack} ({status})")
     if status == "NOT_FOUND":
@@ -93,12 +274,21 @@ def report(cfn, stack: str, since: datetime) -> None:
         return
     try:
         failures = failures_since(collect(cfn, stack), since)
+        stack_error = None
     except ClientError as exc:
-        print(f"could not read events: {exc}")
+        # Still read the change set. Early validation fails before a stack
+        # resource event exists, and this is the only place that names it.
+        failures = []
+        stack_error = exc
+
+    early = early_findings(cfn, stack, since, region)
+    if stack_error and not failures and not early:
+        print(f"could not read events: {stack_error}")
         print("::endgroup::")
         return
-
-    if not failures:
+    if stack_error:
+        print(f"could not read stack events: {stack_error}")
+    if not failures and not early:
         # The useful negative. It says the deploy was fine and sends you to
         # look at the rest of the job instead of at three runs of history.
         print(f"No resource failed in this run (nothing at or after {since.isoformat()}).")
@@ -109,6 +299,8 @@ def report(cfn, stack: str, since: datetime) -> None:
             reason = event.get("ResourceStatusReason")
             if reason:
                 print(f"      {reason}")
+        for line in early:
+            print(line)
     print("::endgroup::")
 
 
@@ -135,7 +327,7 @@ def main() -> int:
 
     cfn = boto3.client("cloudformation", region_name=args.region)
     for stack in args.stacks:
-        report(cfn, stack, since)
+        report(cfn, stack, since, region=args.region)
     return 0
 
 
