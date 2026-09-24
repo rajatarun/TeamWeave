@@ -624,7 +624,7 @@ jobs:
             --region "${AWS_REGION}" \
             --knowledge-base-id "${KB_ID}" \
             --data-source-id "${DS_ID}" \
-            || echo "::warning::Could not start ingestion for knowledge base ${KB_ID}. Grant twelvelabs.marengo-embed-3-0-v1:0 in the Bedrock console and start the job. The data source is already ContextWeave's health bucket."
+            || echo "::warning::Could not start ingestion for knowledge base ${KB_ID}. Grant amazon.nova-2-multimodal-embeddings-v1:0 in the Bedrock console and start the job. The data source is already ContextWeave's health bucket."
 
       - name: Smoke-test the AgentCore runtime
         # A green deploy says CloudFormation created the runtime. It does not
