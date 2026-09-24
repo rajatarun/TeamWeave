@@ -4,7 +4,7 @@ The embedding model is Amazon Nova Multimodal Embeddings
 (``amazon.nova-2-multimodal-embeddings-v1:0``). On a managed knowledge base
 that model is a custom embedding, the same option as Titan and Cohere:
 ``type`` ``MANAGED``, ``embeddingModelType`` ``CUSTOM``, ``dimensions``
-``3072``, ``embeddingDataType`` ``FLOAT32``. The ``modelConfiguration``
+``1024``, ``embeddingDataType`` ``FLOAT32``. The ``modelConfiguration``
 document is TwelveLabs Marengo's, and Marengo is the only model on that
 path. Nova does not use it.
 
@@ -72,15 +72,15 @@ def supplemental_uri(bucket: str) -> str:
     return f"s3://{name}/"
 
 
-# Nova's knowledge-base sample uses 3072, the largest of 256, 384, 1024,
-# and 3072. The managed-KB page's "dimensions (1024)" is the Titan example.
-EMBEDDING_DIMENSIONS = 3072
+# The managed knowledge base page requires custom embedding models to
+# set dimensions 1024 and embeddingDataType FLOAT32.
+EMBEDDING_DIMENSIONS = 1024
 
 
 def knowledge_base_configuration(model_arn: str, multimodal_bucket: str) -> Dict[str, Any]:
     """The CreateKnowledgeBase body Nova accepts on a managed base.
 
-    Custom embedding on a managed base takes ``dimensions`` and
+    Custom embedding on a managed base takes ``dimensions`` ``1024`` and
     ``embeddingDataType`` ``FLOAT32``. ``FLOAT`` is not in that enum.
     ``audio`` and ``video`` on this structure are the self-managed VECTOR
     shape and are marked deprecated in favour of ``modelConfiguration``,
