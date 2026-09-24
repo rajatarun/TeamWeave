@@ -412,7 +412,7 @@ def test_the_portfolio_tool_does_not_receive_the_caller_token(monkeypatch):
 
 
 def test_portfolio_sync_uses_the_portfolio_ids(monkeypatch):
-    from src.orchestrator import portfolio_kb
+    from src.orchestrator import health_kb, portfolio_kb
 
     seen = {}
 
@@ -420,7 +420,7 @@ def test_portfolio_sync_uses_the_portfolio_ids(monkeypatch):
         seen.update(kb_id=kb_id, source_id=source_id)
         return {"kbSync": "started"}
 
-    monkeypatch.setattr(portfolio_kb, "start_sync", start_sync)
+    monkeypatch.setattr(health_kb, "start_sync", start_sync)
     monkeypatch.setenv("PORTFOLIO_KNOWLEDGE_BASE_ID", "KBPORT")
     monkeypatch.setenv("PORTFOLIO_DATA_SOURCE_ID", "DSPORT")
     monkeypatch.setenv("HEALTH_KNOWLEDGE_BASE_ID", "KBHEALTH")
