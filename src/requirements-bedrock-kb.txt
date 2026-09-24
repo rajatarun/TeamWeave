@@ -1,0 +1,11 @@
+# Managed Knowledge Bases are not in the Lambda runtime's botocore.
+# CreateKnowledgeBase fails in the client with "Unknown parameter
+# managedKnowledgeBaseConfiguration" and never reaches Bedrock.
+#
+# 1.43.32 added the managed type and still rejects the Marengo body:
+# supplementalDataStorageConfiguration and modelConfiguration are unknown
+# there. Both are in 1.43.92, which is the floor. The Makefile installs
+# this file only into WorkerFunction (Retrieve) and
+# HealthKbProvisionFunction (CreateKnowledgeBase / CreateDataSource).
+boto3>=1.43.92
+botocore>=1.43.92
