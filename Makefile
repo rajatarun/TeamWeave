@@ -45,3 +45,5 @@ build-ConversationFunction: package-lambda
 build-A2AFunction: package-lambda
 
 build-HealthKbSyncFunction: package-lambda
+
+build-HealthKbProvisionFunction: package-lambda

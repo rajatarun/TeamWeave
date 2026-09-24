@@ -2497,18 +2497,24 @@ Resources:
   # The documents stay in ContextWeave's health bucket. HealthDocsBucketName
   # and HealthDocsKmsKeyArn are that stack's outputs, read at deploy time the
   # same way ContextWeaveUrl is. This section indexes that bucket for
-  # health_prep. The vector bucket below is the embedding index, not a second
-  # copy of the records.
+  # health_prep. It does not create a second copy of the records.
   #
-  # Marengo Embed 3.0 emits 512-d vectors. A wider index accepts the stack and
-  # fails the first ingestion, which is why the dimension is written here
-  # rather than left to a default.
+  # twelvelabs.marengo-embed-3-0-v1:0 is not supported on a self-managed
+  # VECTOR knowledge base (S3 Vectors + vectorKnowledgeBaseConfiguration).
+  # CreateKnowledgeBase returns 400: "The specified embedding model is not
+  # supported." The model is a custom multimodal embedding on a managed
+  # knowledge base, and a managed base owns the vector store — there is no
+  # index to declare here.
   #
-  # The same model refuses to create a knowledge base that has no multimodal
-  # storage destination: "you must specify a multimodal storage destination."
-  # That destination holds media extracted during ingestion. It is not the
-  # document source, and it is not this index. AWS recommends a bucket of its
-  # own so extracted files are not ingested again as if they were records.
+  # AWS::Bedrock::KnowledgeBase cannot express that body. Its managed
+  # configuration has no supplementalDataStorageConfiguration and no
+  # modelConfiguration document, and its embeddingDataType enum is FLOAT32
+  # or BINARY. The user guide for Marengo requires FLOAT plus the document
+  # below. HealthKbProvisionFunction calls CreateKnowledgeBase with it.
+  #
+  # The multimodal bucket holds media extracted during ingestion. It is not
+  # the document source. A bucket of its own keeps extracted files from being
+  # ingested again as if they were records.
 
   HealthMultimodalBucket:
     Type: AWS::S3::Bucket
@@ -2531,32 +2537,11 @@ Resources:
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 7
 
-  HealthVectorBucket:
-    Type: AWS::S3Vectors::VectorBucket
-    Condition: HealthKnowledgeBaseEnabled
-    Properties:
-      VectorBucketName: !Sub "tw-health-vec-${AWS::AccountId}"
-
-  HealthVectorIndex:
-    Type: AWS::S3Vectors::Index
-    Condition: HealthKnowledgeBaseEnabled
-    DependsOn: HealthVectorBucket
-    Properties:
-      VectorBucketName: !Sub "tw-health-vec-${AWS::AccountId}"
-      IndexName: health-registry
-      DataType: float32
-      Dimension: 512
-      DistanceMetric: cosine
-      MetadataConfiguration:
-        NonFilterableMetadataKeys:
-          - AMAZON_BEDROCK_METADATA
-          - AMAZON_BEDROCK_TEXT_CHUNK
-
   HealthKnowledgeBaseRole:
     Type: AWS::IAM::Role
     Condition: HealthKnowledgeBaseEnabled
     Properties:
-      Description: Role the health knowledge base assumes to read ContextWeave's health bucket and write its index.
+      Description: Role the health knowledge base assumes to read ContextWeave's health bucket and write extracted media.
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -2577,16 +2562,6 @@ Resources:
               - Effect: Allow
                 Action: bedrock:InvokeModel
                 Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0"
-              - Effect: Allow
-                Action:
-                  - s3vectors:GetIndex
-                  - s3vectors:QueryVectors
-                  - s3vectors:PutVectors
-                  - s3vectors:GetVectors
-                  - s3vectors:DeleteVectors
-                Resource:
-                  - !GetAtt HealthVectorIndex.IndexArn
-                  - !GetAtt HealthVectorBucket.VectorBucketArn
               - Effect: Allow
                 Action:
                   - s3:ListBucket
@@ -2619,41 +2594,96 @@ Resources:
                   - kms:GenerateDataKey
                 Resource: !Ref HealthDocsKmsKeyArn
 
-  HealthKnowledgeBase:
-    Type: AWS::Bedrock::KnowledgeBase
+  # Not in the VPC. bedrock-agent is IPv4-only, and this function's
+  # whole job is CreateKnowledgeBase. Putting it next to the worker would
+  # make that call depend on the NAT instance.
+  HealthKbProvisionRole:
+    Type: AWS::IAM::Role
     Condition: HealthKnowledgeBaseEnabled
     Properties:
-      Name: !Sub "health-registry-${AWS::StackName}"
+      RoleName: !Sub "${AWS::StackName}-health-kb-provision-role"
+      Description: Creates the managed health knowledge base. It cannot read the records.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: health-kb-provision
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              # Create and list have no knowledge-base id yet. The rest name
+              # the base this function just created.
+              - Effect: Allow
+                Action:
+                  - bedrock:CreateKnowledgeBase
+                  - bedrock:ListKnowledgeBases
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - bedrock:GetKnowledgeBase
+                  - bedrock:UpdateKnowledgeBase
+                  - bedrock:DeleteKnowledgeBase
+                  - bedrock:CreateDataSource
+                  - bedrock:GetDataSource
+                  - bedrock:UpdateDataSource
+                  - bedrock:DeleteDataSource
+                  - bedrock:ListDataSources
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt HealthKnowledgeBaseRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: bedrock.amazonaws.com
+
+  HealthKbProvisionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-HealthKbProvisionFunction"
+      RetentionInDays: 30
+
+  HealthKbProvisionFunction:
+    Type: AWS::Serverless::Function
+    Condition: HealthKnowledgeBaseEnabled
+    DependsOn: HealthKbProvisionLogGroup
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-HealthKbProvisionFunction"
+      CodeUri: ../
+      Handler: src/orchestrator/health_kb_provision.handler
+      Role: !GetAtt HealthKbProvisionRole.Arn
+      Architectures:
+        - arm64
+      MemorySize: 256
+      Timeout: 900
+
+  # Ref is the knowledge base id. GetAtt KnowledgeBaseArn and DataSourceId
+  # are the attributes the function returns. The worker, the sync role, and
+  # the stack outputs already read those names.
+  HealthKnowledgeBase:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      ServiceToken: !GetAtt HealthKbProvisionFunction.Arn
+      KnowledgeBaseName: !Sub "health-registry-${AWS::StackName}"
       Description: Index of ContextWeave's health bucket for the health_prep team.
       RoleArn: !GetAtt HealthKnowledgeBaseRole.Arn
-      KnowledgeBaseConfiguration:
-        Type: VECTOR
-        VectorKnowledgeBaseConfiguration:
-          EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0"
-          # Required for twelvelabs.marengo-embed-3-0-v1:0. The URI is an s3://
-          # location, not a bucket ARN. One location, which is all the API allows.
-          SupplementalDataStorageConfiguration:
-            SupplementalDataStorageLocations:
-              - SupplementalDataStorageLocationType: S3
-                S3Location:
-                  URI: !Sub "s3://${HealthMultimodalBucket}/"
-      StorageConfiguration:
-        Type: S3_VECTORS
-        S3VectorsConfiguration:
-          IndexArn: !GetAtt HealthVectorIndex.IndexArn
-
-  HealthKnowledgeBaseDataSource:
-    Type: AWS::Bedrock::DataSource
-    Condition: HealthKnowledgeBaseEnabled
-    Properties:
-      Name: health-s3
-      Description: ContextWeave's health document bucket. This stack does not create it.
-      KnowledgeBaseId: !Ref HealthKnowledgeBase
-      DataDeletionPolicy: DELETE
-      DataSourceConfiguration:
-        Type: S3
-        S3Configuration:
-          BucketArn: !Sub "arn:${AWS::Partition}:s3:::${HealthDocsBucketName}"
+      EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0"
+      MultimodalBucket: !Ref HealthMultimodalBucket
+      DocsBucketName: !Ref HealthDocsBucketName
+      DocsBucketOwnerAccountId: !Ref AWS::AccountId
 
   HealthKbSyncRole:
     Type: AWS::IAM::Role
@@ -2708,7 +2738,7 @@ Resources:
       Environment:
         Variables:
           HEALTH_KNOWLEDGE_BASE_ID: !Ref HealthKnowledgeBase
-          HEALTH_DATA_SOURCE_ID: !GetAtt HealthKnowledgeBaseDataSource.DataSourceId
+          HEALTH_DATA_SOURCE_ID: !GetAtt HealthKnowledgeBase.DataSourceId
 
   HealthKbSyncRule:
     Type: AWS::Events::Rule
@@ -2840,8 +2870,8 @@ Outputs:
     Value: !Ref HealthKnowledgeBase
   HealthDataSourceId:
     Condition: HealthKnowledgeBaseEnabled
-    Description: S3 data source of the health knowledge base. The bucket is ContextWeave's.
-    Value: !GetAtt HealthKnowledgeBaseDataSource.DataSourceId
+    Description: Managed S3 connector of the health knowledge base. The bucket is ContextWeave's.
+    Value: !GetAtt HealthKnowledgeBase.DataSourceId
 
   OpenApiSpecPath:
     Value: openapi/teamweave.yaml
