@@ -17,6 +17,8 @@ of an IAM call that would otherwise be ambient authority over the record.
 from __future__ import annotations
 
 import os
+import random
+import time
 from typing import Any, Dict, List, Optional
 
 import boto3
@@ -46,7 +48,33 @@ def configured() -> bool:
     return bool(knowledge_base_id())
 
 
-def _client(service: str):
+# StartIngestionJob is rate limited per account. A burst of uploads used to
+# call it once per object with retries disabled, and Bedrock answered
+# ThrottlingException on the first extra call. Sync uses adaptive retries.
+# Retrieve stays at zero: a hung query must surface inside this invocation,
+# not sit in a retry loop until Lambda kills the worker.
+SYNC_MAX_ATTEMPTS = 4
+SYNC_BASE_DELAY_SECONDS = 0.5
+SYNC_MAX_DELAY_SECONDS = 8.0
+_ACTIVE_JOBS = frozenset({"STARTING", "IN_PROGRESS"})
+_THROTTLE_CODES = frozenset({
+    "ThrottlingException",
+    "TooManyRequestsException",
+    "Throttling",
+    "RequestLimitExceeded",
+})
+
+
+class SyncDeferred(RuntimeError):
+    """The job was not started, and the event has to be tried again.
+
+    A running ingestion reads the bucket as it was when that job started.
+    An upload that arrives afterwards is not in it. Reporting success here
+    deletes the event, and that object is never indexed.
+    """
+
+
+def _client(service: str, *, sync: bool = False):
     """A client whose wait fits the time this invocation has left.
 
     Built per call, same reason as the agent client: the budget shrinks as
@@ -56,13 +84,20 @@ def _client(service: str):
     Lambda runtime's botocore rejects that parameter before the request is
     signed. WorkerFunction is packaged with botocore>=1.43.92 so the model
     describes it; an older client fails here, naming that pin.
+
+    ``sync=True`` is the ingestion client. Adaptive mode retries throttling
+    with its own backoff. Retrieve does not, on purpose.
     """
     client = boto3.client(
         service,
         config=Config(
             read_timeout=budget_for_call(),
             connect_timeout=60,
-            retries={"max_attempts": 0},
+            retries=(
+                {"max_attempts": 8, "mode": "adaptive"}
+                if sync
+                else {"max_attempts": 0}
+            ),
         ),
     )
     if service == "bedrock-agent-runtime":
@@ -152,16 +187,68 @@ def retrieve(question: str, *, top_k: int = 6, client=None,
     }
 
 
+def _error_code(exc: BaseException) -> str:
+    if not isinstance(exc, ClientError):
+        return ""
+    return str((exc.response.get("Error") or {}).get("Code") or "")
+
+
+def _throttled(exc: BaseException) -> bool:
+    if not isinstance(exc, ClientError):
+        return False
+    if _error_code(exc) in _THROTTLE_CODES:
+        return True
+    # The production failure was ThrottlingException whose message is
+    # "Rate limit exceeded". A code this set does not name yet still says so.
+    message = str((exc.response.get("Error") or {}).get("Message") or "")
+    lowered = message.lower()
+    return "rate limit" in lowered or "throttl" in lowered
+
+
+def _backoff_sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _pause(attempt: int) -> None:
+    delay = min(SYNC_MAX_DELAY_SECONDS, SYNC_BASE_DELAY_SECONDS * (2 ** attempt))
+    # Full jitter: the sleep is delay plus a random slice of delay, so two
+    # callers that were throttled together do not wake on the same instant.
+    _backoff_sleep(delay + random.uniform(0, delay))
+
+
+def job_in_progress(client, kb_id: str, source_id: str) -> bool:
+    """True when this data source already has a job Bedrock has not finished.
+
+    List is newest first. An older STARTING job still counts: Bedrock rejects
+    a second start with ConflictException, and the object that provoked this
+    call may have landed after that job began.
+    """
+    response = client.list_ingestion_jobs(
+        knowledgeBaseId=kb_id,
+        dataSourceId=source_id,
+        maxResults=10,
+        sortBy={"attribute": "STARTED_AT", "order": "DESCENDING"},
+    )
+    for summary in response.get("ingestionJobSummaries") or []:
+        if not isinstance(summary, dict):
+            continue
+        if str(summary.get("status") or "").upper() in _ACTIVE_JOBS:
+            return True
+    return False
+
+
 def start_sync(*, client=None, kb_id: Optional[str] = None,
                source_id: Optional[str] = None) -> Dict[str, str]:
-    """Ask a base to re-read its bucket.
+    """Ask a base to re-read its bucket, or say the caller must try later.
 
-    A job already running is not a failure: it reads the bucket as it is,
-    including the object that just landed. Any other failure is re-raised so
-    EventBridge retries it. The message is not logged; see :func:`retrieve`.
+    ``{"kbSync": "deferred"}`` means a job is already STARTING or IN_PROGRESS,
+    or StartIngestionJob is still throttled after the backoff. It is not
+    success. The running job does not see objects that arrive after it
+    starts, so the caller has to run again once that job finishes.
 
     Omitted ids are the health base. An explicit empty string stays empty,
     so a portfolio sync with no id does not start a job on the health base.
+    The event is not logged; see :func:`retrieve`.
     """
     if kb_id is None:
         kb_id = knowledge_base_id()
@@ -172,26 +259,89 @@ def start_sync(*, client=None, kb_id: Optional[str] = None,
     else:
         source_id = str(source_id).strip()
     if not kb_id or not source_id:
-        log.warning("health_kb_sync_unconfigured")
+        log.warning("kb_sync_unconfigured")
         return {}
     if client is None:
-        client = _client("bedrock-agent")
-    try:
-        client.start_ingestion_job(
-            knowledgeBaseId=kb_id,
-            dataSourceId=source_id,
-        )
-    except ClientError as exc:
-        code = str((exc.response.get("Error") or {}).get("Code") or "")
-        if code == "ConflictException":
-            log.info("health_kb_sync_already_running")
-            return {"kbSync": "already-running"}
-        log.warning("health_kb_sync_failed", extra={"code": code})
-        raise
-    return {"kbSync": "started"}
+        client = _client("bedrock-agent", sync=True)
+
+    for attempt in range(SYNC_MAX_ATTEMPTS):
+        try:
+            if job_in_progress(client, kb_id, source_id):
+                log.info("kb_sync_deferred")
+                return {"kbSync": "deferred"}
+            client.start_ingestion_job(
+                knowledgeBaseId=kb_id,
+                dataSourceId=source_id,
+            )
+            return {"kbSync": "started"}
+        except ClientError as exc:
+            if _error_code(exc) == "ConflictException":
+                # Lost the race with a start this process did not make.
+                log.info("kb_sync_deferred")
+                return {"kbSync": "deferred"}
+            if _throttled(exc) and attempt + 1 < SYNC_MAX_ATTEMPTS:
+                log.warning("kb_sync_throttled", extra={"attempt": attempt + 1})
+                _pause(attempt)
+                continue
+            if _throttled(exc):
+                log.warning("kb_sync_throttled")
+                return {"kbSync": "deferred"}
+            log.warning("kb_sync_failed", extra={"code": _error_code(exc)})
+            raise
+    log.warning("kb_sync_throttled")
+    return {"kbSync": "deferred"}
 
 
-def sync_handler(event: Any, context: Any) -> Dict[str, str]:
-    """EventBridge entrypoint. The event names the object; it is not logged."""
+def _sqs_records(event: Any) -> List[Dict[str, Any]]:
+    if not isinstance(event, dict):
+        return []
+    records = event.get("Records")
+    if not isinstance(records, list):
+        return []
+    found = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if record.get("eventSource") != "aws:sqs":
+            continue
+        if not record.get("messageId"):
+            continue
+        found.append(record)
+    return found
+
+
+def handle_sync_event(event: Any, context: Any, *,
+                      kb_id: Optional[str] = None,
+                      source_id: Optional[str] = None) -> Dict[str, Any]:
+    """One invocation starts at most one ingestion job.
+
+    The queue gathers the object events. This function does not loop over
+    them: a batch of uploads is one ``StartIngestionJob``. When that start
+    is deferred, every message in the batch is returned to the queue. SQS
+    makes them visible again after the visibility timeout, which is the
+    delay until the running job can be followed by another.
+
+    A direct invoke has no message to return. Defer raises so the caller
+    retries instead of recording the sync as done.
+    """
     set_deadline_from_context(context)
-    return start_sync()
+    result = start_sync(kb_id=kb_id, source_id=source_id)
+    records = _sqs_records(event)
+    if records:
+        if result.get("kbSync") == "deferred":
+            return {
+                "batchItemFailures": [
+                    {"itemIdentifier": record["messageId"]} for record in records
+                ]
+            }
+        return {"batchItemFailures": []}
+    if result.get("kbSync") == "deferred":
+        raise SyncDeferred(
+            "ingestion job was not started; the event must be retried"
+        )
+    return result
+
+
+def sync_handler(event: Any, context: Any) -> Dict[str, Any]:
+    """SQS entrypoint for the health bucket. The event names the object; it is not logged."""
+    return handle_sync_event(event, context)

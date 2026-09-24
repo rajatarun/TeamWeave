@@ -718,9 +718,15 @@ because `HealthMultimodalBucket` exists only when the ContextWeave health
 import is present and the supplemental URI is a bucket, not a prefix.
 Extracted media is not a second copy of the statements. The deploy starts
 one ingestion job from `PortfolioKnowledgeBaseId` and
-`PortfolioDataSourceId`; later uploads and deletes re-index through
-EventBridge. Grant the Nova embedding model in the Bedrock console before
-that job can succeed. A failed job warns and does not roll the stack back.
+`PortfolioDataSourceId`. Later uploads and deletes reach an SQS queue
+(batch of 100, window of 60 seconds) and one Lambda with reserved
+concurrency 1, shared by the health sync. That invocation starts at most
+one job. If a job is already `STARTING` or `IN_PROGRESS`, or Bedrock is
+still throttling, the messages go back on the queue and become visible
+again after six minutes, so an upload that arrived after the running job
+started is still indexed. Grant the Nova embedding model in the Bedrock
+console before that job can succeed. A failed job warns and does not roll
+the stack back.
 Creating the base itself is unconditional, so a `CreateKnowledgeBase`
 failure fails the deploy.
 
