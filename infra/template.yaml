@@ -2615,12 +2615,15 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              # The stack creates the group. CreateLogGroup on * is how a late
+              # log line rebuilds /aws/lambda/<FunctionName> after a rollback
+              # deletes it, and that rebuilt name is what the next changeset
+              # refuses. Streams in the stack's own group are enough.
               - Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+                Resource: !GetAtt HealthKbProvisionLogGroup.Arn
               # Create and list have no knowledge-base id yet. The rest name
               # the base this function just created.
               - Effect: Allow
@@ -2646,24 +2649,31 @@ Resources:
                   StringEquals:
                     iam:PassedToService: bedrock.amazonaws.com
 
+  # No LogGroupName, and no FunctionName. Both are the names a rolled-back
+  # create leaves behind. The provision function ran, CloudFormation deleted
+  # it, then deleted /aws/lambda/<FunctionName>; a log line still in flight
+  # creates that group again, and it is not in the stack. The next changeset
+  # is an Add of that same name, and AWS::EarlyValidation::ResourceExistenceCheck
+  # fails the changeset before any resource event exists. A generated name
+  # cannot collide with the one that came back. LoggingConfig sends the
+  # function's logs here so Lambda does not create the default group either.
   HealthKbProvisionLogGroup:
     Type: AWS::Logs::LogGroup
     Condition: HealthKnowledgeBaseEnabled
     Properties:
-      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-HealthKbProvisionFunction"
       RetentionInDays: 30
 
   HealthKbProvisionFunction:
     Type: AWS::Serverless::Function
     Condition: HealthKnowledgeBaseEnabled
-    DependsOn: HealthKbProvisionLogGroup
     Metadata:
       BuildMethod: makefile
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-HealthKbProvisionFunction"
       CodeUri: ../
       Handler: src/orchestrator/health_kb_provision.handler
       Role: !GetAtt HealthKbProvisionRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref HealthKbProvisionLogGroup
       Architectures:
         - arm64
       MemorySize: 256
@@ -2705,32 +2715,34 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+                Resource: !GetAtt HealthKbSyncLogGroup.Arn
               - Effect: Allow
                 Action: bedrock:StartIngestionJob
                 Resource: !GetAtt HealthKnowledgeBase.KnowledgeBaseArn
 
+  # Same generated name as the provision group. This function never ran on
+  # the failed deploy, so its default group is the less likely leftover;
+  # the first invoke would otherwise arm the same failure for the retry
+  # after that.
   HealthKbSyncLogGroup:
     Type: AWS::Logs::LogGroup
     Condition: HealthKnowledgeBaseEnabled
     Properties:
-      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-HealthKbSyncFunction"
       RetentionInDays: 30
 
   HealthKbSyncFunction:
     Type: AWS::Serverless::Function
     Condition: HealthKnowledgeBaseEnabled
-    DependsOn: HealthKbSyncLogGroup
     Metadata:
       BuildMethod: makefile
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-HealthKbSyncFunction"
       CodeUri: ../
       Handler: src/orchestrator/health_kb.sync_handler
       Role: !GetAtt HealthKbSyncRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref HealthKbSyncLogGroup
       Architectures:
         - arm64
       MemorySize: 256
