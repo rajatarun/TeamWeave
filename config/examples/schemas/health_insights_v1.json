@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "health_insights_v1",
+  "description": "Evidence-backed insights and actions from the person's health records. Not a list of questions and not a diagnosis.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seek_care_now": {
+      "type": "boolean"
+    },
+    "safety_note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "description": "One short sentence: not a diagnosis and not a substitute for care."
+    },
+    "insights": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {"type": "string", "minLength": 1},
+          "finding": {"type": "string", "minLength": 1},
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "S3 URI from sourceKey, or request.experiencing when the knowledge base returned nothing relevant."
+                },
+                "date": {"type": "string"},
+                "value": {"type": "string", "minLength": 1}
+              },
+              "required": ["source", "date", "value"]
+            }
+          },
+          "significance": {
+            "type": "string",
+            "enum": ["low", "moderate", "high"]
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          }
+        },
+        "required": ["title", "finding", "evidence", "significance", "confidence"]
+      }
+    },
+    "suggestions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {"type": "string", "minLength": 1},
+          "rationale": {"type": "string", "minLength": 1},
+          "linked_insight": {"type": "string", "minLength": 1},
+          "priority": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "timeframe": {"type": "string", "minLength": 1}
+        },
+        "required": ["action", "rationale", "linked_insight", "priority", "timeframe"]
+      }
+    },
+    "data_gaps": {
+      "type": "array",
+      "description": "What is missing, stated as an observation. Not a question.",
+      "items": {"type": "string"}
+    },
+    "follow_ups": {
+      "type": "array",
+      "maxItems": 2,
+      "description": "Optional. At most two. Never the substance of the answer.",
+      "items": {"type": "string"}
+    }
+  },
+  "required": [
+    "summary",
+    "seek_care_now",
+    "safety_note",
+    "insights",
+    "suggestions",
+    "data_gaps"
+  ]
+}

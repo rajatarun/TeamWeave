@@ -294,21 +294,25 @@ def test_a_team_that_asks_for_grounding_is_told_what_absent_grounding_means(name
 
 
 def test_the_health_team_prepares_for_care_and_does_not_practise_it():
-    """The one team here with real-world consequences. It structures what was
-    reported and builds questions; it must not name a cause, recommend a
-    medicine, or answer an emergency with an appointment."""
+    """The one team here with real-world consequences. It reads the record and
+    returns insights and suggestions. It must not name a cause, recommend a
+    medicine, or answer an emergency with a plan for later."""
     config = load("health_prep")
     constraints = " ".join(config["globals"]["hard_constraints"]).lower()
     for promise in ("never diagnose", "never suggest a medicine", "seek_care_now"):
         assert promise.lower() in constraints, f"health_prep dropped: {promise}"
     schemas = {a["schema_ref"] for a in config["agents"]}
-    assert "symptom_log_v1" in schemas and "care_questions_v1" in schemas
+    assert schemas == {"symptom_log_v1", "health_insights_v1"}
     # The escalation has to be a field, not a hope: a constraint the model may
     # or may not honour is not the same as a value the schema requires.
-    log = json.loads(pathlib.Path("config/examples/schemas/symptom_log_v1.json").read_text())
-    assert "seek_care_now" in log["required"], (
-        "urgency is optional in the schema, so an answer can omit it entirely"
-    )
+    for name in ("symptom_log_v1", "health_insights_v1"):
+        doc = json.loads(pathlib.Path(f"config/examples/schemas/{name}.json").read_text())
+        assert "seek_care_now" in doc["required"], (
+            f"urgency is optional in {name}, so an answer can omit it entirely"
+        )
+    insights = json.loads(pathlib.Path("config/examples/schemas/health_insights_v1.json").read_text())
+    assert "insights" in insights["required"] and "suggestions" in insights["required"]
+    assert "questions_to_ask" not in insights.get("properties", {})
 
 
 @pytest.mark.parametrize("name", PERSONAL_TEAMS)
