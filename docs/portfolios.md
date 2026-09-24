@@ -32,7 +32,11 @@ sync function runs with reserved concurrency 1, reads up to 100 messages
 gathered over 60 seconds, and starts one ingestion job for the batch. If a
 job is already running, or `StartIngestionJob` is throttled, those messages
 return to the queue and are tried again after the visibility timeout
-(6 minutes). Ingestion is asynchronous. A run that starts before the job
+(720 seconds, twelve minutes — six times the function timeout). A poller
+throttled by reserved concurrency waits out the same timeout. After 1000
+receives a message moves to a dead-letter queue kept for 14 days. That
+queue has no consumer. Redrive it, or start one ingestion job, if it holds
+messages. Ingestion is asynchronous. A run that starts before the job
 finishes sees `found: false` or `error` on `query_portfolio`, and the
 agent is told to say what was searched rather than invent holdings.
 
