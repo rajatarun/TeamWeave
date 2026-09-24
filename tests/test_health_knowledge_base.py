@@ -76,19 +76,51 @@ def test_the_deploy_reads_those_outputs_from_the_contextweave_stack():
 
 def test_there_is_no_second_health_document_bucket(template):
     assert "HealthDocsBucket" not in template["Resources"]
-    buckets = [
-        name for name, res in template["Resources"].items()
-        if res.get("Type") == "AWS::S3::Bucket" and "health" in name.lower()
-    ]
-    assert buckets == []
     source = template["Resources"]["HealthKnowledgeBaseDataSource"]
     rendered = str(source)
     assert "HealthDocsBucketName" in rendered
+    assert "HealthMultimodalBucket" not in rendered
     assert source["Properties"]["DataSourceConfiguration"]["Type"] == "S3"
     # The vector bucket is the index, and its name says so.
     vector = template["Resources"]["HealthVectorBucket"]
     assert vector["Type"] == "AWS::S3Vectors::VectorBucket"
     assert "tw-health-vec-" in str(vector["Properties"]["VectorBucketName"])
+
+
+def test_marengo_declares_a_multimodal_storage_destination(template):
+    """CreateKnowledgeBase 400s without one: Marengo requires a multimodal
+    storage destination. It holds extracted media, so it is its own bucket."""
+    vector = (
+        template["Resources"]["HealthKnowledgeBase"]["Properties"]
+        ["KnowledgeBaseConfiguration"]["VectorKnowledgeBaseConfiguration"]
+    )
+    locations = vector["SupplementalDataStorageConfiguration"]["SupplementalDataStorageLocations"]
+    assert len(locations) == 1
+    assert locations[0]["SupplementalDataStorageLocationType"] == "S3"
+    uri = str(locations[0]["S3Location"]["URI"])
+    assert "s3://" in uri
+    assert "HealthMultimodalBucket" in uri
+    assert "HealthDocsBucketName" not in uri
+    bucket = template["Resources"]["HealthMultimodalBucket"]
+    assert bucket["Type"] == "AWS::S3::Bucket"
+    assert bucket["Condition"] == "HealthKnowledgeBaseEnabled"
+    assert "tw-health-mm-" in str(bucket["Properties"]["BucketName"])
+    role = template["Resources"]["HealthKnowledgeBaseRole"]
+    rendered = str(role)
+    assert "s3:PutObject" in rendered
+    assert "s3:DeleteObject" in rendered
+    assert "HealthMultimodalBucket" in rendered
+    # The document bucket grant is still read-only.
+    docs_write = False
+    for statement in role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]:
+        if not isinstance(statement, dict):
+            continue
+        actions = statement.get("Action")
+        actions = actions if isinstance(actions, list) else [actions]
+        resource = str(statement.get("Resource"))
+        if "HealthDocsBucketName" in resource and "s3:PutObject" in actions:
+            docs_write = True
+    assert not docs_write
 
 
 def test_the_base_embeds_with_marengo_at_512(template):
@@ -113,6 +145,7 @@ def test_the_base_exists_only_when_both_imports_are_present(template):
         "HealthKnowledgeBaseDataSource",
         "HealthVectorBucket",
         "HealthVectorIndex",
+        "HealthMultimodalBucket",
         "HealthKbSyncFunction",
     ):
         assert template["Resources"][name]["Condition"] == "HealthKnowledgeBaseEnabled"
