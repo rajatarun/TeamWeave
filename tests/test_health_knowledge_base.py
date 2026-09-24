@@ -75,32 +75,32 @@ def test_the_deploy_reads_those_outputs_from_the_contextweave_stack():
 
 
 def test_there_is_no_second_health_document_bucket(template):
+    """The document bucket is ContextWeave's. Managed search owns the index.
+
+    A VECTOR base with an S3 Vectors index is what rejected Marengo. Neither
+    the index nor a second document bucket is in this template.
+    """
     assert "HealthDocsBucket" not in template["Resources"]
-    source = template["Resources"]["HealthKnowledgeBaseDataSource"]
-    rendered = str(source)
+    assert "HealthVectorBucket" not in template["Resources"]
+    assert "HealthVectorIndex" not in template["Resources"]
+    assert "HealthKnowledgeBaseDataSource" not in template["Resources"]
+    assert "AWS::S3Vectors::" not in TEMPLATE
+    assert "S3_VECTORS" not in TEMPLATE
+    kb = template["Resources"]["HealthKnowledgeBase"]
+    assert kb["Type"] == "AWS::CloudFormation::CustomResource"
+    rendered = str(kb)
     assert "HealthDocsBucketName" in rendered
-    assert "HealthMultimodalBucket" not in rendered
-    assert source["Properties"]["DataSourceConfiguration"]["Type"] == "S3"
-    # The vector bucket is the index, and its name says so.
-    vector = template["Resources"]["HealthVectorBucket"]
-    assert vector["Type"] == "AWS::S3Vectors::VectorBucket"
-    assert "tw-health-vec-" in str(vector["Properties"]["VectorBucketName"])
+    assert "DocsBucketName" in kb["Properties"]
+    # The multimodal bucket is the extracted-media destination, not the source.
+    assert "HealthMultimodalBucket" not in str(kb["Properties"]["DocsBucketName"])
 
 
 def test_marengo_declares_a_multimodal_storage_destination(template):
     """CreateKnowledgeBase 400s without one: Marengo requires a multimodal
     storage destination. It holds extracted media, so it is its own bucket."""
-    vector = (
-        template["Resources"]["HealthKnowledgeBase"]["Properties"]
-        ["KnowledgeBaseConfiguration"]["VectorKnowledgeBaseConfiguration"]
-    )
-    locations = vector["SupplementalDataStorageConfiguration"]["SupplementalDataStorageLocations"]
-    assert len(locations) == 1
-    assert locations[0]["SupplementalDataStorageLocationType"] == "S3"
-    uri = str(locations[0]["S3Location"]["URI"])
-    assert "s3://" in uri
-    assert "HealthMultimodalBucket" in uri
-    assert "HealthDocsBucketName" not in uri
+    kb = template["Resources"]["HealthKnowledgeBase"]["Properties"]
+    assert "HealthMultimodalBucket" in str(kb["MultimodalBucket"])
+    assert "HealthDocsBucketName" not in str(kb["MultimodalBucket"])
     bucket = template["Resources"]["HealthMultimodalBucket"]
     assert bucket["Type"] == "AWS::S3::Bucket"
     assert bucket["Condition"] == "HealthKnowledgeBaseEnabled"
@@ -110,6 +110,7 @@ def test_marengo_declares_a_multimodal_storage_destination(template):
     assert "s3:PutObject" in rendered
     assert "s3:DeleteObject" in rendered
     assert "HealthMultimodalBucket" in rendered
+    assert "s3vectors:" not in rendered
     # The document bucket grant is still read-only.
     docs_write = False
     for statement in role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]:
@@ -123,17 +124,21 @@ def test_marengo_declares_a_multimodal_storage_destination(template):
     assert not docs_write
 
 
-def test_the_base_embeds_with_marengo_at_512(template):
+def test_the_base_embeds_with_marengo(template):
     assert EMBEDDING_MODEL_ID in TEMPLATE
     kb = template["Resources"]["HealthKnowledgeBase"]["Properties"]
-    arn = kb["KnowledgeBaseConfiguration"]["VectorKnowledgeBaseConfiguration"]["EmbeddingModelArn"]
-    assert EMBEDDING_MODEL_ID in str(arn)
-    index = template["Resources"]["HealthVectorIndex"]["Properties"]
-    assert index["Dimension"] == 512
-    assert index["DistanceMetric"] == "cosine"
-    assert index["DataType"] == "float32"
+    assert EMBEDDING_MODEL_ID in str(kb["EmbeddingModelArn"])
+    assert template["Resources"]["HealthKnowledgeBase"]["Type"] == "AWS::CloudFormation::CustomResource"
     role = str(template["Resources"]["HealthKnowledgeBaseRole"])
     assert EMBEDDING_MODEL_ID in role
+    provision = str(template["Resources"]["HealthKbProvisionRole"])
+    assert "bedrock:CreateKnowledgeBase" in provision
+    assert "iam:PassRole" in provision
+    assert "HealthKnowledgeBaseRole" in provision
+    function = template["Resources"]["HealthKbProvisionFunction"]
+    assert function["Properties"]["Handler"] == "src/orchestrator/health_kb_provision.handler"
+    assert function["Properties"]["Timeout"] == 900
+    assert "VpcConfig" not in function["Properties"]
 
 
 def test_the_base_exists_only_when_both_imports_are_present(template):
@@ -142,9 +147,7 @@ def test_the_base_exists_only_when_both_imports_are_present(template):
     assert "HealthDocsKmsKeyArn" in condition
     for name in (
         "HealthKnowledgeBase",
-        "HealthKnowledgeBaseDataSource",
-        "HealthVectorBucket",
-        "HealthVectorIndex",
+        "HealthKbProvisionFunction",
         "HealthMultimodalBucket",
         "HealthKbSyncFunction",
     ):
@@ -174,6 +177,11 @@ def test_a_bucket_change_reindexes_and_a_deploy_indexes_what_is_already_there():
     assert "start-ingestion-job" in WORKFLOW
     assert "HealthKnowledgeBaseId" in WORKFLOW
     assert "HealthDataSourceId" in WORKFLOW
+    loaded = yaml.load(TEMPLATE, Loader=CfnLoader)
+    source_id = loaded["Resources"]["HealthKbSyncFunction"]["Properties"]["Environment"]["Variables"]["HEALTH_DATA_SOURCE_ID"]
+    assert "HealthKnowledgeBase" in str(source_id)
+    assert "HealthKnowledgeBaseDataSource" not in str(source_id)
+    assert "DataSourceId" in str(loaded["Outputs"]["HealthDataSourceId"]["Value"])
 
 
 # ── the tool actually calls it, and still refuses without a person ──────────
@@ -205,7 +213,8 @@ def test_a_configured_base_is_what_health_prep_reads(monkeypatch):
     result = weave_tools.query_health_record("last lab", caller_token="tok", top_k=4)
     assert seen["knowledgeBaseId"] == "KBHEALTH"
     assert seen["retrievalQuery"] == {"text": "last lab"}
-    assert seen["retrievalConfiguration"]["vectorSearchConfiguration"]["numberOfResults"] == 4
+    assert seen["retrievalConfiguration"]["managedSearchConfiguration"]["numberOfResults"] == 4
+    assert "vectorSearchConfiguration" not in seen["retrievalConfiguration"]
     assert result["found"] is True
     assert result["excerpts"][0]["content"] == "HbA1c 6.1 in March"
     assert result["source"] == "bedrock-knowledge-base"
@@ -319,3 +328,346 @@ def test_the_sync_handler_does_not_log_the_object_key(monkeypatch):
         {"detail": {"object": {"key": "discharge-summary.pdf"}}}, Context())
     assert result == {"kbSync": "started"}
     assert "discharge-summary" not in str(logged)
+
+
+# ── CreateKnowledgeBase is the managed Marengo body, not a VECTOR base ──────
+
+MODEL_ARN = (
+    "arn:aws:bedrock:us-east-1::foundation-model/twelvelabs.marengo-embed-3-0-v1:0"
+)
+REQUEST_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+def test_the_create_body_is_the_documented_managed_shape():
+    """botocore accepts this body. A VECTOR body is what the API rejected."""
+    from botocore.session import Session
+    from botocore.validate import ParamValidator
+
+    from orchestrator.health_kb_provision import (
+        data_source_fields,
+        knowledge_base_configuration,
+    )
+
+    configuration = knowledge_base_configuration(MODEL_ARN, "tw-health-mm-1-us-east-1")
+    assert configuration == {
+        "type": "MANAGED",
+        "managedKnowledgeBaseConfiguration": {
+            "embeddingModelType": "CUSTOM",
+            "embeddingModelArn": MODEL_ARN,
+            "embeddingModelConfiguration": {
+                "bedrockEmbeddingModelConfiguration": {
+                    "embeddingDataType": "FLOAT",
+                    "modelConfiguration": {
+                        "version": "1",
+                        "audio": {
+                            "segmentation": {
+                                "method": "dynamic",
+                                "dynamic": {"minDurationSec": 4},
+                            }
+                        },
+                        "video": {
+                            "segmentation": {
+                                "method": "fixed",
+                                "fixed": {"durationSec": 6},
+                            }
+                        },
+                    },
+                }
+            },
+            "supplementalDataStorageConfiguration": {
+                "storageLocations": [
+                    {
+                        "type": "S3",
+                        "s3Location": {"uri": "s3://tw-health-mm-1-us-east-1/"},
+                    }
+                ]
+            },
+        },
+    }
+    assert "storageConfiguration" not in configuration
+    assert "dimensions" not in str(configuration)
+
+    service = Session().get_service_model("bedrock-agent")
+    validator = ParamValidator()
+    create = validator.validate(
+        {
+            "name": "health-registry-teamweave",
+            "roleArn": "arn:aws:iam::239571291755:role/kb",
+            "description": "Index of ContextWeave's health bucket for the health_prep team.",
+            "knowledgeBaseConfiguration": configuration,
+        },
+        service.operation_model("CreateKnowledgeBase").input_shape,
+    )
+    assert not create.has_errors(), create.generate_report()
+
+    fields = data_source_fields("contextweave-health-docs", "239571291755")
+    assert fields["dataSourceConfiguration"]["type"] == "MANAGED_KNOWLEDGE_BASE_CONNECTOR"
+    connection = fields["dataSourceConfiguration"]["managedKnowledgeBaseConnectorConfiguration"]
+    assert connection["connectorParameters"]["connectionConfiguration"] == {
+        "bucketName": "contextweave-health-docs",
+        "bucketOwnerAccountId": "239571291755",
+    }
+    assert fields["dataDeletionPolicy"] == "DELETE"
+    assert fields["vectorIngestionConfiguration"]["parsingConfiguration"]["parsingStrategy"] == "SMART_PARSING"
+    data_source = validator.validate(
+        {"knowledgeBaseId": "KBID123456", **fields},
+        service.operation_model("CreateDataSource").input_shape,
+    )
+    assert not data_source.has_errors(), data_source.generate_report()
+
+    runtime = Session().get_service_model("bedrock-agent-runtime")
+    retrieve = validator.validate(
+        {
+            "knowledgeBaseId": "KBID123456",
+            "retrievalQuery": {"text": "last lab"},
+            "retrievalConfiguration": {"managedSearchConfiguration": {"numberOfResults": 4}},
+        },
+        runtime.operation_model("Retrieve").input_shape,
+    )
+    assert not retrieve.has_errors(), retrieve.generate_report()
+
+
+class _Context:
+    log_stream_name = "stream"
+
+    def get_remaining_time_in_millis(self):
+        return 120_000
+
+
+def _event(request_type, physical=""):
+    event = {
+        "RequestType": request_type,
+        "ResponseURL": "https://cloudformation-custom-resource-response.s3.amazonaws.com/response",
+        "StackId": "arn:aws:cloudformation:us-east-1:239571291755:stack/teamweave/guid",
+        "RequestId": REQUEST_ID,
+        "LogicalResourceId": "HealthKnowledgeBase",
+        "ResourceProperties": {
+            "ServiceToken": "arn:aws:lambda:us-east-1:239571291755:function:provision",
+            "KnowledgeBaseName": "health-registry-teamweave",
+            "Description": "Index of ContextWeave's health bucket for the health_prep team.",
+            "RoleArn": "arn:aws:iam::239571291755:role/health-kb",
+            "EmbeddingModelArn": MODEL_ARN,
+            "MultimodalBucket": "tw-health-mm-239571291755-us-east-1",
+            "DocsBucketName": "contextweave-health-docs",
+            "DocsBucketOwnerAccountId": "239571291755",
+        },
+    }
+    if physical:
+        event["PhysicalResourceId"] = physical
+    return event
+
+
+def _install_response(monkeypatch):
+    sent = []
+
+    def urlopen(request, timeout=None):
+        sent.append(request)
+
+        class _Response:
+            def read(self):
+                return b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        return _Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("orchestrator.health_kb_provision.time.sleep", lambda *_: None)
+    return sent
+
+
+def _body(request):
+    import json
+    return json.loads(request.data.decode())
+
+
+def test_create_calls_the_managed_api_and_returns_the_ids(monkeypatch):
+    from orchestrator import health_kb_provision
+
+    sent = _install_response(monkeypatch)
+    seen = {}
+
+    class Client:
+        def create_knowledge_base(self, **kwargs):
+            seen["create"] = kwargs
+            return {"knowledgeBase": {"knowledgeBaseId": "KBHEALTH", "status": "CREATING"}}
+
+        def get_knowledge_base(self, **kwargs):
+            return {"knowledgeBase": {
+                "knowledgeBaseId": "KBHEALTH",
+                "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:239571291755:knowledge-base/KBHEALTH",
+                "status": "ACTIVE",
+            }}
+
+        def list_data_sources(self, **kwargs):
+            return {"dataSourceSummaries": []}
+
+        def create_data_source(self, **kwargs):
+            seen["data_source"] = kwargs
+            return {"dataSource": {"dataSourceId": "DSHEALTH", "status": "CREATING"}}
+
+        def get_data_source(self, **kwargs):
+            return {"dataSource": {"dataSourceId": "DSHEALTH", "status": "AVAILABLE"}}
+
+    monkeypatch.setattr(health_kb_provision, "_client", lambda: Client())
+    result = health_kb_provision.handler(_event("Create"), _Context())
+    assert result["KnowledgeBaseId"] == "KBHEALTH"
+    assert result["DataSourceId"] == "DSHEALTH"
+    create = seen["create"]
+    assert "storageConfiguration" not in create
+    assert create["knowledgeBaseConfiguration"]["type"] == "MANAGED"
+    managed = create["knowledgeBaseConfiguration"]["managedKnowledgeBaseConfiguration"]
+    assert managed["embeddingModelArn"].endswith(EMBEDDING_MODEL_ID)
+    assert managed["embeddingModelConfiguration"]["bedrockEmbeddingModelConfiguration"]["embeddingDataType"] == "FLOAT"
+    assert managed["supplementalDataStorageConfiguration"]["storageLocations"][0]["s3Location"]["uri"] == (
+        "s3://tw-health-mm-239571291755-us-east-1/"
+    )
+    source = seen["data_source"]
+    assert source["dataSourceConfiguration"]["type"] == "MANAGED_KNOWLEDGE_BASE_CONNECTOR"
+    connection = source["dataSourceConfiguration"]["managedKnowledgeBaseConnectorConfiguration"]["connectorParameters"]
+    assert connection["connectionConfiguration"]["bucketName"] == "contextweave-health-docs"
+    assert "s3Configuration" not in source["dataSourceConfiguration"]
+    body = _body(sent[0])
+    assert request_method(sent[0]) == "PUT"
+    assert body["Status"] == "SUCCESS"
+    assert body["PhysicalResourceId"] == "KBHEALTH"
+    assert body["Data"]["KnowledgeBaseArn"].endswith("knowledge-base/KBHEALTH")
+    assert body["Data"]["DataSourceId"] == "DSHEALTH"
+    content_type = sent[0].get_header("Content-type")
+    assert content_type in ("", None)
+
+
+def request_method(request):
+    return request.get_method()
+
+
+def test_update_keeps_the_same_base(monkeypatch):
+    from orchestrator import health_kb_provision
+
+    sent = _install_response(monkeypatch)
+    seen = {}
+
+    class Client:
+        def create_knowledge_base(self, **kwargs):
+            raise AssertionError("update created a second knowledge base")
+
+        def update_knowledge_base(self, **kwargs):
+            seen["update"] = kwargs
+
+        def get_knowledge_base(self, **kwargs):
+            return {"knowledgeBase": {
+                "knowledgeBaseId": "KBHEALTH",
+                "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:239571291755:knowledge-base/KBHEALTH",
+                "status": "ACTIVE",
+            }}
+
+        def list_data_sources(self, **kwargs):
+            return {"dataSourceSummaries": [
+                {"dataSourceId": "DSHEALTH", "name": "health-s3", "status": "AVAILABLE"},
+            ]}
+
+        def update_data_source(self, **kwargs):
+            seen["data_source"] = kwargs
+
+        def get_data_source(self, **kwargs):
+            return {"dataSource": {"dataSourceId": "DSHEALTH", "status": "AVAILABLE"}}
+
+    monkeypatch.setattr(health_kb_provision, "_client", lambda: Client())
+    health_kb_provision.handler(_event("Update", "KBHEALTH"), _Context())
+    assert seen["update"]["knowledgeBaseId"] == "KBHEALTH"
+    assert seen["update"]["knowledgeBaseConfiguration"]["type"] == "MANAGED"
+    assert "storageConfiguration" not in seen["update"]
+    assert seen["data_source"]["dataSourceId"] == "DSHEALTH"
+    assert seen["data_source"]["dataSourceConfiguration"]["type"] == "MANAGED_KNOWLEDGE_BASE_CONNECTOR"
+    body = _body(sent[0])
+    assert body["Status"] == "SUCCESS"
+    assert body["PhysicalResourceId"] == "KBHEALTH"
+
+
+def test_delete_removes_the_connector_before_the_base(monkeypatch):
+    from botocore.exceptions import ClientError
+
+    from orchestrator import health_kb_provision
+
+    sent = _install_response(monkeypatch)
+    deleted = []
+    lists = {"n": 0}
+
+    class Client:
+        def list_data_sources(self, **kwargs):
+            lists["n"] += 1
+            if lists["n"] == 1:
+                return {"dataSourceSummaries": [
+                    {"dataSourceId": "DSHEALTH", "name": "health-s3", "status": "AVAILABLE"},
+                ]}
+            return {"dataSourceSummaries": []}
+
+        def delete_data_source(self, **kwargs):
+            deleted.append(("data-source", kwargs["dataSourceId"]))
+
+        def delete_knowledge_base(self, **kwargs):
+            deleted.append(("knowledge-base", kwargs["knowledgeBaseId"]))
+
+        def get_knowledge_base(self, **kwargs):
+            raise ClientError(
+                {"Error": {"Code": "ResourceNotFoundException", "Message": "gone"}},
+                "GetKnowledgeBase",
+            )
+
+    monkeypatch.setattr(health_kb_provision, "_client", lambda: Client())
+    result = health_kb_provision.handler(_event("Delete", "KBHEALTH"), _Context())
+    assert deleted == [("data-source", "DSHEALTH"), ("knowledge-base", "KBHEALTH")]
+    assert result["PhysicalResourceId"] == "KBHEALTH"
+    assert _body(sent[0])["Status"] == "SUCCESS"
+
+
+def test_delete_of_a_missing_base_succeeds(monkeypatch):
+    from botocore.exceptions import ClientError
+
+    from orchestrator import health_kb_provision
+
+    sent = _install_response(monkeypatch)
+
+    class Client:
+        def list_data_sources(self, **kwargs):
+            raise ClientError(
+                {"Error": {"Code": "ResourceNotFoundException", "Message": "gone"}},
+                "ListDataSources",
+            )
+
+    monkeypatch.setattr(health_kb_provision, "_client", lambda: Client())
+    health_kb_provision.handler(_event("Delete", "KBHEALTH"), _Context())
+    assert _body(sent[0])["Status"] == "SUCCESS"
+
+
+def test_a_create_failure_reports_the_base_id_so_rollback_can_delete_it(monkeypatch):
+    from orchestrator import health_kb_provision
+
+    sent = _install_response(monkeypatch)
+    logged = []
+    monkeypatch.setattr(
+        health_kb_provision.log, "warning", lambda *a, **k: logged.append((a, k)),
+    )
+
+    class Client:
+        def create_knowledge_base(self, **kwargs):
+            return {"knowledgeBase": {"knowledgeBaseId": "KBHEALTH", "status": "CREATING"}}
+
+        def get_knowledge_base(self, **kwargs):
+            return {"knowledgeBase": {
+                "knowledgeBaseId": "KBHEALTH",
+                "status": "FAILED",
+                "failureReasons": ["The specified embedding model is not supported."],
+            }}
+
+    monkeypatch.setattr(health_kb_provision, "_client", lambda: Client())
+    health_kb_provision.handler(_event("Create"), _Context())
+    body = _body(sent[0])
+    assert body["Status"] == "FAILED"
+    assert body["PhysicalResourceId"] == "KBHEALTH"
+    assert "not supported" in body["Reason"]
+    assert "discharge" not in str(logged)
