@@ -2500,7 +2500,7 @@ Resources:
   # health_prep. It does not create a second copy of the records.
   #
   # amazon.nova-2-multimodal-embeddings-v1:0 is a custom embedding on a
-  # managed knowledge base: dimensions 3072 and embeddingDataType FLOAT32.
+  # managed knowledge base: dimensions 1024 and embeddingDataType FLOAT32.
   # The modelConfiguration document is TwelveLabs Marengo's path, and
   # Marengo is the only model on it. A managed base owns the vector store,
   # so there is no S3 Vectors index to declare here.

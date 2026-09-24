@@ -381,7 +381,7 @@ def test_the_create_body_is_the_documented_managed_shape():
             "embeddingModelArn": MODEL_ARN,
             "embeddingModelConfiguration": {
                 "bedrockEmbeddingModelConfiguration": {
-                    "dimensions": 3072,
+                    "dimensions": 1024,
                     "embeddingDataType": "FLOAT32",
                 }
             },
@@ -693,7 +693,7 @@ def test_a_different_embedding_model_replaces_the_base(monkeypatch):
     assert gone["base"] is True
     created = seen["create"]["knowledgeBaseConfiguration"]["managedKnowledgeBaseConfiguration"]
     assert created["embeddingModelArn"] == nova
-    assert created["embeddingModelConfiguration"]["bedrockEmbeddingModelConfiguration"]["dimensions"] == 3072
+    assert created["embeddingModelConfiguration"]["bedrockEmbeddingModelConfiguration"]["dimensions"] == 1024
     body = _body(sent[0])
     assert body["Status"] == "SUCCESS"
     assert body["PhysicalResourceId"] == "KBNEW"
