@@ -2508,9 +2508,9 @@ Resources:
   #
   # AWS::Bedrock::KnowledgeBase cannot express that body. Its managed
   # configuration has no supplementalDataStorageConfiguration and no
-  # modelConfiguration document, and its embeddingDataType enum is FLOAT32
-  # or BINARY. The user guide for Marengo requires FLOAT plus the document
-  # below. HealthKbProvisionFunction calls CreateKnowledgeBase with it.
+  # modelConfiguration document. CreateKnowledgeBase takes embeddingDataType
+  # FLOAT32 (BINARY is the other accepted value; FLOAT is rejected).
+  # HealthKbProvisionFunction calls CreateKnowledgeBase with that body.
   #
   # The multimodal bucket holds media extracted during ingestion. It is not
   # the document source. A bucket of its own keeps extracted files from being
