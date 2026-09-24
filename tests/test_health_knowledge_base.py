@@ -23,7 +23,7 @@ sys.path.insert(0, str(REPO / "src"))
 TEMPLATE = (REPO / "infra" / "template.yaml").read_text()
 WORKFLOW = (REPO / ".github" / "workflows" / "deploy.yml").read_text()
 
-EMBEDDING_MODEL_ID = "twelvelabs.marengo-embed-3-0-v1:0"
+EMBEDDING_MODEL_ID = "amazon.nova-2-multimodal-embeddings-v1:0"
 
 
 class CfnLoader(yaml.SafeLoader):
@@ -77,8 +77,8 @@ def test_the_deploy_reads_those_outputs_from_the_contextweave_stack():
 def test_there_is_no_second_health_document_bucket(template):
     """The document bucket is ContextWeave's. Managed search owns the index.
 
-    A VECTOR base with an S3 Vectors index is what rejected Marengo. Neither
-    the index nor a second document bucket is in this template.
+    A self-managed VECTOR base brings its own index. Neither the index nor
+    a second document bucket is in this template.
     """
     assert "HealthDocsBucket" not in template["Resources"]
     assert "HealthVectorBucket" not in template["Resources"]
@@ -95,9 +95,9 @@ def test_there_is_no_second_health_document_bucket(template):
     assert "HealthMultimodalBucket" not in str(kb["Properties"]["DocsBucketName"])
 
 
-def test_marengo_declares_a_multimodal_storage_destination(template):
-    """CreateKnowledgeBase 400s without one: Marengo requires a multimodal
-    storage destination. It holds extracted media, so it is its own bucket."""
+def test_nova_declares_a_multimodal_storage_destination(template):
+    """Nova is a native multimodal model. Extracted media has its own bucket,
+    which is not a copy of ContextWeave's health records."""
     kb = template["Resources"]["HealthKnowledgeBase"]["Properties"]
     assert "HealthMultimodalBucket" in str(kb["MultimodalBucket"])
     assert "HealthDocsBucketName" not in str(kb["MultimodalBucket"])
@@ -149,7 +149,7 @@ def test_health_lambdas_do_not_reuse_a_name_a_rollback_leaves_behind(template):
         assert group_name in rendered
 
 
-def test_the_base_embeds_with_marengo(template):
+def test_the_base_embeds_with_nova(template):
     assert EMBEDDING_MODEL_ID in TEMPLATE
     kb = template["Resources"]["HealthKnowledgeBase"]["Properties"]
     assert EMBEDDING_MODEL_ID in str(kb["EmbeddingModelArn"])
@@ -355,10 +355,10 @@ def test_the_sync_handler_does_not_log_the_object_key(monkeypatch):
     assert "discharge-summary" not in str(logged)
 
 
-# ── CreateKnowledgeBase is the managed Marengo body, not a VECTOR base ──────
+# ── CreateKnowledgeBase is the managed Nova body, not a VECTOR base ─────────
 
 MODEL_ARN = (
-    "arn:aws:bedrock:us-east-1::foundation-model/twelvelabs.marengo-embed-3-0-v1:0"
+    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-2-multimodal-embeddings-v1:0"
 )
 REQUEST_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
@@ -381,22 +381,8 @@ def test_the_create_body_is_the_documented_managed_shape():
             "embeddingModelArn": MODEL_ARN,
             "embeddingModelConfiguration": {
                 "bedrockEmbeddingModelConfiguration": {
+                    "dimensions": 3072,
                     "embeddingDataType": "FLOAT32",
-                    "modelConfiguration": {
-                        "version": "1",
-                        "audio": {
-                            "segmentation": {
-                                "method": "dynamic",
-                                "dynamic": {"minDurationSec": 4},
-                            }
-                        },
-                        "video": {
-                            "segmentation": {
-                                "method": "fixed",
-                                "fixed": {"durationSec": 6},
-                            }
-                        },
-                    },
                 }
             },
             "supplementalDataStorageConfiguration": {
@@ -410,7 +396,7 @@ def test_the_create_body_is_the_documented_managed_shape():
         },
     }
     assert "storageConfiguration" not in configuration
-    assert "dimensions" not in str(configuration)
+    assert "modelConfiguration" not in str(configuration)
 
     service = Session().get_service_model("bedrock-agent")
     validator = ParamValidator()
@@ -455,7 +441,7 @@ def test_the_create_body_is_the_documented_managed_shape():
     assert "managedKnowledgeBaseConfiguration" in service.shape_for("KnowledgeBaseConfiguration").members
     managed = service.shape_for("ManagedKnowledgeBaseConfiguration").members
     assert "supplementalDataStorageConfiguration" in managed
-    assert "modelConfiguration" in service.shape_for("BedrockEmbeddingModelConfiguration").members
+    assert "dimensions" in service.shape_for("BedrockEmbeddingModelConfiguration").members
     # ParamValidator does not enforce this enum, which is how FLOAT reached
     # Bedrock and came back as a ValidationException. The value has to be a
     # member of the set the service documents.
@@ -601,6 +587,12 @@ def test_update_keeps_the_same_base(monkeypatch):
                 "knowledgeBaseId": "KBHEALTH",
                 "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:239571291755:knowledge-base/KBHEALTH",
                 "status": "ACTIVE",
+                "knowledgeBaseConfiguration": {
+                    "type": "MANAGED",
+                    "managedKnowledgeBaseConfiguration": {
+                        "embeddingModelArn": MODEL_ARN,
+                    },
+                },
             }}
 
         def list_data_sources(self, **kwargs):
@@ -624,6 +616,88 @@ def test_update_keeps_the_same_base(monkeypatch):
     body = _body(sent[0])
     assert body["Status"] == "SUCCESS"
     assert body["PhysicalResourceId"] == "KBHEALTH"
+
+
+def test_a_different_embedding_model_replaces_the_base(monkeypatch):
+    """UpdateKnowledgeBase cannot change the embedding model."""
+    from botocore.exceptions import ClientError
+
+    from orchestrator import health_kb_provision
+
+    sent = _install_response(monkeypatch)
+    gone = {"data_source": False, "base": False}
+    seen = {}
+    nova = MODEL_ARN
+    marengo = nova.replace("amazon.nova-2-multimodal-embeddings-v1:0", "twelvelabs.marengo-embed-3-0-v1:0")
+
+    class Client:
+        def get_knowledge_base(self, **kwargs):
+            kb_id = kwargs["knowledgeBaseId"]
+            if kb_id == "KBOLD":
+                if gone["base"]:
+                    raise ClientError(
+                        {"Error": {"Code": "ResourceNotFoundException", "Message": "gone"}},
+                        "GetKnowledgeBase",
+                    )
+                return {"knowledgeBase": {
+                    "knowledgeBaseId": "KBOLD",
+                    "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:239571291755:knowledge-base/KBOLD",
+                    "status": "ACTIVE",
+                    "knowledgeBaseConfiguration": {
+                        "type": "MANAGED",
+                        "managedKnowledgeBaseConfiguration": {"embeddingModelArn": marengo},
+                    },
+                }}
+            return {"knowledgeBase": {
+                "knowledgeBaseId": "KBNEW",
+                "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:239571291755:knowledge-base/KBNEW",
+                "status": "ACTIVE",
+                "knowledgeBaseConfiguration": {
+                    "type": "MANAGED",
+                    "managedKnowledgeBaseConfiguration": {"embeddingModelArn": nova},
+                },
+            }}
+
+        def list_data_sources(self, **kwargs):
+            if kwargs["knowledgeBaseId"] == "KBOLD" and not gone["data_source"]:
+                return {"dataSourceSummaries": [
+                    {"dataSourceId": "DSOLD", "name": "health-s3", "status": "AVAILABLE"},
+                ]}
+            return {"dataSourceSummaries": []}
+
+        def delete_data_source(self, **kwargs):
+            gone["data_source"] = True
+
+        def delete_knowledge_base(self, **kwargs):
+            assert kwargs["knowledgeBaseId"] == "KBOLD"
+            gone["base"] = True
+
+        def update_knowledge_base(self, **kwargs):
+            raise AssertionError("the embedding model was updated in place")
+
+        def create_knowledge_base(self, **kwargs):
+            seen["create"] = kwargs
+            return {"knowledgeBase": {"knowledgeBaseId": "KBNEW", "status": "CREATING"}}
+
+        def create_data_source(self, **kwargs):
+            seen["data_source"] = kwargs
+            return {"dataSource": {"dataSourceId": "DSNEW", "status": "AVAILABLE"}}
+
+        def get_data_source(self, **kwargs):
+            return {"dataSource": {"dataSourceId": "DSNEW", "status": "AVAILABLE"}}
+
+    monkeypatch.setattr(health_kb_provision, "_client", lambda: Client())
+    event = _event("Update", "KBOLD")
+    event["ResourceProperties"]["EmbeddingModelArn"] = nova
+    health_kb_provision.handler(event, _Context())
+    assert gone["base"] is True
+    created = seen["create"]["knowledgeBaseConfiguration"]["managedKnowledgeBaseConfiguration"]
+    assert created["embeddingModelArn"] == nova
+    assert created["embeddingModelConfiguration"]["bedrockEmbeddingModelConfiguration"]["dimensions"] == 3072
+    body = _body(sent[0])
+    assert body["Status"] == "SUCCESS"
+    assert body["PhysicalResourceId"] == "KBNEW"
+    assert body["Data"]["DataSourceId"] == "DSNEW"
 
 
 def test_delete_removes_the_connector_before_the_base(monkeypatch):
@@ -716,8 +790,8 @@ def test_only_the_callers_bundle_a_botocore_that_knows_managed_bases():
 
     src/requirements.txt stays free of boto3 so the other functions keep
     the runtime SDK. The two callers install a pin whose model accepts the
-    Marengo body. 1.43.32 is not that pin: it knows the managed type and
-    still rejects modelConfiguration and the supplemental location.
+    managed body. 1.43.32 is not that pin: it knows the managed type and
+    still rejects the supplemental storage location.
     """
     pinned = (REPO / "src" / "requirements-bedrock-kb.txt").read_text()
     assert "botocore>=1.43.92" in pinned
@@ -812,7 +886,7 @@ def test_an_old_client_model_is_refused_before_create():
 
 
 def test_a_model_that_stops_at_the_managed_type_is_not_new_enough():
-    """1.43.32 has the managed member and still rejects the Marengo fields."""
+    """1.43.32 has the managed member and still rejects supplemental storage."""
     from orchestrator.health_kb_provision import _assert_managed_model
 
     class _Shape:
@@ -847,7 +921,7 @@ def test_a_model_that_stops_at_the_managed_type_is_not_new_enough():
         class meta:
             service_model = _Model()
 
-    with pytest.raises(RuntimeError, match="modelConfiguration"):
+    with pytest.raises(RuntimeError, match="supplementalDataStorageConfiguration"):
         _assert_managed_model(_Client())
 
 

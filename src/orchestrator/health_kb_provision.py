@@ -1,23 +1,27 @@
 """Create the health knowledge base as a managed base.
 
-``twelvelabs.marengo-embed-3-0-v1:0`` is rejected on a self-managed VECTOR
-knowledge base ("the specified embedding model is not supported"). It is
-accepted as a custom multimodal embedding on a managed base: ``type``
-``MANAGED``, ``embeddingModelType`` ``CUSTOM``, ``embeddingDataType``
-``FLOAT32``, a ``modelConfiguration`` document, and a supplemental S3 location
-for extracted media.
+The embedding model is Amazon Nova Multimodal Embeddings
+(``amazon.nova-2-multimodal-embeddings-v1:0``). On a managed knowledge base
+that model is a custom embedding, the same option as Titan and Cohere:
+``type`` ``MANAGED``, ``embeddingModelType`` ``CUSTOM``, ``dimensions``
+``3072``, ``embeddingDataType`` ``FLOAT32``. The ``modelConfiguration``
+document is TwelveLabs Marengo's, and Marengo is the only model on that
+path. Nova does not use it.
 
-``AWS::Bedrock::KnowledgeBase`` does not expose that shape. Its managed
-configuration has no supplemental storage and no ``modelConfiguration``
-document. This function is the custom resource that calls
-``CreateKnowledgeBase`` with the documented body. The managed base owns the
-vector store, so there is no S3 Vectors index to create.
+Nova is a native multimodal model, so the managed configuration still
+carries a supplemental S3 location for extracted media. That bucket is not
+a copy of the health records.
+
+``AWS::Bedrock::KnowledgeBase`` does not expose supplemental storage.
+This function is the custom resource that calls ``CreateKnowledgeBase``
+with the documented body. The managed base owns the vector store, so there
+is no S3 Vectors index to create.
 
 The Lambda runtime's botocore does not know that body. Parameter validation
 fails in the client and Bedrock never sees the request. The function is
 packaged with ``botocore>=1.43.92`` (``src/requirements-bedrock-kb.txt``),
-which is the first model that describes ``modelConfiguration`` and the
-supplemental storage location. ``_client`` refuses an older model before
+which is the first model that describes the supplemental storage location
+and the managed data-source connector. ``_client`` refuses an older model before
 the call, so a package that forgot the pin fails with that reason rather
 than "Unknown parameter".
 
@@ -68,13 +72,23 @@ def supplemental_uri(bucket: str) -> str:
     return f"s3://{name}/"
 
 
-def knowledge_base_configuration(model_arn: str, multimodal_bucket: str) -> Dict[str, Any]:
-    """The CreateKnowledgeBase body Marengo accepts.
+# Nova's knowledge-base sample uses 3072, the largest of 256, 384, 1024,
+# and 3072. The managed-KB page's "dimensions (1024)" is the Titan example.
+EMBEDDING_DIMENSIONS = 3072
 
-    ``embeddingDataType`` is ``FLOAT32``. CreateKnowledgeBase rejects
-    ``FLOAT``: the member must be ``FLOAT32`` or ``BINARY``. Marengo's
-    vectors are floating point, so the value is ``FLOAT32``. Dimensions
-    are absent on purpose: a managed base owns its index.
+
+def knowledge_base_configuration(model_arn: str, multimodal_bucket: str) -> Dict[str, Any]:
+    """The CreateKnowledgeBase body Nova accepts on a managed base.
+
+    Custom embedding on a managed base takes ``dimensions`` and
+    ``embeddingDataType`` ``FLOAT32``. ``FLOAT`` is not in that enum.
+    ``audio`` and ``video`` on this structure are the self-managed VECTOR
+    shape and are marked deprecated in favour of ``modelConfiguration``,
+    which is Marengo's document. Neither is sent.
+
+    Supplemental storage stays. The API describes it as required for a
+    native multimodal embedding model, which Nova is. The location holds
+    media extracted during ingestion, not a second copy of the records.
     """
     return {
         "type": "MANAGED",
@@ -83,22 +97,8 @@ def knowledge_base_configuration(model_arn: str, multimodal_bucket: str) -> Dict
             "embeddingModelArn": model_arn,
             "embeddingModelConfiguration": {
                 "bedrockEmbeddingModelConfiguration": {
+                    "dimensions": EMBEDDING_DIMENSIONS,
                     "embeddingDataType": "FLOAT32",
-                    "modelConfiguration": {
-                        "version": "1",
-                        "audio": {
-                            "segmentation": {
-                                "method": "dynamic",
-                                "dynamic": {"minDurationSec": 4},
-                            }
-                        },
-                        "video": {
-                            "segmentation": {
-                                "method": "fixed",
-                                "fixed": {"durationSec": 6},
-                            }
-                        },
-                    },
                 }
             },
             "supplementalDataStorageConfiguration": {
@@ -156,12 +156,11 @@ def data_source_fields(bucket_name: str, account_id: str) -> Dict[str, Any]:
 
 
 def _assert_managed_model(client) -> None:
-    """Refuse a botocore that would reject the Marengo body locally.
+    """Refuse a botocore that would reject the Nova body locally.
 
     The runtime copy stops at ``managedKnowledgeBaseConfiguration``. 1.43.32
-    knows that member and still rejects ``modelConfiguration`` and the
-    supplemental storage location. Either failure is a client-side
-    validation error; the service is never asked.
+    knows that member and still rejects the supplemental storage location.
+    That failure is a client-side validation error; the service is never asked.
     """
     import botocore
 
@@ -175,10 +174,9 @@ def _assert_managed_model(client) -> None:
             model, "ManagedKnowledgeBaseConfiguration"
         ):
             missing.append("supplementalDataStorageConfiguration")
-        if "modelConfiguration" not in _shape_members(
-            model, "BedrockEmbeddingModelConfiguration"
-        ):
-            missing.append("modelConfiguration")
+        data_types = _shape_enum(model, "EmbeddingDataType")
+        if data_types and "FLOAT32" not in data_types:
+            missing.append("FLOAT32")
     if "MANAGED_KNOWLEDGE_BASE_CONNECTOR" not in _shape_enum(model, "DataSourceType"):
         missing.append("MANAGED_KNOWLEDGE_BASE_CONNECTOR")
     if missing:
@@ -366,6 +364,12 @@ def _create_kb(client, event: Dict[str, Any], props: Dict[str, Any]) -> str:
         return found
 
 
+def _model_arn(kb: Dict[str, Any]) -> str:
+    configuration = kb.get("knowledgeBaseConfiguration") or {}
+    managed = configuration.get("managedKnowledgeBaseConfiguration") or {}
+    return str(managed.get("embeddingModelArn") or "")
+
+
 def _update_kb(client, kb_id: str, props: Dict[str, Any]) -> None:
     kwargs: Dict[str, Any] = {
         "knowledgeBaseId": kb_id,
@@ -424,8 +428,27 @@ def _upsert(event: Dict[str, Any], context: Any):
                 # A retried update can arrive while the previous one is still
                 # settling. UpdateKnowledgeBase on a base that is not ACTIVE
                 # conflicts, so wait first.
-                _wait_kb(client, kb_id, context)
-                _update_kb(client, kb_id, props)
+                try:
+                    existing = _wait_kb(client, kb_id, context)
+                except ClientError as exc:
+                    if not _missing(exc):
+                        raise
+                    # The previous attempt deleted the base and did not
+                    # finish creating its replacement. Create with the
+                    # properties of this request.
+                    kb_id = _create_kb(client, event, props)
+                else:
+                    current = _model_arn(existing)
+                    wanted = str(props["EmbeddingModelArn"])
+                    if current and current != wanted:
+                        # UpdateKnowledgeBase cannot change the embedding
+                        # model. Delete finishes before create so the name
+                        # can be reused. CloudFormation's follow-up delete
+                        # of the old id finds nothing and succeeds.
+                        _delete(client, kb_id, context)
+                        kb_id = _create_kb(client, event, props)
+                    else:
+                        _update_kb(client, kb_id, props)
         kb = _wait_kb(client, kb_id, context)
         data_source_id = _ensure_data_source(client, kb_id, props, event, context)
     except _Failed:

@@ -4,7 +4,7 @@ The documents are ContextWeave's. Deploy reads that stack's
 ``HealthDocsBucketName`` and ``KMSKeyArn`` outputs and points a Bedrock
 knowledge base at the bucket. This module does not create a bucket and does
 not embed. The base is a managed knowledge base built with
-``twelvelabs.marengo-embed-3-0-v1:0``. Querying it is
+``amazon.nova-2-multimodal-embeddings-v1:0``. Querying it is
 ``bedrock-agent-runtime:Retrieve`` with ``managedSearchConfiguration``.
 ``vectorSearchConfiguration`` is the self-managed shape and does not apply.
 
@@ -30,7 +30,7 @@ log = get_logger("health_kb")
 # The model the base is created with. Retrieval does not send it — Bedrock
 # already embedded the bucket with it — and a second id here would be a
 # second source of truth. The template is the one that is deployed.
-EMBEDDING_MODEL_ID = "twelvelabs.marengo-embed-3-0-v1:0"
+EMBEDDING_MODEL_ID = "amazon.nova-2-multimodal-embeddings-v1:0"
 
 
 def knowledge_base_id() -> str:
@@ -109,8 +109,7 @@ def retrieve(question: str, *, top_k: int = 6, client=None) -> Optional[Dict[str
             retrievalQuery={"text": question},
             retrievalConfiguration={
                 # Managed bases are queried through managedSearchConfiguration.
-                # vectorSearchConfiguration is for a self-managed VECTOR base,
-                # which is the shape that rejects Marengo.
+                # vectorSearchConfiguration is for a self-managed VECTOR base.
                 "managedSearchConfiguration": {
                     "numberOfResults": max(1, int(top_k or 6)),
                 },

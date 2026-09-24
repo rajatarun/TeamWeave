@@ -7,7 +7,8 @@
 # here `pytest` cannot even collect, which is how the first CI run of the test
 # step failed -- in one second, before a single test executed.
 # 1.43.92 is the first botocore whose bedrock-agent model accepts the
-# Marengo managed body (modelConfiguration and supplemental storage).
+# managed body this stack sends (supplemental storage and the managed
+# data-source connector).
 # Tests load that model. The Lambda runtime's copy is older; the functions
 # that call the API install src/requirements-bedrock-kb.txt instead.
 boto3>=1.43.92
