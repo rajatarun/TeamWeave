@@ -2824,13 +2824,40 @@ Resources:
   # changeset fails ResourceExistenceCheck on an Add of that same name.
   # Object events land here instead of on the function: one message per
   # object, one batch per minute, one ingestion job.
+  #
+  # ScalingConfig is absent from the mapping on purpose.
+  # MaximumConcurrency cannot be 1 — the property's minimum is 2 — and 2
+  # pollers would both call StartIngestionJob. ReservedConcurrentExecutions
+  # on the function is what keeps a single start in flight. A poller that
+  # loses that race is throttled; SQS holds the batch invisible until
+  # VisibilityTimeout and then delivers it again. That timeout is six times
+  # the function's 120s so the retry does not overlap a batch Lambda may
+  # still be running. A deferred start (a job already STARTING or
+  # IN_PROGRESS, or Bedrock still throttling after the in-process retries)
+  # returns the same messages as batch item failures and waits out the same
+  # timeout, so the follow-up sync still happens.
+  #
+  # After 1000 receives the message moves to the DLQ. 1000 times 720s is
+  # longer than an ingestion, so a follow-up is not dead-lettered while a
+  # job is still running. The DLQ has no consumer. If it holds messages,
+  # redrive the source queue or start one ingestion job by hand.
+  HealthKbSyncDlq:
+    Type: AWS::SQS::Queue
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
   HealthKbSyncQueue:
     Type: AWS::SQS::Queue
     Condition: HealthKnowledgeBaseEnabled
     Properties:
-      VisibilityTimeout: 360
+      VisibilityTimeout: 720
       MessageRetentionPeriod: 1209600
       SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt HealthKbSyncDlq.Arn
+        maxReceiveCount: 1000
 
   # SourceAccount, not the rule ARN. The rule target is this queue, so a
   # policy that names the rule and a rule that depends on the policy is a
@@ -2884,8 +2911,6 @@ Resources:
       MaximumBatchingWindowInSeconds: 60
       FunctionResponseTypes:
         - ReportBatchItemFailures
-      ScalingConfig:
-        MaximumConcurrency: 1
 
   # ── Portfolio knowledge base ───────────────────────────────────────────────
   # The documents are this stack's bucket. ContextWeave has a health bucket
@@ -3151,13 +3176,23 @@ Resources:
           PORTFOLIO_DATA_SOURCE_ID: !GetAtt PortfolioKnowledgeBase.DataSourceId
 
   # No QueueName. See HealthKbSyncQueue: a fixed name is what
-  # ResourceExistenceCheck rejects after a rollback.
+  # ResourceExistenceCheck rejects after a rollback, and the visibility
+  # timeout, the missing ScalingConfig, and the DLQ are the same choice.
+  PortfolioKbSyncDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
   PortfolioKbSyncQueue:
     Type: AWS::SQS::Queue
     Properties:
-      VisibilityTimeout: 360
+      VisibilityTimeout: 720
       MessageRetentionPeriod: 1209600
       SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PortfolioKbSyncDlq.Arn
+        maxReceiveCount: 1000
 
   PortfolioKbSyncQueuePolicy:
     Type: AWS::SQS::QueuePolicy
@@ -3205,8 +3240,6 @@ Resources:
       MaximumBatchingWindowInSeconds: 60
       FunctionResponseTypes:
         - ReportBatchItemFailures
-      ScalingConfig:
-        MaximumConcurrency: 1
 
 
 Outputs:

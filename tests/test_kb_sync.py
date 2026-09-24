@@ -244,10 +244,25 @@ def test_both_sync_paths_coalesce_on_a_queue():
         if condition:
             assert queue["Condition"] == condition
         assert "QueueName" not in queue.get("Properties", {})
-        assert queue["Properties"]["VisibilityTimeout"] == 360
-        assert queue["Properties"]["VisibilityTimeout"] >= (
-            resources[f"{prefix}KbSyncFunction"]["Properties"]["Timeout"]
-        )
+        timeout = resources[f"{prefix}KbSyncFunction"]["Properties"]["Timeout"]
+        # Six times the function timeout. A reserved-concurrency throttle
+        # holds the batch until this expires, and a shorter window can make
+        # the message visible while Lambda is still retrying the invocation.
+        assert queue["Properties"]["VisibilityTimeout"] >= 6 * timeout
+        assert queue["Properties"]["VisibilityTimeout"] == 720
+        dlq_name = f"{prefix}KbSyncDlq"
+        dlq = resources[dlq_name]
+        if condition:
+            assert dlq["Condition"] == condition
+        assert "QueueName" not in dlq.get("Properties", {})
+        assert dlq["Properties"]["MessageRetentionPeriod"] == 1209600
+        assert dlq["Properties"]["SqsManagedSseEnabled"] is True
+        redrive = queue["Properties"]["RedrivePolicy"]
+        assert redrive["maxReceiveCount"] == 1000
+        assert redrive["deadLetterTargetArn"] == {
+            "__fn__": "GetAtt",
+            "__arg__": f"{dlq_name}.Arn",
+        }
         function = resources[f"{prefix}KbSyncFunction"]["Properties"]
         assert "FunctionName" not in function
         assert function["ReservedConcurrentExecutions"] == 1
@@ -255,7 +270,9 @@ def test_both_sync_paths_coalesce_on_a_queue():
         assert mapping["BatchSize"] == 100
         assert mapping["MaximumBatchingWindowInSeconds"] == 60
         assert mapping["FunctionResponseTypes"] == ["ReportBatchItemFailures"]
-        assert mapping["ScalingConfig"]["MaximumConcurrency"] == 1
+        # MaximumConcurrency's minimum is 2. Two pollers would both start
+        # a job. ReservedConcurrentExecutions is the serialization.
+        assert "ScalingConfig" not in mapping
         target = resources[f"{prefix}KbSyncRule"]["Properties"]["Targets"][0]["Arn"]
         assert target == {"__fn__": "GetAtt", "__arg__": f"{prefix}KbSyncQueue.Arn"}
         role = str(resources[f"{prefix}KbSyncRole"])
