@@ -21,6 +21,7 @@ from .profile_context import get_owner_profile_context
 from .prompt_builder import build_prompt
 from .rag import get_rag_context_with_meta
 from .storage import presign, request_text, run_folder, save_artifact, save_bytes
+from .schema_validate import settle_health_insights
 from .structured_transform import transform_json_to_schema
 from .tool_registry import execute_post_tools, execute_pre_tools
 
@@ -438,7 +439,21 @@ def run_team_pipeline(
         log.info("enrichment_complete step=%s run_id=%s", step_id, run_id)
         # ──────────────────────────────────────────────────────────────────────
 
-        if step_schema:
+        if step_schema and step_schema.get("title") == "health_insights_v1":
+            # The deliverable used to be a required list of questions, and the
+            # generic transform rewrites every answer whether or not it already
+            # matches. A valid insights answer is kept. A question list is
+            # repaired once; if it is still questions, the run is not
+            # schema-valid and is not up-voted as grounding that worked.
+            out_json, accepted = settle_health_insights(
+                out_json, step_schema, transform_json_to_schema)
+            if not accepted:
+                log.warning(
+                    "health_insights_not_accepted step=%s run_id=%s",
+                    step_id, run_id,
+                )
+                schema_valid = False
+        elif step_schema:
             try:
                 out_json = transform_json_to_schema(out_json, step_schema)
             except Exception as transform_error:

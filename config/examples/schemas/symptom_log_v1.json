@@ -1,11 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "symptom_log_v1",
+  "description": "What was reported and what the health knowledge base returned. Observations, not questions.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "reported": {
       "type": "array",
+      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": true
@@ -14,14 +16,42 @@
     "timeline": {
       "type": "string"
     },
+    "searched": {
+      "type": "array",
+      "description": "The retrieval queries that were run, copied from tool_results.query_health_record.queries.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "sourceKey from the excerpt, an S3 URI."
+          },
+          "date": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": ["source", "date", "value"]
+      }
+    },
     "seek_care_now": {
       "type": "boolean"
     },
     "seek_care_reason": {
       "type": "string"
     },
-    "missing_detail": {
+    "data_gaps": {
       "type": "array",
+      "description": "What the searches did not contain, stated as observations.",
       "items": {
         "type": "string"
       }
@@ -29,6 +59,8 @@
   },
   "required": [
     "reported",
-    "seek_care_now"
+    "searched",
+    "seek_care_now",
+    "data_gaps"
   ]
 }

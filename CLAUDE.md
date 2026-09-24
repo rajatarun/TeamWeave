@@ -600,7 +600,7 @@ clutter, each with its runtime and its map entry.
 | `daily_operator` | 2 | none | a brain dump → the one thing worth doing today |
 | `linkedin_quick_post` | 2 | ContextWeave | a rough thought → a publishable post, in two turns |
 | `job_hunter` | 3 | ScreenWeave crawl + ContextWeave | a posting URL → an honest fit read and an outreach note |
-| `health_prep` | 2 | ContextWeave health store | symptoms → questions for a clinician, never a diagnosis |
+| `health_prep` | 2 | ContextWeave health store | symptoms plus the person's records → insights and suggestions, never a diagnosis |
 
 **Say which parts are grounded and which are reasoning.** An agent cannot
 choose to call a tool here, so a team is grounded only where a *pre-tool*
@@ -667,11 +667,13 @@ which is a different and worse untruth than "I could not ask".
 `A2A message:send` cannot start this team — it sends `brief`/`skill_id` rather
 than `team`/`version`/`request` — so no token is plumbed there.
 
-**`health_prep` prepares for care; it does not practise it.** Never a
-diagnosis, never a medicine or a dose, and an emergency is answered with
-"be seen now" rather than with questions for next week. That last one is a
-**required** field in `symptom_log_v1`, not a hope: a constraint the model may
-honour is weaker than a value the schema will not accept an answer without.
+**`health_prep` prepares for care; it does not practise it.** The deliverable
+is insights and suggestions grounded in the health knowledge base, not a list
+of questions. Never a diagnosis, never a medicine or a dose, and an emergency
+is answered with "be seen now" rather than with a plan for next week. That
+last one is a **required** field in `symptom_log_v1` and in
+`health_insights_v1`, not a hope: a constraint the model may honour is weaker
+than a value the schema will not accept an answer without.
 `tests/test_weave_tools.py` holds all of it, and a mutation dropping any of
 them fails.
 
