@@ -723,8 +723,12 @@ one ingestion job from `PortfolioKnowledgeBaseId` and
 concurrency 1, shared by the health sync. That invocation starts at most
 one job. If a job is already `STARTING` or `IN_PROGRESS`, or Bedrock is
 still throttling, the messages go back on the queue and become visible
-again after six minutes, so an upload that arrived after the running job
-started is still indexed. Grant the Nova embedding model in the Bedrock
+again after twelve minutes (720 seconds, six times the function timeout),
+so an upload that arrived after the running job started is still indexed.
+A poller throttled by the reserved concurrency waits out that same
+timeout. After 1000 receives the message moves to a dead-letter queue kept
+for 14 days. That queue has no consumer; redrive it or start one ingestion
+job if it holds messages. Grant the Nova embedding model in the Bedrock
 console before that job can succeed. A failed job warns and does not roll
 the stack back.
 Creating the base itself is unconditional, so a `CreateKnowledgeBase`
