@@ -439,6 +439,37 @@ jobs:
           echo "ContextWeave URL from ${CONTEXTWEAVE_STACK_NAME}: ${CONTEXTWEAVE_URL}"
           PARAM_OVERRIDES+=("ContextWeaveUrl=${CONTEXTWEAVE_URL}")
 
+          # The health documents live in ContextWeave. HealthDocsBucketName is
+          # that stack's output — the bucket name; it publishes no ARN — and
+          # KMSKeyArn is the key the bucket is encrypted with. Same
+          # describe-stacks read as APIEndpoint above, and the same rule: do
+          # not invent a bucket name here. Unlike the URL, a missing health
+          # output does not fail the deploy. The health surface is optional;
+          # the visibility team's RAG mode is not. An empty value is still
+          # *sent*, because sam deploy otherwise reuses the previous value
+          # and a bucket that no longer exists would keep being indexed.
+          HEALTH_DOCS_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "${CONTEXTWEAVE_STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='HealthDocsBucketName'].OutputValue" \
+            --output text 2>/dev/null || true)
+          [ "${HEALTH_DOCS_BUCKET}" = "None" ] && HEALTH_DOCS_BUCKET=""
+          HEALTH_DOCS_KMS=$(aws cloudformation describe-stacks \
+            --stack-name "${CONTEXTWEAVE_STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='KMSKeyArn'].OutputValue" \
+            --output text 2>/dev/null || true)
+          [ "${HEALTH_DOCS_KMS}" = "None" ] && HEALTH_DOCS_KMS=""
+          if [ -z "${HEALTH_DOCS_BUCKET}" ]; then
+            echo "::warning::No HealthDocsBucketName output on stack ${CONTEXTWEAVE_STACK_NAME}. The health knowledge base is not created. That output exists when ContextWeave creates its health bucket."
+          elif [ -z "${HEALTH_DOCS_KMS}" ]; then
+            echo "::warning::Stack ${CONTEXTWEAVE_STACK_NAME} published HealthDocsBucketName but no KMSKeyArn. The health bucket is encrypted with that key, so the knowledge base is not created."
+          else
+            echo "Health docs bucket from ${CONTEXTWEAVE_STACK_NAME}: ${HEALTH_DOCS_BUCKET}"
+          fi
+          PARAM_OVERRIDES+=("HealthDocsBucketName=${HEALTH_DOCS_BUCKET}")
+          PARAM_OVERRIDES+=("HealthDocsKmsKeyArn=${HEALTH_DOCS_KMS}")
+
           # The weave systems that are MCP servers, as AgentCore Gateway
           # targets. Resolved from each sibling's own stack output, never
           # hardcoded -- same rule as the ContextWeave URL above.
@@ -565,6 +596,35 @@ jobs:
             --resolve-s3 \
             --no-fail-on-empty-changeset \
             --parameter-overrides "${PARAM_OVERRIDES[@]}"
+
+      - name: Sync the health knowledge base
+        # Objects already in the bucket are not an S3 event, so the rule that
+        # re-indexes later uploads does not cover them. Starting one job here
+        # reads what is there now. A failure is a warning: model access is
+        # granted in the Bedrock console, and a missing grant must not roll
+        # back a stack whose data source is already pointed at the right bucket.
+        run: |
+          KB_ID=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='HealthKnowledgeBaseId'].OutputValue" \
+            --output text 2>/dev/null || true)
+          DS_ID=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='HealthDataSourceId'].OutputValue" \
+            --output text 2>/dev/null || true)
+          [ "${KB_ID}" = "None" ] && KB_ID=""
+          [ "${DS_ID}" = "None" ] && DS_ID=""
+          if [ -z "${KB_ID}" ] || [ -z "${DS_ID}" ]; then
+            echo "::warning::No health knowledge base on this stack. ContextWeave published no health bucket, so nothing was indexed."
+            exit 0
+          fi
+          aws bedrock-agent start-ingestion-job \
+            --region "${AWS_REGION}" \
+            --knowledge-base-id "${KB_ID}" \
+            --data-source-id "${DS_ID}" \
+            || echo "::warning::Could not start ingestion for knowledge base ${KB_ID}. Grant twelvelabs.marengo-embed-3-0-v1:0 in the Bedrock console and start the job. The data source is already ContextWeave's health bucket."
 
       - name: Smoke-test the AgentCore runtime
         # A green deploy says CloudFormation created the runtime. It does not

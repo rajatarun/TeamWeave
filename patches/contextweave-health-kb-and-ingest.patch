@@ -1,42 +1,19 @@
 diff --git a/src/health_api/handler.py b/src/health_api/handler.py
-index fc00090..5f87fb0 100644
+index fc00090..61a821a 100644
 --- a/src/health_api/handler.py
 +++ b/src/health_api/handler.py
-@@ -25,7 +25,10 @@ import logging
+@@ -25,7 +25,9 @@ import logging
  import os
  from typing import Any
  
 -from ..shared import health_db
-+from .kb import retrieve_excerpts
 +from .layout import shared_module
 +
 +health_db = shared_module("health_db")
  
  logger = logging.getLogger(__name__)
  logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
-@@ -80,24 +83,41 @@ def _synthesize(question: str, excerpts: list[dict], *, client=None) -> dict:
-     return {"answer": "".join(b.get("text", "") for b in blocks if isinstance(b, dict)).strip()}
- 
- 
--def query(body: dict, *, bedrock=None, embed=None) -> dict:
--    question = str(body.get("question") or "").strip()
--    if not question:
--        return _response(400, {"error": "question is required"})
-+def _excerpts_for(question: str, top_k: int, *, embed=None, kb_client=None) -> tuple[list[dict] | None, dict | None]:
-+    """Knowledge base first. The pgvector table is the path when no base is configured.
-+
-+    Returns (excerpts, error_response). error_response is set only when the
-+    fallback embedder fails — a knowledge-base miss is an empty list, which
-+    the caller reports as "nothing in your records", not as a broken embedder.
-+    """
-+    knowledge_base_id = os.environ.get("HEALTH_KNOWLEDGE_BASE_ID", "").strip()
-+    if knowledge_base_id:
-+        return retrieve_excerpts(
-+            question, knowledge_base_id=knowledge_base_id, top_k=top_k, client=kb_client,
-+        ), None
- 
-     # Injected, like `bedrock` and `s3` elsewhere here, and imported lazily
-     # when it is not: listing and deleting a record must not depend on the
+@@ -90,7 +92,7 @@ def query(body: dict, *, bedrock=None, embed=None) -> dict:
      # embedding stack being importable, and a test must not have to import
      # Bedrock and the observability wrapper to check a disclaimer.
      if embed is None:
@@ -45,41 +22,22 @@ index fc00090..5f87fb0 100644
  
      embedding = embed(question)
      if embedding is None:
--        return _response(503, {"error": "the question could not be embedded", "disclaimer": DISCLAIMER})
-+        return None, _response(503, {"error": "the question could not be embedded", "disclaimer": DISCLAIMER})
-+    return health_db.search(embedding, top_k=top_k), None
-+
-+
-+def query(body: dict, *, bedrock=None, embed=None, kb_client=None) -> dict:
-+    question = str(body.get("question") or "").strip()
-+    if not question:
-+        return _response(400, {"error": "question is required"})
- 
-     top_k = int(body.get("topK") or 6)
--    excerpts = health_db.search(embedding, top_k=top_k)
-+    excerpts, error = _excerpts_for(question, top_k, embed=embed, kb_client=kb_client)
-+    if error is not None:
-+        return error
-     if not excerpts:
-         # Distinct from an answer. "Nothing in your records covers this" is a
-         # real result, and letting a model answer anyway from general knowledge
 diff --git a/src/health_api/ingest.py b/src/health_api/ingest.py
-index fa501c6..512e824 100644
+index fa501c6..0ce534d 100644
 --- a/src/health_api/ingest.py
 +++ b/src/health_api/ingest.py
-@@ -16,7 +16,10 @@ import os
+@@ -16,7 +16,9 @@ import os
  from typing import Any
  from urllib.parse import unquote_plus
  
 -from ..shared import health_db
-+from . import kb
 +from .layout import shared_module
 +
 +health_db = shared_module("health_db")
  
  logger = logging.getLogger(__name__)
  logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
-@@ -65,7 +68,7 @@ def ingest_object(bucket: str, key: str, *, s3=None, embed=None) -> dict:
+@@ -65,7 +67,7 @@ def ingest_object(bucket: str, key: str, *, s3=None, embed=None) -> dict:
      # and the observability wrapper, and a *withdrawal* needs none of that.
      # Deleting a record must not depend on the embedding stack being healthy.
      if embed is None:
@@ -88,118 +46,6 @@ index fa501c6..512e824 100644
  
      vectors = embed(pieces)
      rows = [(c, v) for c, v in zip(pieces, vectors) if v is not None]
-@@ -80,7 +83,12 @@ def ingest_object(bucket: str, key: str, *, s3=None, embed=None) -> dict:
-     # The key is logged, never the content: this log is the one place a medical
-     # record could leak into CloudWatch, where it would outlive any delete.
-     logger.info("health document ingested doc_id=%s chunks=%d", doc_id, written)
--    return {"ingested": written, "docId": doc_id, "sourceKey": key}
-+    # The bucket is also the knowledge base's data source. Syncing here is what
-+    # makes a new record retrievable by the health agent, not only by the
-+    # pgvector table this function writes.
-+    result = {"ingested": written, "docId": doc_id, "sourceKey": key}
-+    result.update(kb.start_sync())
-+    return result
- 
- 
- def lambda_handler(event: dict, _context: Any = None) -> dict:
-@@ -98,6 +106,8 @@ def lambda_handler(event: dict, _context: Any = None) -> dict:
-         # API, and deleting the object would leave it searchable.
-         removed = health_db.delete_document(doc_id_for(key))
-         logger.info("health document withdrawn doc_id=%s chunks=%d", doc_id_for(key), removed)
--        return {"deleted": removed}
-+        result = {"deleted": removed}
-+        result.update(kb.start_sync())
-+        return result
- 
-     return ingest_object(bucket, key)
-diff --git a/src/health_api/kb.py b/src/health_api/kb.py
-new file mode 100644
-index 0000000..185b27a
---- /dev/null
-+++ b/src/health_api/kb.py
-@@ -0,0 +1,82 @@
-+"""Retrieve from the health Bedrock Knowledge Base.
-+
-+The health bucket is the data source. Bedrock embeds it with
-+`twelvelabs.marengo-embed-3-0-v1:0` and stores the vectors in S3 Vectors.
-+This module only asks that index a question. It does not embed, and it does
-+not read the expertise corpus.
-+
-+The call stays inside the health API, which is the only authenticated route
-+on this service. A caller that invoked Retrieve with its own role would be
-+ambient authority over the record.
-+"""
-+from __future__ import annotations
-+
-+import logging
-+import os
-+from typing import Any
-+
-+logger = logging.getLogger(__name__)
-+
-+EMBEDDING_MODEL_ID = "twelvelabs.marengo-embed-3-0-v1:0"
-+
-+
-+def retrieve_excerpts(question: str, *, knowledge_base_id: str, top_k: int = 6,
-+                      client=None) -> list[dict]:
-+    """Excerpts in the shape the synthesizer already reads: sourceKey + content."""
-+    if client is None:
-+        import boto3
-+        client = boto3.client("bedrock-agent-runtime")
-+
-+    response = client.retrieve(
-+        knowledgeBaseId=knowledge_base_id,
-+        retrievalQuery={"text": question},
-+        retrievalConfiguration={
-+            "vectorSearchConfiguration": {"numberOfResults": max(1, int(top_k))},
-+        },
-+    )
-+    excerpts = []
-+    for item in (response or {}).get("retrievalResults") or []:
-+        if not isinstance(item, dict):
-+            continue
-+        text = ((item.get("content") or {}).get("text") or "").strip()
-+        if not text:
-+            continue
-+        s3_loc = ((item.get("location") or {}).get("s3Location") or {})
-+        excerpts.append({"sourceKey": s3_loc.get("uri") or "", "content": text})
-+    return excerpts
-+
-+
-+def start_sync(*, client=None) -> dict:
-+    """Ask the knowledge base to re-read the health bucket.
-+
-+    Returns {} when the base is not configured, so a deploy that has not
-+    created it yet still ingests into the health database. A job already in
-+    progress is not a failure: the next object will be picked up by the run
-+    that is underway, and raising here would mark a stored record as uningested.
-+    """
-+    knowledge_base_id = os.environ.get("HEALTH_KNOWLEDGE_BASE_ID", "").strip()
-+    data_source_id = os.environ.get("HEALTH_DATA_SOURCE_ID", "").strip()
-+    if not knowledge_base_id or not data_source_id:
-+        return {}
-+    if client is None:
-+        import boto3
-+        client = boto3.client("bedrock-agent")
-+    try:
-+        response = client.start_ingestion_job(
-+            knowledgeBaseId=knowledge_base_id,
-+            dataSourceId=data_source_id,
-+        )
-+    except Exception as exc:  # noqa: BLE001 - see below
-+        code = ""
-+        response = getattr(exc, "response", None)
-+        if isinstance(response, dict):
-+            code = str((response.get("Error") or {}).get("Code") or "")
-+        if code == "ConflictException":
-+            logger.info("health knowledge base sync already running")
-+            return {"kbSync": "already-running"}
-+        # The message is not returned. A service error can echo the object key,
-+        # and the key of a health document is itself identifying.
-+        logger.exception("health knowledge base sync failed")
-+        return {"kbSync": "failed"}
-+    job = ((response or {}).get("ingestionJob") or {}).get("ingestionJobId") or ""
-+    return {"kbSync": job or "started"}
 diff --git a/src/health_api/layout.py b/src/health_api/layout.py
 new file mode 100644
 index 0000000..edb6efe
@@ -229,290 +75,14 @@ index 0000000..edb6efe
 +        parent = package.rsplit(".", 1)[0]
 +        return importlib.import_module(f"{parent}.shared.{name}")
 +    return importlib.import_module(f"shared.{name}")
-diff --git a/template.yaml b/template.yaml
-index 88ca1d4..0ff8250 100644
---- a/template.yaml
-+++ b/template.yaml
-@@ -23,6 +23,14 @@ Parameters:
-     Description: >
-       Bucket holding health documents. Separate from the artifacts bucket on
-       purpose; leave empty and one is created for this stack.
-+  HealthEmbeddingModelId:
-+    Type: String
-+    Default: twelvelabs.marengo-embed-3-0-v1:0
-+    Description: >
-+      Embedding model for the health registry knowledge base. Marengo Embed 3.0
-+      emits 512-dimensional vectors; the S3 vector index is created at that
-+      width. Model access is granted in the Bedrock console, per model — an
-+      unentitled id is refused when the knowledge base is created, not here.
-   Environment:
-     Type: String
-     Default: dev
-@@ -1341,6 +1349,140 @@ Resources:
-         PasswordLength: 32
-         ExcludePunctuation: true
- 
-+  # The health bucket, indexed for the health agent. Marengo Embed 3.0 is
-+  # 512-d; the index width has to match or the first ingestion fails after
-+  # the stack has already reported success. S3 Vectors is the store so this
-+  # does not stand up a second database beside the health one.
-+  HealthVectorBucket:
-+    Type: AWS::S3Vectors::VectorBucket
-+    Condition: HealthEnabled
-+    Properties:
-+      VectorBucketName: !Sub "cw-health-vec-${AWS::AccountId}-${Environment}"
-+
-+  HealthVectorIndex:
-+    Type: AWS::S3Vectors::Index
-+    Condition: HealthEnabled
-+    DependsOn: HealthVectorBucket
-+    Properties:
-+      VectorBucketName: !Sub "cw-health-vec-${AWS::AccountId}-${Environment}"
-+      IndexName: health-registry
-+      DataType: float32
-+      Dimension: 512
-+      DistanceMetric: cosine
-+      MetadataConfiguration:
-+        NonFilterableMetadataKeys:
-+          - AMAZON_BEDROCK_METADATA
-+          - AMAZON_BEDROCK_TEXT_CHUNK
-+
-+  HealthKnowledgeBaseRole:
-+    Type: AWS::IAM::Role
-+    Condition: HealthEnabled
-+    # W1031: the false branch of the bucket ARN is only taken when
-+    # HealthDocsBucketName is non-empty (CreateHealthBucket is HealthEnabled
-+    # AND an empty name). cfn-lint resolves the parameter's empty default and
-+    # reports the unresolved name as a bad ARN. The true branch is a GetAtt.
-+    Metadata:
-+      cfn-lint:
-+        config:
-+          ignore_checks:
-+            - W1031
-+    Properties:
-+      AssumeRolePolicyDocument:
-+        Version: "2012-10-17"
-+        Statement:
-+          - Effect: Allow
-+            Principal:
-+              Service: bedrock.amazonaws.com
-+            Action: sts:AssumeRole
-+            Condition:
-+              StringEquals:
-+                aws:SourceAccount: !Ref AWS::AccountId
-+              ArnLike:
-+                aws:SourceArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
-+      Policies:
-+        - PolicyName: health-registry-kb
-+          PolicyDocument:
-+            Version: "2012-10-17"
-+            Statement:
-+              - Effect: Allow
-+                Action: bedrock:InvokeModel
-+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${HealthEmbeddingModelId}"
-+              - Effect: Allow
-+                Action:
-+                  - s3vectors:GetIndex
-+                  - s3vectors:QueryVectors
-+                  - s3vectors:PutVectors
-+                  - s3vectors:GetVectors
-+                  - s3vectors:DeleteVectors
-+                Resource: !GetAtt HealthVectorIndex.IndexArn
-+              - Effect: Allow
-+                Action: [s3:ListBucket, s3:GetBucketLocation]
-+                Resource: !If
-+                  - CreateHealthBucket
-+                  - !GetAtt HealthDocsBucket.Arn
-+                  - !Sub "arn:${AWS::Partition}:s3:::${HealthDocsBucketName}"
-+              - Effect: Allow
-+                Action: s3:GetObject
-+                Resource: !If
-+                  - CreateHealthBucket
-+                  - !Sub "${HealthDocsBucket.Arn}/*"
-+                  - !Sub "arn:${AWS::Partition}:s3:::${HealthDocsBucketName}/*"
-+              - Effect: Allow
-+                Action: [kms:Decrypt, kms:GenerateDataKey]
-+                Resource: !GetAtt ArtifactsKMSKey.Arn
-+
-+  HealthKnowledgeBase:
-+    Type: AWS::Bedrock::KnowledgeBase
-+    Condition: HealthEnabled
-+    # S3_VECTORS is not in the cfn-lint schema this repository's SAM bundle
-+    # ships. The rules below are the ones that schema raises on a storage
-+    # type it does not know; they are not a claim that the resource is valid
-+    # for some other reason. A real mistake on this resource — a missing
-+    # RoleArn, a bad model id — is still a different rule.
-+    Metadata:
-+      cfn-lint:
-+        config:
-+          ignore_checks:
-+            - E3002
-+            - E3003
-+            - E3018
-+            - E3030
-+    Properties:
-+      Name: !Sub "health-registry-${Environment}"
-+      Description: Health records from the health bucket, for the health registry agent.
-+      RoleArn: !GetAtt HealthKnowledgeBaseRole.Arn
-+      KnowledgeBaseConfiguration:
-+        Type: VECTOR
-+        VectorKnowledgeBaseConfiguration:
-+          EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${HealthEmbeddingModelId}"
-+      StorageConfiguration:
-+        Type: S3_VECTORS
-+        S3VectorsConfiguration:
-+          IndexArn: !GetAtt HealthVectorIndex.IndexArn
-+
-+  HealthKnowledgeBaseDataSource:
-+    Type: AWS::Bedrock::DataSource
-+    Condition: HealthEnabled
-+    # Same W1031 as the role: the external-bucket ARN is only evaluated when
-+    # the name parameter is set, and the linter substitutes the empty default.
-+    Metadata:
-+      cfn-lint:
-+        config:
-+          ignore_checks:
-+            - W1031
-+    Properties:
-+      Name: health-s3
-+      Description: The health document bucket.
-+      KnowledgeBaseId: !Ref HealthKnowledgeBase
-+      DataDeletionPolicy: DELETE
-+      DataSourceConfiguration:
-+        Type: S3
-+        S3Configuration:
-+          BucketArn: !If
-+            - CreateHealthBucket
-+            - !GetAtt HealthDocsBucket.Arn
-+            - !Sub "arn:${AWS::Partition}:s3:::${HealthDocsBucketName}"
-+
-   HealthIngestFunction:
-     Type: AWS::Serverless::Function
-     Condition: HealthEnabled
-@@ -1357,6 +1499,8 @@ Resources:
-           # instance itself, so nothing here is a hardcoded hostname.
-           HEALTH_POSTGRES_HOST: !GetAtt PostgresRDS.Endpoint.Address
-           HEALTH_POSTGRES_PORT: !GetAtt PostgresRDS.Endpoint.Port
-+          HEALTH_KNOWLEDGE_BASE_ID: !Ref HealthKnowledgeBase
-+          HEALTH_DATA_SOURCE_ID: !Ref HealthKnowledgeBaseDataSource
-       # The Postgres instance is PubliclyAccessible: false. Without this the
-       # function resolves the endpoint, cannot route to it, and fails on the
-       # connect timeout rather than on anything it did wrong.
-@@ -1377,6 +1521,9 @@ Resources:
-             - Effect: Allow
-               Action: [bedrock:InvokeModel]
-               Resource: "*"
-+            - Effect: Allow
-+              Action: bedrock:StartIngestionJob
-+              Resource: !GetAtt HealthKnowledgeBase.KnowledgeBaseArn
-             - Effect: Allow
-               # Read-only on the health bucket: ingestion never needs to write
-               # there, and a write grant is a way for a bug to alter a record.
-@@ -1433,6 +1580,7 @@ Resources:
-           # instance itself, so nothing here is a hardcoded hostname.
-           HEALTH_POSTGRES_HOST: !GetAtt PostgresRDS.Endpoint.Address
-           HEALTH_POSTGRES_PORT: !GetAtt PostgresRDS.Endpoint.Port
-+          HEALTH_KNOWLEDGE_BASE_ID: !Ref HealthKnowledgeBase
-       # The Postgres instance is PubliclyAccessible: false. Without this the
-       # function resolves the endpoint, cannot route to it, and fails on the
-       # connect timeout rather than on anything it did wrong.
-@@ -1453,6 +1601,9 @@ Resources:
-             - Effect: Allow
-               Action: [bedrock:InvokeModel]
-               Resource: "*"
-+            - Effect: Allow
-+              Action: bedrock:Retrieve
-+              Resource: !GetAtt HealthKnowledgeBase.KnowledgeBaseArn
-       Events:
-         # Every one of these carries the authorizer. The expertise routes on
-         # this same API carry none, which is the asymmetry the whole store
-@@ -1639,6 +1790,19 @@ Outputs:
-       the shared knowledge graph.
-     Value: !Ref HealthDocsBucket
- 
-+  HealthKnowledgeBaseId:
-+    Condition: HealthEnabled
-+    Description: >
-+      Bedrock Knowledge Base over the health bucket, embedded with
-+      twelvelabs.marengo-embed-3-0-v1:0. The health API retrieves from it.
-+      Empty until the health surface is enabled.
-+    Value: !Ref HealthKnowledgeBase
-+
-+  HealthDataSourceId:
-+    Condition: HealthEnabled
-+    Description: S3 data source of the health registry knowledge base.
-+    Value: !Ref HealthKnowledgeBaseDataSource
-+
-   ArtifactsBucketName:
-     Description: S3 bucket for raw uploads and derived artifacts
-     Value: !Ref ArtifactsBucket
 diff --git a/tests/test_health_store.py b/tests/test_health_store.py
-index 4e8aac7..7551821 100644
+index 4e8aac7..365ec4d 100644
 --- a/tests/test_health_store.py
 +++ b/tests/test_health_store.py
-@@ -338,3 +338,81 @@ def test_ingest_cannot_write_to_the_health_bucket():
+@@ -338,3 +338,22 @@ def test_ingest_cannot_write_to_the_health_bucket():
                    (st["Action"] if isinstance(st["Action"], list) else [st["Action"]])
                    if a.startswith("s3:")]
      assert s3_actions == ["s3:GetObject"], s3_actions
-+
-+
-+# ── the health bucket is a Bedrock knowledge base ──────────────────────────
-+
-+def test_the_health_bucket_is_indexed_with_marengo():
-+    """The model id is the one the knowledge base embeds with, and the index
-+    is the width that model emits. A 1024-d index would accept the stack and
-+    fail the first ingestion."""
-+    assert TEMPLATE["Parameters"]["HealthEmbeddingModelId"]["Default"] == (
-+        "twelvelabs.marengo-embed-3-0-v1:0"
-+    )
-+    index = RESOURCES["HealthVectorIndex"]["Properties"]
-+    assert index["Dimension"] == 512
-+    assert index["DistanceMetric"] == "cosine"
-+    kb = RESOURCES["HealthKnowledgeBase"]["Properties"]
-+    arn = kb["KnowledgeBaseConfiguration"]["VectorKnowledgeBaseConfiguration"]["EmbeddingModelArn"]
-+    assert "${HealthEmbeddingModelId}" in arn["arg"]
-+    source = RESOURCES["HealthKnowledgeBaseDataSource"]["Properties"]
-+    assert source["DataSourceConfiguration"]["Type"] == "S3"
-+    assert source["KnowledgeBaseId"]["arg"] == "HealthKnowledgeBase"
-+    api_env = RESOURCES["HealthAPIFunction"]["Properties"]["Environment"]["Variables"]
-+    assert api_env["HEALTH_KNOWLEDGE_BASE_ID"]["arg"] == "HealthKnowledgeBase"
-+
-+
-+def test_a_configured_knowledge_base_is_what_gets_read(monkeypatch):
-+    monkeypatch.setenv("HEALTH_KNOWLEDGE_BASE_ID", "KBHEALTH")
-+    seen = {}
-+
-+    class Client:
-+        def retrieve(self, **kwargs):
-+            seen.update(kwargs)
-+            return {"retrievalResults": [{
-+                "content": {"text": "HbA1c 6.1 in March"},
-+                "location": {"s3Location": {"uri": "s3://health/labs.txt"}},
-+            }]}
-+
-+    def boom(*_a, **_k):
-+        raise AssertionError("searched the table while a knowledge base is configured")
-+
-+    monkeypatch.setattr(health_db, "search", boom)
-+    monkeypatch.setattr(health_handler, "_synthesize", lambda *a, **k: {"answer": "from the record"})
-+    response = health_handler.query({"question": "last lab"}, kb_client=Client())
-+    body = json.loads(response["body"])
-+    assert seen["knowledgeBaseId"] == "KBHEALTH"
-+    assert body["found"] is True
-+    assert body["sources"] == ["s3://health/labs.txt"]
-+
-+
-+def test_an_empty_knowledge_base_is_not_filled_in(monkeypatch):
-+    monkeypatch.setenv("HEALTH_KNOWLEDGE_BASE_ID", "KBHEALTH")
-+
-+    class Client:
-+        def retrieve(self, **kwargs):
-+            return {"retrievalResults": []}
-+
-+    response = health_handler.query({"question": "q"}, kb_client=Client())
-+    body = json.loads(response["body"])
-+    assert body["found"] is False
-+    assert body["answer"] == ""
 +
 +
 +def test_the_handler_imports_when_health_api_is_top_level():
@@ -532,21 +102,3 @@ index 4e8aac7..7551821 100644
 +        text=True,
 +    )
 +    assert completed.returncode == 0, completed.stderr
-diff --git a/tests/test_template_references.py b/tests/test_template_references.py
-index c700b21..c06eaf8 100644
---- a/tests/test_template_references.py
-+++ b/tests/test_template_references.py
-@@ -276,6 +276,13 @@ EXPECTED_SUPPRESSIONS = {
-     # true-branch it is already true, so the inner false-branches are
-     # unreachable -- correct, about generated output nothing here writes.
-     "ExpertiseAPI": ["W1028"],
-+    # S3_VECTORS is absent from the cfn-lint schema SAM bundles. These four
-+    # rules are what that schema raises on a storage type it does not know.
-+    "HealthKnowledgeBase": ["E3002", "E3003", "E3018", "E3030"],
-+    # The external-bucket ARN is only used when HealthDocsBucketName is set.
-+    # cfn-lint substitutes the empty default and calls the result a bad ARN.
-+    "HealthKnowledgeBaseRole": ["W1031"],
-+    "HealthKnowledgeBaseDataSource": ["W1031"],
- }
- 
- 

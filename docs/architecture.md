@@ -558,6 +558,8 @@ Trigger: push to main | manual workflow_dispatch
        VectorDbTable=resume-rag-db
        GeminiSecretArn=<ARN>
        ContextWeaveUrl=<ContextWeave API base URL>
+       HealthDocsBucketName=<ContextWeave HealthDocsBucketName output>
+       HealthDocsKmsKeyArn=<ContextWeave KMSKeyArn output>
          │
          ▼
 6. On Failure: Dump CloudFormation events

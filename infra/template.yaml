@@ -63,6 +63,22 @@ Parameters:
       Base URL of the ContextWeave knowledge layer API (used by RAG mode "contextweave",
       e.g. https://abc123.execute-api.us-east-1.amazonaws.com/prod). Empty means the mode is
       unavailable and any team selecting it fails at config-load time.
+  HealthDocsBucketName:
+    Type: String
+    Default: ""
+    Description: >-
+      Name of ContextWeave's health document bucket, taken from that stack's
+      HealthDocsBucketName output during deploy. Empty means the health surface
+      is off and this stack creates no knowledge base. This stack does not
+      create the bucket; the documents stay where ContextWeave put them.
+  HealthDocsKmsKeyArn:
+    Type: String
+    Default: ""
+    Description: >-
+      ARN of the KMS key that encrypts that bucket, taken from ContextWeave's
+      KMSKeyArn output. The knowledge base role decrypts with it. Empty leaves
+      the knowledge base uncreated, because a base that cannot read the objects
+      would deploy green and fail at the first ingestion.
   ContextWeaveFeedbackOnValidOutput:
     Type: String
     Default: "0"
@@ -312,6 +328,12 @@ Conditions:
     - !Not [!Equals [!Ref ToolWeaveMcpEndpoint, ""]]
   HasSiweAuthorizer: !Not [!Equals [!Ref SiweAuthorizerFunctionArn, ""]]
   HasDPOBucket: !Not [!Equals [!Ref DPOTrainingBucketName, ""]]
+  # Both come from ContextWeave. The bucket name without the key would index
+  # objects this role cannot decrypt; the key without the bucket has nothing
+  # to read. Either one missing leaves the base uncreated.
+  HealthKnowledgeBaseEnabled: !And
+    - !Not [!Equals [!Ref HealthDocsBucketName, ""]]
+    - !Not [!Equals [!Ref HealthDocsKmsKeyArn, ""]]
 
 Globals:
   Function:
@@ -611,6 +633,17 @@ Resources:
                 Action:
                   - aps:RemoteWrite
                 Resource: !Ref AMPWorkspaceArn
+              # Retrieve on the health knowledge base only, and only when that
+              # base exists. The action is scoped to its ARN so a worker that
+              # can call Bedrock cannot read some other base. The team allowlist
+              # and the caller token still decide whether a run may ask.
+              - !If
+                - HealthKnowledgeBaseEnabled
+                - Effect: Allow
+                  Action:
+                    - bedrock:Retrieve
+                  Resource: !GetAtt HealthKnowledgeBase.KnowledgeBaseArn
+                - !Ref "AWS::NoValue"
 
   TriggerRole:
     Type: AWS::IAM::Role
@@ -1460,6 +1493,14 @@ Resources:
           GEMINI_MODEL: gemini-3.8-flash
           CONTEXTWEAVE_URL: !Ref ContextWeaveUrl
           CONTEXTWEAVE_FEEDBACK_ON_VALID_OUTPUT: !Ref ContextWeaveFeedbackOnValidOutput
+          # The health_prep pre-tool retrieves from this base. Empty when
+          # ContextWeave published no health bucket, and the tool then uses
+          # the health API instead. Set only here: a token-gated read of a
+          # medical index does not belong on every function.
+          HEALTH_KNOWLEDGE_BASE_ID: !If
+            - HealthKnowledgeBaseEnabled
+            - !Ref HealthKnowledgeBase
+            - ""
           GEMINI_LAMBDA_ARN: !GetAtt GeminiResearchFunction.Arn
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
           OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTableName
@@ -2337,7 +2378,7 @@ Resources:
     Condition: AgentCoreEnabled
     Properties:
       AgentRuntimeName: "teamweave_health_prep"
-      Description: "AgentCore runtime serving every agent of health_prep."
+      Description: "AgentCore runtime serving every agent of health_prep. The worker retrieves from the health knowledge base before the turn; this runtime does not."
       RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
       AgentRuntimeArtifact:
         CodeConfiguration:
@@ -2452,6 +2493,200 @@ Resources:
           McpServer:
             Endpoint: !Ref ToolWeaveMcpEndpoint
 
+  # ── Health knowledge base ──────────────────────────────────────────────────
+  # The documents stay in ContextWeave's health bucket. HealthDocsBucketName
+  # and HealthDocsKmsKeyArn are that stack's outputs, read at deploy time the
+  # same way ContextWeaveUrl is. This section indexes that bucket for
+  # health_prep. The vector bucket below is the embedding index, not a second
+  # copy of the records.
+  #
+  # Marengo Embed 3.0 emits 512-d vectors. A wider index accepts the stack and
+  # fails the first ingestion, which is why the dimension is written here
+  # rather than left to a default.
+
+  HealthVectorBucket:
+    Type: AWS::S3Vectors::VectorBucket
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      VectorBucketName: !Sub "tw-health-vec-${AWS::AccountId}"
+
+  HealthVectorIndex:
+    Type: AWS::S3Vectors::Index
+    Condition: HealthKnowledgeBaseEnabled
+    DependsOn: HealthVectorBucket
+    Properties:
+      VectorBucketName: !Sub "tw-health-vec-${AWS::AccountId}"
+      IndexName: health-registry
+      DataType: float32
+      Dimension: 512
+      DistanceMetric: cosine
+      MetadataConfiguration:
+        NonFilterableMetadataKeys:
+          - AMAZON_BEDROCK_METADATA
+          - AMAZON_BEDROCK_TEXT_CHUNK
+
+  HealthKnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      Description: Role the health knowledge base assumes to read ContextWeave's health bucket and write its index.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+      Policies:
+        - PolicyName: health-registry-kb
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0"
+              - Effect: Allow
+                Action:
+                  - s3vectors:GetIndex
+                  - s3vectors:QueryVectors
+                  - s3vectors:PutVectors
+                  - s3vectors:GetVectors
+                  - s3vectors:DeleteVectors
+                Resource:
+                  - !GetAtt HealthVectorIndex.IndexArn
+                  - !GetAtt HealthVectorBucket.VectorBucketArn
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${HealthDocsBucketName}"
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${HealthDocsBucketName}/*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref HealthDocsKmsKeyArn
+
+  HealthKnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      Name: !Sub "health-registry-${AWS::StackName}"
+      Description: Index of ContextWeave's health bucket for the health_prep team.
+      RoleArn: !GetAtt HealthKnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0"
+      StorageConfiguration:
+        Type: S3_VECTORS
+        S3VectorsConfiguration:
+          IndexArn: !GetAtt HealthVectorIndex.IndexArn
+
+  HealthKnowledgeBaseDataSource:
+    Type: AWS::Bedrock::DataSource
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      Name: health-s3
+      Description: ContextWeave's health document bucket. This stack does not create it.
+      KnowledgeBaseId: !Ref HealthKnowledgeBase
+      DataDeletionPolicy: DELETE
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !Sub "arn:${AWS::Partition}:s3:::${HealthDocsBucketName}"
+
+  HealthKbSyncRole:
+    Type: AWS::IAM::Role
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-health-kb-sync-role"
+      Description: Starts an ingestion job when the health bucket changes. It cannot read the records.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: health-kb-sync
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action: bedrock:StartIngestionJob
+                Resource: !GetAtt HealthKnowledgeBase.KnowledgeBaseArn
+
+  HealthKbSyncLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-HealthKbSyncFunction"
+      RetentionInDays: 30
+
+  HealthKbSyncFunction:
+    Type: AWS::Serverless::Function
+    Condition: HealthKnowledgeBaseEnabled
+    DependsOn: HealthKbSyncLogGroup
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-HealthKbSyncFunction"
+      CodeUri: ../
+      Handler: src/orchestrator/health_kb.sync_handler
+      Role: !GetAtt HealthKbSyncRole.Arn
+      Architectures:
+        - arm64
+      MemorySize: 256
+      Timeout: 120
+      Environment:
+        Variables:
+          HEALTH_KNOWLEDGE_BASE_ID: !Ref HealthKnowledgeBase
+          HEALTH_DATA_SOURCE_ID: !GetAtt HealthKnowledgeBaseDataSource.DataSourceId
+
+  HealthKbSyncRule:
+    Type: AWS::Events::Rule
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      Description: Re-index ContextWeave's health bucket when a record is uploaded or removed.
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+          - Object Deleted
+        detail:
+          bucket:
+            name:
+              - !Ref HealthDocsBucketName
+      State: ENABLED
+      Targets:
+        - Id: HealthKbSync
+          Arn: !GetAtt HealthKbSyncFunction.Arn
+
+  HealthKbSyncPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HealthKnowledgeBaseEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HealthKbSyncFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt HealthKbSyncRule.Arn
+
 
 Outputs:
   HttpApiUrl:
@@ -2542,6 +2777,19 @@ Outputs:
       configured. GET /observability returns null (not an error) for its
       routingGraph and routingDecisions sections in that case, so a harness
       reads this to tell "not configured" from "configured and broken".
+
+  HealthKnowledgeBaseId:
+    Condition: HealthKnowledgeBaseEnabled
+    Description: >
+      Bedrock knowledge base over ContextWeave's health bucket, embedded with
+      twelvelabs.marengo-embed-3-0-v1:0. Absent when that bucket was not
+      published, which is how a harness tells "health is off" from "the base
+      failed".
+    Value: !Ref HealthKnowledgeBase
+  HealthDataSourceId:
+    Condition: HealthKnowledgeBaseEnabled
+    Description: S3 data source of the health knowledge base. The bucket is ContextWeave's.
+    Value: !GetAtt HealthKnowledgeBaseDataSource.DataSourceId
 
   OpenApiSpecPath:
     Value: openapi/teamweave.yaml
