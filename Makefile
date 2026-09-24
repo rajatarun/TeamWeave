@@ -43,3 +43,5 @@ build-UnifiedObservabilityFunction: package-lambda
 build-ConversationFunction: package-lambda
 
 build-A2AFunction: package-lambda
+
+build-HealthKbSyncFunction: package-lambda
