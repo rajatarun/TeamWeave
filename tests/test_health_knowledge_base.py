@@ -425,6 +425,14 @@ def test_the_create_body_is_the_documented_managed_shape():
         runtime.operation_model("Retrieve").input_shape,
     )
     assert not retrieve.has_errors(), retrieve.generate_report()
+    # The members the runtime client does not have. A model that validates
+    # the call is the one the functions are packaged with.
+    assert "managedKnowledgeBaseConfiguration" in service.shape_for("KnowledgeBaseConfiguration").members
+    managed = service.shape_for("ManagedKnowledgeBaseConfiguration").members
+    assert "supplementalDataStorageConfiguration" in managed
+    assert "modelConfiguration" in service.shape_for("BedrockEmbeddingModelConfiguration").members
+    assert "MANAGED_KNOWLEDGE_BASE_CONNECTOR" in service.shape_for("DataSourceType").enum
+    assert "managedSearchConfiguration" in runtime.shape_for("KnowledgeBaseRetrievalConfiguration").members
 
 
 class _Context:
@@ -671,3 +679,178 @@ def test_a_create_failure_reports_the_base_id_so_rollback_can_delete_it(monkeypa
     assert body["PhysicalResourceId"] == "KBHEALTH"
     assert "not supported" in body["Reason"]
     assert "discharge" not in str(logged)
+
+
+def test_only_the_callers_bundle_a_botocore_that_knows_managed_bases():
+    """The runtime copy rejects the body before Bedrock sees it.
+
+    src/requirements.txt stays free of boto3 so the other functions keep
+    the runtime SDK. The two callers install a pin whose model accepts the
+    Marengo body. 1.43.32 is not that pin: it knows the managed type and
+    still rejects modelConfiguration and the supplemental location.
+    """
+    pinned = (REPO / "src" / "requirements-bedrock-kb.txt").read_text()
+    assert "botocore>=1.43.92" in pinned
+    assert "boto3>=1.43.92" in pinned
+    shared = (REPO / "src" / "requirements.txt").read_text()
+    assert "boto3" not in shared
+    assert "botocore" not in shared
+    makefile = (REPO / "Makefile").read_text()
+    assert "src/requirements-bedrock-kb.txt" in makefile
+    recipes = {}
+    for line in makefile.splitlines():
+        if not line.startswith("build-") or ":" not in line:
+            continue
+        name, deps = line.split(":", 1)
+        recipes[name.removeprefix("build-")] = deps
+    bundled = {name for name, deps in recipes.items() if "install-bedrock-kb-sdk" in deps}
+    assert bundled == {"WorkerFunction", "HealthKbProvisionFunction"}
+
+
+def test_the_provision_client_model_accepts_the_body_it_sends():
+    """The client the function constructs, not a model loaded beside it."""
+    from botocore.validate import ParamValidator
+
+    from orchestrator.health_kb_provision import (
+        _client,
+        data_source_fields,
+        knowledge_base_configuration,
+    )
+
+    client = _client()
+    model = client.meta.service_model
+    validator = ParamValidator()
+    create = validator.validate(
+        {
+            "name": "health-registry-teamweave",
+            "roleArn": "arn:aws:iam::239571291755:role/kb",
+            "description": "Index of ContextWeave's health bucket for the health_prep team.",
+            "knowledgeBaseConfiguration": knowledge_base_configuration(
+                MODEL_ARN, "tw-health-mm-1-us-east-1",
+            ),
+        },
+        model.operation_model("CreateKnowledgeBase").input_shape,
+    )
+    assert not create.has_errors(), create.generate_report()
+    source = validator.validate(
+        {"knowledgeBaseId": "KBID123456", **data_source_fields("contextweave-health-docs", "239571291755")},
+        model.operation_model("CreateDataSource").input_shape,
+    )
+    assert not source.has_errors(), source.generate_report()
+    update = validator.validate(
+        {
+            "knowledgeBaseId": "KBID123456",
+            "name": "health-registry-teamweave",
+            "roleArn": "arn:aws:iam::239571291755:role/kb",
+            "knowledgeBaseConfiguration": knowledge_base_configuration(
+                MODEL_ARN, "tw-health-mm-1-us-east-1",
+            ),
+        },
+        model.operation_model("UpdateKnowledgeBase").input_shape,
+    )
+    assert not update.has_errors(), update.generate_report()
+
+
+def test_an_old_client_model_is_refused_before_create():
+    """The production failure: the runtime model has no managed member."""
+    from orchestrator.health_kb_provision import _assert_managed_model
+
+    class _Shape:
+        def __init__(self, members=None, enum=None):
+            self.members = members or {}
+            self.enum = enum
+
+    class _Model:
+        def shape_for(self, name):
+            if name == "KnowledgeBaseConfiguration":
+                return _Shape(members={
+                    "type": None,
+                    "vectorKnowledgeBaseConfiguration": None,
+                    "kendraKnowledgeBaseConfiguration": None,
+                    "sqlKnowledgeBaseConfiguration": None,
+                })
+            if name == "DataSourceType":
+                return _Shape(enum=["S3"])
+            raise KeyError(name)
+
+    class _Client:
+        class meta:
+            service_model = _Model()
+
+    with pytest.raises(RuntimeError, match="managedKnowledgeBaseConfiguration"):
+        _assert_managed_model(_Client())
+
+
+def test_a_model_that_stops_at_the_managed_type_is_not_new_enough():
+    """1.43.32 has the managed member and still rejects the Marengo fields."""
+    from orchestrator.health_kb_provision import _assert_managed_model
+
+    class _Shape:
+        def __init__(self, members=None, enum=None):
+            self.members = members or {}
+            self.enum = enum
+
+    shapes = {
+        "KnowledgeBaseConfiguration": _Shape(members={
+            "type": None,
+            "managedKnowledgeBaseConfiguration": None,
+        }),
+        "ManagedKnowledgeBaseConfiguration": _Shape(members={
+            "embeddingModelType": None,
+            "embeddingModelArn": None,
+            "embeddingModelConfiguration": None,
+        }),
+        "BedrockEmbeddingModelConfiguration": _Shape(members={
+            "dimensions": None,
+            "embeddingDataType": None,
+            "audio": None,
+            "video": None,
+        }),
+        "DataSourceType": _Shape(enum=["S3", "MANAGED_KNOWLEDGE_BASE_CONNECTOR"]),
+    }
+
+    class _Model:
+        def shape_for(self, name):
+            return shapes[name]
+
+    class _Client:
+        class meta:
+            service_model = _Model()
+
+    with pytest.raises(RuntimeError, match="modelConfiguration"):
+        _assert_managed_model(_Client())
+
+
+def test_retrieve_refuses_a_client_without_managed_search():
+    from orchestrator.health_kb import _assert_managed_retrieve
+
+    class _Shape:
+        members = {"vectorSearchConfiguration": None}
+
+    class _Model:
+        def shape_for(self, name):
+            return _Shape()
+
+    class _Client:
+        class meta:
+            service_model = _Model()
+
+    with pytest.raises(RuntimeError, match="managedSearchConfiguration"):
+        _assert_managed_retrieve(_Client())
+
+
+def test_the_installed_retrieve_client_accepts_managed_search():
+    from botocore.validate import ParamValidator
+
+    from orchestrator.health_kb import _client
+
+    client = _client("bedrock-agent-runtime")
+    err = ParamValidator().validate(
+        {
+            "knowledgeBaseId": "KBID123456",
+            "retrievalQuery": {"text": "last lab"},
+            "retrievalConfiguration": {"managedSearchConfiguration": {"numberOfResults": 4}},
+        },
+        client.meta.service_model.operation_model("Retrieve").input_shape,
+    )
+    assert not err.has_errors(), err.generate_report()
