@@ -5,14 +5,15 @@
     "owner": "Tarun Raja"
   },
   "globals": {
-    "north_star": "Turn what you are experiencing into a clinician's appointment that is not wasted.",
+    "north_star": "Turn the person's records and what they are experiencing into insights and the next actions those records support.",
     "default_channel": "personal",
     "hard_constraints": [
       "Never diagnose. Never name a condition as the cause. Never suggest a medicine, a dose, or stopping one.",
-      "This prepares a person to be seen; it does not substitute for being seen. Say so in every answer.",
-      "If anything reported could be an emergency, set seek_care_now and lead with it. Preparing questions for next week is the wrong answer to a symptom that needs today.",
-      "tool_results.query_health_record is the health knowledge base: excerpts of the person's own uploaded records. Each excerpts entry has content and sourceKey; those passages are the record. found false means nothing in their records is relevant; an error key means the lookup did not happen. Neither is permission to invent a history — with no retrieved record, report only what they told you in this request. Never present a retrieved value as a diagnosis or as a clinician's opinion: it is a past record, not an answer about now.",
-      "Report only what the person said. An inferred symptom becomes a fact in a consulting room.",
+      "Every answer carries one short safety_note: this is not a diagnosis and not a substitute for care. One sentence, then the insights.",
+      "If anything reported could be an emergency, set seek_care_now and lead with being seen now. Suggestions for later are the wrong answer to a symptom that needs today.",
+      "tool_results.query_health_record is the health knowledge base over the person's uploaded records. queries is what was searched. Each excerpts entry has content and sourceKey. found false means nothing in their records is relevant; an error key means the lookup did not happen. A query entry with its own error did not happen; the other queries still count. Neither is permission to invent a history. With no retrieved record, use only what they said in this request, say in data_gaps what was searched, and cite request.experiencing as the source. Never present a retrieved value as a diagnosis or as a clinician's opinion.",
+      "The answer is insights and suggestions. A list of questions is not the answer. data_gaps states what is missing as an observation. follow_ups holds at most two optional items and is never the substance.",
+      "Act on what they asked. Analyze the records — trends, out-of-range values, changes since the last period — and give the next actions. Restating their paragraph is a failed turn.",
       "This request may be a follow-up. When request.edit_instruction is present, request.previous_output is your own last answer: revise it to satisfy the instruction and change nothing else. Do not start over, and do not drop fields the instruction did not mention."
     ],
     "features": {
@@ -33,7 +34,7 @@
   "agents": [
     {
       "id": "HP_log",
-      "name": "Symptom Log",
+      "name": "Record Log",
       "role_id": "PBM-001",
       "department_id": "DEPT-001",
       "bedrock": {
@@ -50,12 +51,12 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Turn what was reported into a log a clinician can scan: separate items, a timeline, and the gaps. Do not paste their paragraph back as one item, and do not add anything they did not say — missing_detail is where a gap goes, not an assumption. Set seek_care_now true when anything reported is the kind of thing that should be seen urgently rather than at a scheduled appointment, and say plainly why. Do not name a cause: that is a clinician's job and guessing at one changes what the person says when they get there. tool_results.query_health_record is the health knowledge base over their uploaded records. Read excerpts[].content when it is present; that is the passage from the record, and sourceKey says which file it came from. An error key means the lookup did not happen and found false means nothing in their records is relevant. Neither is a history you may supply — with no retrieved record, log only what they told you here.",
+      "goal_template": "Turn what was reported, and the health knowledge base, into a log of evidence. The lookups have already been run. Read tool_results.query_health_record first. queries is what was searched: the person's words, recent labs and vitals, medications, sleep and activity, and trends. excerpts entries have content and sourceKey; those passages are the record. An error key means that lookup did not happen. found false means nothing in the records was relevant. A query entry with its own error did not happen; the other queries still count. Neither is a history you may supply. Copy each query string into searched. Put each passage you rely on into evidence with its sourceKey as source, the date the passage states, and the value. reported is separate items for what they said, not their paragraph pasted back. data_gaps are observations about what those searches did not contain, written as statements. A list of questions is not a log. Set seek_care_now when anything reported should be seen urgently, and say why in seek_care_reason. Do not name a cause.",
       "schema_ref": "symptom_log_v1"
     },
     {
-      "id": "HP_questions",
-      "name": "Appointment Prep",
+      "id": "HP_insights",
+      "name": "Health Insights",
       "role_id": "PBM-003",
       "department_id": "DEPT-003",
       "bedrock": {
@@ -72,8 +73,8 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Write the questions worth asking a clinician — each one something they can answer in the room. Restating a symptom as 'is it true that I have this?' is not a question; derive what would change the visit: timing, triggers, what to track, what to bring. what_to_track_before is what would make the appointment sharper if recorded first. bring_with_you is documents, timelines, previous results. Fill this_is_not_advice with a plain sentence saying this is preparation for a clinician and not a substitute for one. If seek_care_now was set, the first question is how soon they are seen. Use only the log and what they reported; do not invent history the log does not contain.",
-      "schema_ref": "care_questions_v1"
+      "goal_template": "Produce insights and suggestions from the health knowledge base and from the log. Do that analysis; do not echo the request back. The lookups have already been run. Read tool_results.query_health_record first: queries is what was searched, excerpts have content and sourceKey. An error key means that lookup did not happen; found false means nothing relevant was retrieved. If nothing useful came back, the summary says what was searched and that those searches returned nothing, data_gaps states that as an observation, and insights and suggestions use only what the person reported — evidence.source is request.experiencing and evidence.value is their words. Do not invent results, dates, or sources. Each insight has a title, a finding, evidence with source, date, and value, significance of low, moderate, or high, and confidence of low, medium, or high. Say what changed over time, what is out of range, and what moved since the last period, and only where a passage supports it. Each suggestion has an action, a rationale, the linked insight title, a priority of high, medium, or low, and a timeframe. Suggestions are specific next actions, never a medicine, a dose, or stopping one. State assumptions in data_gaps as observations. follow_ups has at most two optional items and is never the substance. A list of questions is not an insight and not a suggestion. safety_note is one short sentence: this is not a diagnosis and not a substitute for care. If anything should be seen urgently, set seek_care_now and lead the summary with being seen now.",
+      "schema_ref": "health_insights_v1"
     }
   ],
   "workflow": [
@@ -88,16 +89,28 @@
           "args": {
             "source_key": "request.experiencing",
             "output_key": "question",
-            "top_k": 6
+            "top_k": 4,
+            "facets": true
           }
         }
       ]
     },
     {
-      "step": "HP_questions",
+      "step": "HP_insights",
       "inputs": [
         "request",
         "HP_log.output"
+      ],
+      "pre_tools": [
+        {
+          "name": "query_health_record",
+          "args": {
+            "source_key": "request.experiencing",
+            "output_key": "question",
+            "top_k": 4,
+            "facets": true
+          }
+        }
       ]
     }
   ],
@@ -105,12 +118,12 @@
     "symptom_log_v1": {
       "path": "config/examples/schemas/symptom_log_v1.json"
     },
-    "care_questions_v1": {
-      "path": "config/examples/schemas/care_questions_v1.json"
+    "health_insights_v1": {
+      "path": "config/examples/schemas/health_insights_v1.json"
     }
   },
   "request_schema": {
-    "summary": "Describe what you are experiencing. You get it structured and a set of questions for a clinician — never a diagnosis. Follow-up turns in the same chat revise the last answer rather than starting over.",
+    "summary": "Describe what you are experiencing. You get insights and suggestions grounded in your health records, with the dates and sources they come from — never a diagnosis, and not a list of questions. Follow-up turns in the same chat revise the last answer rather than starting over.",
     "fields": [
       {
         "name": "experiencing",
