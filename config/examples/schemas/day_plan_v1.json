@@ -25,10 +25,18 @@
       "items": {
         "type": "string"
       }
+    },
+    "intent": {
+      "type": "string"
+    },
+    "work": {
+      "type": "string",
+      "description": "The plan, the exploration, or the decision. Not a restatement of the request."
     }
   },
   "required": [
     "the_one_thing",
-    "blocks"
+    "blocks",
+    "work"
   ]
 }

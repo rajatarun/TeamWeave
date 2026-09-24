@@ -526,7 +526,7 @@ def test_the_stored_extension_matches_the_returned_mime(monkeypatch):
                                               "prompt": prompt, "content_type": "image/jpeg"})
     saved = {}
     monkeypatch.setattr(worker_handler, "save_bytes",
-                        lambda run, step, data, *, extension, content_type: saved.update(
+                        lambda run, step, data, *, extension, content_type, summary="": saved.update(
                             extension=extension, content_type=content_type) or "s3://b/k.jpg")
 
     out = worker_handler._run_image_step(_agent("gemini"), "s", "r", {})

@@ -5,11 +5,11 @@
     "owner": "Tarun Raja"
   },
   "globals": {
-    "north_star": "Turn everything in your head into the one thing worth doing next.",
+    "north_star": "Do the thing they asked. A dump becomes the one thing worth doing next. A request to plan or explore becomes that plan or that exploration.",
     "default_channel": "personal",
     "hard_constraints": [
-      "Never invent a task that was not in the dump. A plan the person does not recognise is a plan they will not follow.",
-      "Say which of your assumptions would change the order if wrong.",
+      "Read the request as an assignment. If it is a dump of tasks, sort and schedule those tasks. If it asks you to plan, explore, compare, or decide, do that work. Repeating the request back is not an answer.",
+      "Do not invent tasks the person did not mention when they handed you a list. A plan they asked for is not a list: produce the plan, the options, or the decision, and name the assumptions that would change it.",
       "No grounding is used here: this is about the person's own day, and nothing in a corpus knows it. Do not cite sources.",
       "This request may be a follow-up. When request.edit_instruction is present, request.previous_output is your own last answer: revise it to satisfy the instruction and change nothing else. Do not start over, and do not drop fields the instruction did not mention."
     ],
@@ -37,8 +37,8 @@
       "bedrock": {
         "agentId": "",
         "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_id": "us.amazon.nova-lite-v1:0",
+        "shadow_model_id": "us.amazon.nova-pro-v1:0",
         "model_aliases": {
           "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
@@ -48,7 +48,7 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Sort the dump. Each item goes to today, this week, someone else's, or dropped \u2014 and every drop and delegation needs a one-line reason, because those are the calls the person will want to argue with. Keep their words; do not rewrite a task into something tidier than they said. If the dump is vague, put what you assumed in assumptions rather than guessing silently.",
+      "goal_template": "Decide what they actually asked, and do not hand their words back. A brain dump is sorted: each item to today, this week, someone else's, or dropped, with a one-line reason for every drop and delegation. A request to plan, explore, or decide is not a dump \u2014 set intent to plan or explore, put a one-sentence reading of the ask in read_as (not their paragraph copied), and put in today and this_week only the concrete next actions that fall out of that work. If the ask is vague, record the assumption instead of guessing silently.",
       "schema_ref": "day_triage_v1"
     },
     {
@@ -59,8 +59,8 @@
       "bedrock": {
         "agentId": "",
         "aliasId": "",
-        "model_id": "us.amazon.nova-micro-v1:0",
-        "shadow_model_id": "us.amazon.nova-lite-v1:0",
+        "model_id": "us.amazon.nova-lite-v1:0",
+        "shadow_model_id": "us.amazon.nova-pro-v1:0",
         "model_aliases": {
           "us.amazon.nova-micro-v1:0": "",
           "us.amazon.nova-lite-v1:0": "",
@@ -70,7 +70,7 @@
           "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
         }
       },
-      "goal_template": "Build the actual day from the triage. Pick the_one_thing \u2014 the single item that, done, makes the day a success even if nothing else happens \u2014 and say why it beats the others. Block the rest around it against the hours available. if_the_day_goes_wrong is the honest fallback: what still gets done when half the day disappears.",
+      "goal_template": "Produce the thing they asked for. the_one_thing is the decision or the single next move, not their sentence rewritten. work is the substance: the plan, the options you explored, or the day laid out, specific enough to act on without re-reading what they typed. blocks are the sequence. why_that_one says why this beats the alternatives. if_the_day_goes_wrong is the reduced version when half the time disappears. If they dumped tasks, schedule those. If they asked to plan or explore something else, that exploration is work \u2014 do not shoehorn it into a copy of their prompt.",
       "schema_ref": "day_plan_v1"
     }
   ],
@@ -98,7 +98,7 @@
     }
   },
   "request_schema": {
-    "summary": "Dump everything on your mind. You get it triaged and a day built around one thing that matters. Follow-up turns in the same chat revise the last answer rather than starting over.",
+    "summary": "Dump a day, or ask for a plan or an exploration. You get the work, not your own words repeated. Follow-up turns in the same chat revise the last answer rather than starting over.",
     "fields": [
       {
         "name": "dump",

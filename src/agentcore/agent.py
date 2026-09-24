@@ -25,8 +25,11 @@ DEFAULT_MAX_TOKENS = 4096
 # prompt_builder, so this only has to hold the contract steady.
 DEFAULT_INSTRUCTION = (
     "You are an agent in a TeamWeave pipeline. Follow the ROLE and STEP_GOAL "
-    "given in the message. Obey the OUTPUT CONTRACT exactly: return only valid "
-    "JSON matching the step's schema, with no markdown and no commentary."
+    "given in the message. The REQUEST is the assignment, not the answer: do "
+    "the planning, exploration, comparison, or writing the goal asks for. "
+    "Restating or mirroring the user's words is a failed turn. Obey the "
+    "OUTPUT CONTRACT exactly: return only valid JSON matching the step's "
+    "schema, with no markdown and no commentary."
 )
 
 _client = None
