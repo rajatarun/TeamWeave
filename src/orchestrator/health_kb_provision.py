@@ -14,6 +14,14 @@ This function is the custom resource that calls ``CreateKnowledgeBase``
 with the documented body. The managed base owns the vector store, so there
 is no S3 Vectors index to create.
 
+The Lambda runtime's botocore does not know that body. Parameter validation
+fails in the client and Bedrock never sees the request. The function is
+packaged with ``botocore>=1.43.92`` (``src/requirements-bedrock-kb.txt``),
+which is the first model that describes ``modelConfiguration`` and the
+supplemental storage location. ``_client`` refuses an older model before
+the call, so a package that forgot the pin fails with that reason rather
+than "Unknown parameter".
+
 CloudFormation does not ship ``cfnresponse`` inside a packaged function.
 The response is a PUT to ``ResponseURL`` with an empty ``Content-Type``.
 """
@@ -148,15 +156,66 @@ def data_source_fields(bucket_name: str, account_id: str) -> Dict[str, Any]:
     }
 
 
+def _assert_managed_model(client) -> None:
+    """Refuse a botocore that would reject the Marengo body locally.
+
+    The runtime copy stops at ``managedKnowledgeBaseConfiguration``. 1.43.32
+    knows that member and still rejects ``modelConfiguration`` and the
+    supplemental storage location. Either failure is a client-side
+    validation error; the service is never asked.
+    """
+    import botocore
+
+    model = client.meta.service_model
+    missing = []
+    kb_members = _shape_members(model, "KnowledgeBaseConfiguration")
+    if "managedKnowledgeBaseConfiguration" not in kb_members:
+        missing.append("managedKnowledgeBaseConfiguration")
+    else:
+        if "supplementalDataStorageConfiguration" not in _shape_members(
+            model, "ManagedKnowledgeBaseConfiguration"
+        ):
+            missing.append("supplementalDataStorageConfiguration")
+        if "modelConfiguration" not in _shape_members(
+            model, "BedrockEmbeddingModelConfiguration"
+        ):
+            missing.append("modelConfiguration")
+    if "MANAGED_KNOWLEDGE_BASE_CONNECTOR" not in _shape_enum(model, "DataSourceType"):
+        missing.append("MANAGED_KNOWLEDGE_BASE_CONNECTOR")
+    if missing:
+        raise RuntimeError(
+            f"botocore {botocore.__version__} cannot describe {', '.join(missing)}. "
+            "CreateKnowledgeBase would fail parameter validation before Bedrock "
+            "sees the request. This package needs src/requirements-bedrock-kb.txt "
+            "(botocore>=1.43.92)."
+        )
+
+
+def _shape_members(model, name: str):
+    try:
+        return model.shape_for(name).members
+    except Exception:
+        return {}
+
+
+def _shape_enum(model, name: str):
+    try:
+        return list(model.shape_for(name).enum or [])
+    except Exception:
+        return []
+
+
 def _client():
     # Outside the worker's deadline helper on purpose. This function's only
     # job is one control-plane call sequence, and a read timeout as long as
     # the function would turn a stall into a Lambda timeout with no response
     # to CloudFormation. The poll loop is what waits for ACTIVE.
-    return boto3.client(
+    client = boto3.client(
         "bedrock-agent",
         config=Config(read_timeout=60, connect_timeout=10, retries={"max_attempts": 2}),
     )
+    _assert_managed_model(client)
+    return client
 
 
 def _code(exc: BaseException) -> str:

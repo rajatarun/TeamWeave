@@ -50,8 +50,13 @@ def _client(service: str):
 
     Built per call, same reason as the agent client: the budget shrinks as
     earlier steps spend it. An injected client is how tests avoid the network.
+
+    Retrieve on a managed base sends ``managedSearchConfiguration``. The
+    Lambda runtime's botocore rejects that parameter before the request is
+    signed. WorkerFunction is packaged with botocore>=1.43.92 so the model
+    describes it; an older client fails here, naming that pin.
     """
-    return boto3.client(
+    client = boto3.client(
         service,
         config=Config(
             read_timeout=budget_for_call(),
@@ -59,6 +64,26 @@ def _client(service: str):
             retries={"max_attempts": 0},
         ),
     )
+    if service == "bedrock-agent-runtime":
+        _assert_managed_retrieve(client)
+    return client
+
+
+def _assert_managed_retrieve(client) -> None:
+    members = {}
+    try:
+        members = client.meta.service_model.shape_for(
+            "KnowledgeBaseRetrievalConfiguration"
+        ).members
+    except Exception:
+        members = {}
+    if "managedSearchConfiguration" not in members:
+        import botocore
+        raise RuntimeError(
+            f"botocore {botocore.__version__} has no managedSearchConfiguration. "
+            "Retrieve would fail parameter validation. WorkerFunction must be "
+            "built with src/requirements-bedrock-kb.txt (botocore>=1.43.92)."
+        )
 
 
 def retrieve(question: str, *, top_k: int = 6, client=None) -> Optional[Dict[str, Any]]:
