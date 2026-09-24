@@ -27,10 +27,28 @@ The name is `${AWS::StackName}-portfolios-${AWS::AccountId}`. The stack name
 has to stay lowercase, and the full name has to stay within 63 characters.
 
 The first deploy starts an ingestion job for objects already in the bucket.
-A later upload or delete sends an EventBridge event and the sync function
-starts another job. Ingestion is asynchronous. A run that starts before the
-job finishes sees `found: false` or `error` on `query_portfolio`, and the
+A later upload or delete sends an EventBridge event onto an SQS queue. The
+sync function runs with reserved concurrency 1, reads up to 100 messages
+gathered over 60 seconds, and starts one ingestion job for the batch. If a
+job is already running, or `StartIngestionJob` is throttled, those messages
+return to the queue and are tried again after the visibility timeout
+(6 minutes). Ingestion is asynchronous. A run that starts before the job
+finishes sees `found: false` or `error` on `query_portfolio`, and the
 agent is told to say what was searched rather than invent holdings.
+
+A burst of uploads that failed before this queue existed is not replayed.
+After deploying the queue, confirm the deploy log started an ingestion job.
+If that step warned, start one job so the bucket is read as it is now:
+
+```bash
+aws bedrock-agent start-ingestion-job \
+  --region us-east-1 \
+  --knowledge-base-id "$TEAMWEAVE_PORTFOLIO_KNOWLEDGE_BASE_ID" \
+  --data-source-id "$TEAMWEAVE_PORTFOLIO_DATA_SOURCE_ID"
+```
+
+The health base uses the same sync path. If its lambda was failing the same
+way, start one job with `HealthKnowledgeBaseId` and `HealthDataSourceId`.
 
 ## The knowledge base
 

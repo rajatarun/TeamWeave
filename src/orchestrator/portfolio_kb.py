@@ -15,9 +15,8 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 
-from .deadline import set_deadline_from_context
+from .health_kb import handle_sync_event
 from .health_kb import retrieve as _retrieve
-from .health_kb import start_sync
 from .logger import get_logger
 
 log = get_logger("portfolio_kb")
@@ -132,9 +131,12 @@ def search(question: str, *, top_k: int = 6, facets: bool = False, client=None) 
     return body
 
 
-def sync_handler(event: Any, context: Any) -> Dict[str, str]:
-    """EventBridge entrypoint. The event names the object; it is not logged."""
-    set_deadline_from_context(context)
-    # Explicit ids, including when they are empty. Omitting them would start
-    # a job on the health base, which is the other caller's default.
-    return start_sync(kb_id=knowledge_base_id(), source_id=data_source_id())
+def sync_handler(event: Any, context: Any) -> Dict[str, Any]:
+    """SQS entrypoint for the portfolio bucket. The event names the object; it is not logged.
+
+    Explicit ids, including when they are empty. Omitting them would start
+    a job on the health base, which is the other caller's default.
+    """
+    return handle_sync_event(
+        event, context, kb_id=knowledge_base_id(), source_id=data_source_id(),
+    )
