@@ -5,7 +5,9 @@ when it needs an id. A model id written on an agent is an override: it is
 logged, and the category's fallbacks still follow it.
 
 Prices live on the model records. A category's cost tier is its primary's
-tier, so changing a price is one edit.
+tier, so changing a price is one edit. Ids listed under ``unavailable`` are
+refused: an override that names one is dropped, and a category cannot select
+one.
 """
 from __future__ import annotations
 
@@ -143,6 +145,13 @@ def validate_model_map(doc: Any) -> List[str]:
         categories = {}
     if "default" not in categories:
         errors.append("categories.default is required")
+    blocked = doc.get("unavailable") or []
+    if not isinstance(blocked, list) or not all(isinstance(item, str) and item for item in blocked):
+        errors.append("unavailable must be a list of model ids")
+        blocked = []
+    for model_id in blocked:
+        if model_id in models:
+            errors.append(f"{model_id} is listed unavailable and is also in models")
     for model_id, spec in models.items():
         if not isinstance(spec, dict):
             errors.append(f"{model_id} is not a mapping")
@@ -168,14 +177,18 @@ def validate_model_map(doc: Any) -> List[str]:
             errors.append(f"category {name} is not a mapping")
             continue
         primary = cat.get("primary")
-        if primary not in models:
+        if primary in blocked:
+            errors.append(f"category {name} primary {primary!r} is unavailable")
+        elif primary not in models:
             errors.append(f"category {name} primary {primary!r} is not in models")
         fallbacks = cat.get("fallbacks", [])
         if not isinstance(fallbacks, list):
             errors.append(f"category {name} fallbacks is not a list")
             fallbacks = []
         for item in fallbacks:
-            if item not in models:
+            if item in blocked:
+                errors.append(f"category {name} fallback {item!r} is unavailable")
+            elif item not in models:
                 errors.append(f"category {name} fallback {item!r} is not in models")
         if not str(cat.get("rationale") or "").strip():
             errors.append(f"category {name} has no rationale")
@@ -201,6 +214,15 @@ def validate_model_map(doc: Any) -> List[str]:
 
 def model_ids() -> set:
     return set(load_model_map().get("models") or {})
+
+
+def unavailable_ids(doc: Optional[Dict[str, Any]] = None) -> set:
+    """Ids this account cannot call. ``resolve_model`` will not return one."""
+    raw = doc if doc is not None else load_model_map()
+    listed = raw.get("unavailable") or []
+    if not isinstance(listed, list):
+        return set()
+    return {str(item) for item in listed if item}
 
 
 def categories() -> List[str]:
@@ -248,10 +270,13 @@ def resolve_model(category: str, override: str = "") -> ResolvedModel:
 
     An unknown category resolves to ``default`` and logs a warning. A
     non-empty ``override`` becomes the primary and is logged; the category's
-    own fallbacks still follow it, so a throttle can leave the override.
+    own fallbacks still follow it, so a throttle can leave the override. An
+    override listed under ``unavailable`` is dropped and the category primary
+    is used instead.
     """
     doc = load_model_map()
     cats = doc["categories"]
+    blocked = unavailable_ids(doc)
     requested = (category or "").strip() or "default"
     used_default = False
     if requested not in cats:
@@ -264,8 +289,16 @@ def resolve_model(category: str, override: str = "") -> ResolvedModel:
     else:
         requested_resolved = requested
     cat = cats[requested_resolved]
-    fallback_ids = [str(item) for item in cat.get("fallbacks") or []]
+    fallback_ids = [
+        str(item) for item in cat.get("fallbacks") or [] if str(item) not in blocked
+    ]
     override_id = (override or "").strip()
+    if override_id and override_id in blocked:
+        log.warning(
+            "unavailable_model_refused",
+            extra={"category": requested_resolved, "model_id": override_id},
+        )
+        override_id = ""
     if override_id:
         log.warning(
             "model_id_override",

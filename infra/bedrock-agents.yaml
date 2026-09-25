@@ -22,12 +22,12 @@ Parameters:
 
   NovaProModelId:
     Type: String
-    Default: us.anthropic.claude-sonnet-5
+    Default: us.anthropic.claude-sonnet-4-6
     Description: Nova Pro model ID — balanced performance alias.
 
   NovaPremierModelId:
     Type: String
-    Default: us.anthropic.claude-sonnet-5
+    Default: us.anthropic.claude-sonnet-4-6
     Description: Nova Premier model ID — complex reasoning alias.
 
   ClaudeHaikuModelId:
