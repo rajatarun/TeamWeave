@@ -17,7 +17,7 @@ This directory contains a CloudFormation template that provisions:
 Set model via env var (optional):
 
 ```bash
-export FOUNDATION_MODEL_ID=amazon.nova-micro-v1:0
+export FOUNDATION_MODEL_ID=deepseek.v3.2
 export ASSUME_ROLE_ARN=arn:aws:iam::123456789012:role/teamweave-github-actions-sam-deployer
 ```
 
@@ -32,7 +32,7 @@ sam deploy \
   --resolve-s3 \
   --no-fail-on-empty-changeset \
   --parameter-overrides \
-    FoundationModelId=${FOUNDATION_MODEL_ID:-amazon.nova-micro-v1:0} \
+    FoundationModelId=${FOUNDATION_MODEL_ID:-deepseek.v3.2} \
     SamAssumeRoleName=${ASSUME_ROLE_ARN##*/}
 ```
 

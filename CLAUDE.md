@@ -408,6 +408,13 @@ when set, and `run_turn` prefers it over the environment; omit it and the
 runtime keeps its own default, so an agent that declares no model is
 unaffected.
 
+**Which model is `config/model_map.yaml`.** A team names a `model_category`.
+`resolve_model` is the selector every turn calls. Prices, a cost tier, and a
+latency tier live on each model record, and a category's cost tier is its
+primary's tier. Observatory rows for `model_selection` carry
+`estimated_cost_usd`, tokens times those prices. The writeup, the sources,
+and the date the prices were checked are in `docs/model_map.md`.
+
 `build_payload` took an `instruction` argument from the day it was written and
 `invoke` never passed one — the seam existed, was documented, and was
 connected to nothing, so every turn fell back to the runtime's

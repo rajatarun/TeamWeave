@@ -1,0 +1,268 @@
+# One place decides which model an agent runs.
+# Change a price or a model here. Team configs name a category, not an id.
+# Prices are us-east-1 on-demand, checked 2026-09-25.
+# Claude rates are the provider rates Bedrock bills (Anthropic pricing).
+# DeepSeek is the rate on the AWS Bedrock pricing page for N. Virginia.
+# Gemini rates are the Gemini API paid tier (introductory through 2026-12-31
+# for 3.8 Flash).
+price_checked: "2026-09-25"
+
+models:
+  us.anthropic.claude-sonnet-5:
+    provider: bedrock
+    cost_per_1m_input: 2.0
+    cost_per_1m_output: 10.0
+    cost_tier: standard
+    latency_tier: fast
+    price_source: https://platform.claude.com/docs/en/about-claude/pricing
+    price_checked: "2026-09-25"
+  us.anthropic.claude-sonnet-4-6:
+    provider: bedrock
+    cost_per_1m_input: 3.0
+    cost_per_1m_output: 15.0
+    cost_tier: standard
+    latency_tier: fast
+    price_source: https://platform.claude.com/docs/en/about-claude/pricing
+    price_checked: "2026-09-25"
+  us.anthropic.claude-haiku-4-5-20251001-v1:0:
+    provider: bedrock
+    cost_per_1m_input: 1.0
+    cost_per_1m_output: 5.0
+    cost_tier: low
+    latency_tier: fastest
+    price_source: https://platform.claude.com/docs/en/about-claude/pricing
+    price_checked: "2026-09-25"
+  us.anthropic.claude-opus-5:
+    provider: bedrock
+    cost_per_1m_input: 5.0
+    cost_per_1m_output: 25.0
+    cost_tier: high
+    latency_tier: medium
+    price_source: https://platform.claude.com/docs/en/about-claude/pricing
+    price_checked: "2026-09-25"
+  deepseek.v3.2:
+    provider: bedrock
+    cost_per_1m_input: 0.62
+    cost_per_1m_output: 1.85
+    cost_tier: low
+    latency_tier: medium
+    price_source: https://aws.amazon.com/bedrock/pricing/
+    price_checked: "2026-09-25"
+  gemini-3.8-flash:
+    provider: gemini
+    cost_per_1m_input: 0.75
+    cost_per_1m_output: 3.75
+    cost_tier: low
+    latency_tier: fast
+    price_source: https://ai.google.dev/gemini-api/docs/pricing
+    price_checked: "2026-09-25"
+  gemini-3.1-flash-lite:
+    provider: gemini
+    cost_per_1m_input: 0.25
+    cost_per_1m_output: 1.50
+    cost_tier: low
+    latency_tier: fastest
+    price_source: https://ai.google.dev/gemini-api/docs/pricing
+    price_checked: "2026-09-25"
+  gemini-3.1-flash-lite-image:
+    provider: gemini
+    cost_per_1m_input: 0.25
+    cost_per_1m_output: 30.0
+    cost_per_image: 0.0336
+    cost_tier: low
+    latency_tier: fastest
+    price_source: https://ai.google.dev/gemini-api/docs/pricing
+    price_checked: "2026-09-25"
+  amazon.nova-2-multimodal-embeddings-v1:0:
+    provider: bedrock
+    cost_per_1m_input: 0
+    cost_per_1m_output: 0
+    cost_tier: infra
+    latency_tier: fast
+    price_source: https://aws.amazon.com/bedrock/pricing/
+    price_checked: "2026-09-25"
+
+categories:
+  coding:
+    primary: us.anthropic.claude-sonnet-5
+    fallbacks:
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+      - deepseek.v3.2
+    max_tokens: 8192
+    temperature: 0
+    cost_tier: standard
+    rationale: >
+      Sonnet 5 is the current coding Sonnet and costs $2/$10, which is less
+      than Sonnet 4.6 ($3/$15) and Opus 5 ($5/$25). Opus is not the primary:
+      Sonnet 5 is the model Anthropic positions for coding, at less than half
+      Opus's price. Haiku 4.5 then DeepSeek V3.2 are the availability
+      fallbacks.
+  planning:
+    primary: us.anthropic.claude-sonnet-5
+    fallbacks:
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+      - deepseek.v3.2
+    max_tokens: 8192
+    temperature: 0
+    cost_tier: standard
+    rationale: >
+      Planning is one of the categories where quality is worth paying for.
+      Sonnet 5 is near-Opus at $2/$10 versus Opus 5 at $5/$25, so Opus stays
+      off this path. Haiku then DeepSeek cover a throttle or a missing grant.
+  research_web:
+    primary: gemini-3.8-flash
+    fallbacks:
+      - deepseek.v3.2
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+    max_tokens: 8192
+    temperature: 0
+    cost_tier: low
+    rationale: >
+      Gemini 3.8 Flash is the research model this stack already calls, and
+      its introductory price through 31 Dec 2026 is $0.75/$3.75, below
+      Sonnet 5. The orchestrator can call it with the existing Gemini secret.
+      A missing key or a throttle falls through to DeepSeek, then Haiku.
+  finance:
+    primary: us.anthropic.claude-sonnet-5
+    fallbacks:
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+      - deepseek.v3.2
+    max_tokens: 8192
+    temperature: 0
+    cost_tier: standard
+    rationale: >
+      A financial insight that invents a holding is worse than a slow one.
+      Sonnet 5 is the quality pick. It is still cheaper than Sonnet 4.6 and
+      Opus 5, so the frontier price is not what this category pays.
+  health_medical:
+    primary: us.anthropic.claude-sonnet-5
+    fallbacks:
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+      - deepseek.v3.2
+    max_tokens: 8192
+    temperature: 0
+    cost_tier: standard
+    rationale: >
+      Health answers have to follow the schema's safety rules. Sonnet 5 is
+      the careful model at the best price in the current Sonnet line. Haiku
+      is the first fallback so a throttle still lands on an instruction-
+      following model rather than the cheapest one.
+  writing_creative:
+    primary: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    fallbacks:
+      - us.anthropic.claude-sonnet-5
+      - deepseek.v3.2
+    max_tokens: 4096
+    temperature: 0.4
+    cost_tier: low
+    rationale: >
+      Publishable prose needs care, and Haiku 4.5 is Anthropic's near-frontier
+      fast model at $1/$5, half of Sonnet 5. Writing is not one of the
+      categories that justify the Sonnet price on every turn. Sonnet 5 is the
+      fallback when Haiku is throttled or not enabled.
+  summarization:
+    primary: gemini-3.1-flash-lite
+    fallbacks:
+      - deepseek.v3.2
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+    max_tokens: 4096
+    temperature: 0
+    cost_tier: low
+    rationale: >
+      Summaries do not need a frontier model. Flash-Lite is $0.25/$1.50 and
+      the fastest Gemini tier. DeepSeek then Haiku are the Bedrock fallbacks
+      when the Gemini secret is absent.
+  data_analysis:
+    primary: deepseek.v3.2
+    fallbacks:
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+      - us.anthropic.claude-sonnet-5
+    max_tokens: 8192
+    temperature: 0
+    cost_tier: low
+    rationale: >
+      DeepSeek V3.2 is $0.62/$1.85 on us-east-1, a third of Sonnet 5's input
+      price, and it is a strong analysis model. Sonnet 5 is the last fallback
+      for a hard comparison, not the model every fit-read pays for.
+  customer_support:
+    primary: gemini-3.1-flash-lite
+    fallbacks:
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+      - deepseek.v3.2
+    max_tokens: 2048
+    temperature: 0.2
+    cost_tier: low
+    rationale: >
+      Chat wants the lowest latency that still follows instructions.
+      Flash-Lite is the cheap fast tier. Haiku 4.5 is the Bedrock fallback
+      and is itself the fast Anthropic model.
+  quick:
+    primary: gemini-3.1-flash-lite
+    fallbacks:
+      - deepseek.v3.2
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+    max_tokens: 2048
+    temperature: 0
+    cost_tier: low
+    rationale: >
+      The cheap path. Flash-Lite at $0.25/$1.50 beats Haiku ($1/$5) and
+      DeepSeek ($0.62/$1.85) on price and is the fastest tier. Bedrock
+      fallbacks keep the turn alive without a Gemini key.
+  multimodal_vision:
+    primary: gemini-3.8-flash
+    fallbacks:
+      - us.anthropic.claude-sonnet-5
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+    max_tokens: 4096
+    temperature: 0
+    cost_tier: low
+    rationale: >
+      Gemini 3.8 Flash accepts images and costs $0.75/$3.75 through 2026.
+      Sonnet 5 also accepts images on Bedrock Converse and is the fallback
+      when Gemini cannot be called. No team uses this category yet.
+  image_generation:
+    primary: gemini-3.1-flash-lite-image
+    fallbacks: []
+    max_tokens: 1024
+    temperature: 0
+    cost_tier: low
+    rationale: >
+      Nova Canvas reaches end of life on 30 Sep 2026, five days after this
+      map was written, so the illustrator stays on Gemini Flash Lite Image.
+      A 1K image is about $0.0336. There is no second image model in this
+      map; a failure degrades the step the way the image path already does.
+  embeddings:
+    primary: amazon.nova-2-multimodal-embeddings-v1:0
+    fallbacks: []
+    max_tokens: 0
+    temperature: 0
+    cost_tier: infra
+    rationale: >
+      The health and portfolio knowledge bases embed with Nova multimodal
+      embeddings. The Bedrock pricing page fetched on 2026-09-25 did not
+      list a per-token on-demand rate for this model, so estimated invocation
+      cost stays 0 until a rate is written on this entry.
+  schema_repair:
+    primary: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    fallbacks:
+      - us.anthropic.claude-sonnet-5
+    max_tokens: 4096
+    temperature: 0
+    cost_tier: low
+    rationale: >
+      Repair reshapes an answer into the step schema. Haiku 4.5 supports
+      Converse and is $1/$5. Sonnet 5 is the fallback. The old pinned Haiku
+      3 id is refused by Bedrock as legacy.
+  default:
+    primary: deepseek.v3.2
+    fallbacks:
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+      - us.anthropic.claude-sonnet-5
+    max_tokens: 4096
+    temperature: 0
+    cost_tier: low
+    rationale: >
+      An agent with no category, and the runtime's last-resort model, use
+      DeepSeek V3.2. It is the best quality-for-cost Bedrock model in this
+      map ($0.62/$1.85) and does not need the Gemini secret. An unknown
+      category name resolves here and logs a warning.

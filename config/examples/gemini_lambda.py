@@ -11,7 +11,7 @@ API key is fetched from AWS Secrets Manager:
   Secret key: key
 
 Environment variables:
-  GEMINI_MODEL  — model to use (default: gemini-3.8-flash)
+  GEMINI_MODEL  — override of the model map's research_web category
   MAX_TOKENS    — max output tokens (default: 1024)
 """
 
@@ -26,7 +26,18 @@ import boto3
 log = logging.getLogger()
 log.setLevel(getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO))
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+def gemini_model() -> str:
+    """research_web from the model map. GEMINI_MODEL is a logged override."""
+    override = os.environ.get("GEMINI_MODEL", "").strip()
+    try:
+        from src.orchestrator.model_map import resolve_model
+        chosen = resolve_model("research_web").model_id
+    except Exception:
+        chosen = ""
+    if override and override != chosen:
+        log.warning("model_id_override category=research_web model_id=%s", override)
+        return override
+    return chosen or override
 MAX_TOKENS   = int(os.environ.get("MAX_TOKENS", "1024"))
 API_BASE     = "https://generativelanguage.googleapis.com/v1beta/models"
 SECRET_ID    = "gemini/api_key"
@@ -52,7 +63,7 @@ def _get_api_key() -> str:
 
 def _gemini_search(query: str) -> str:
     api_key = _get_api_key()
-    url     = f"{API_BASE}/{GEMINI_MODEL}:generateContent?key={api_key}"
+    url     = f"{API_BASE}/{gemini_model()}:generateContent?key={api_key}"
     payload = json.dumps({
         "contents": [{"parts": [{"text": query}]}],
         "generationConfig": {"maxOutputTokens": MAX_TOKENS},

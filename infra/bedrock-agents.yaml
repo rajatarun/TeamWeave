@@ -6,7 +6,7 @@ Description: >-
 Parameters:
   FoundationModelId:
     Type: String
-    Default: us.amazon.nova-micro-v1:0
+    Default: deepseek.v3.2
     Description: >-
       Primary (main) foundation model ID used by all Bedrock agents.
       The provision Lambda creates one alias per agent using this model
@@ -14,7 +14,7 @@ Parameters:
 
   ShadowFoundationModelId:
     Type: String
-    Default: us.amazon.nova-lite-v1:0
+    Default: us.anthropic.claude-haiku-4-5-20251001-v1:0
     Description: >-
       Shadow model ID used for mcp-observatory dual_invoke comparison.
       The provision Lambda creates a 'nova-lite' alias per agent pointing
@@ -22,22 +22,22 @@ Parameters:
 
   NovaProModelId:
     Type: String
-    Default: us.amazon.nova-pro-v1:0
+    Default: us.anthropic.claude-sonnet-5
     Description: Nova Pro model ID — balanced performance alias.
 
   NovaPremierModelId:
     Type: String
-    Default: us.amazon.nova-premier-v1:0
+    Default: us.anthropic.claude-sonnet-5
     Description: Nova Premier model ID — complex reasoning alias.
 
   ClaudeHaikuModelId:
     Type: String
-    Default: us.anthropic.claude-3-haiku-20240307-v1:0
+    Default: us.anthropic.claude-haiku-4-5-20251001-v1:0
     Description: Claude 3 Haiku model ID — fast agent response alias.
 
   Claude35HaikuModelId:
     Type: String
-    Default: us.anthropic.claude-3-5-haiku-20241022-v1:0
+    Default: us.anthropic.claude-haiku-4-5-20251001-v1:0
     Description: Claude 3.5 Haiku model ID — enhanced fast response alias.
 
   AgentServiceRoleArn:

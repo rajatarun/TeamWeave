@@ -8,10 +8,10 @@ Called after every agent step in worker_handler.py to:
   2. Enforce voice — rewrite copy fields to Tarun's first-person LinkedIn voice
   3. Enforce schema — ensure all required fields are present and correctly typed
 
-Uses Claude 3.5 Haiku via InvokeModel (direct, not Bedrock Agents).
+Uses the model map's schema_repair category via Converse.
 
 Environment variables:
-  ENRICH_MODEL  — Bedrock model ID (default: us.anthropic.claude-3-5-haiku-20241022-v1:0)
+  ENRICH_MODEL  — override of schema_repair; logged when it differs
   AWS_REGION    — AWS region (default: us-east-1)
 """
 
@@ -25,10 +25,19 @@ from .logger import get_logger
 
 log = get_logger("enrich")
 
-ENRICH_MODEL = os.environ.get(
-    "ENRICH_MODEL",
-    "us.anthropic.claude-3-5-haiku-20241022-v1:0",
-)
+def enrich_model_id() -> str:
+    """schema_repair from the map. ENRICH_MODEL is a logged override."""
+    from .model_map import resolve_model
+
+    chosen = resolve_model("schema_repair")
+    override = os.environ.get("ENRICH_MODEL", "").strip()
+    if override and override != chosen.model_id:
+        log.warning(
+            "model_id_override",
+            extra={"category": "schema_repair", "model_id": override},
+        )
+        return override
+    return chosen.model_id
 
 # Phrases that indicate Nova summarised instead of generating
 _REFUSAL_PHRASES = [
@@ -152,32 +161,28 @@ def _has_placeholder(obj, depth=0) -> bool:
 
 
 def _invoke_claude(prompt: str) -> str:
+    model = enrich_model_id()
     try:
-        response = _client().invoke_model(
-            modelId=ENRICH_MODEL,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps({
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 8192,
-                "messages": [{"role": "user", "content": prompt}],
-            }),
+        response = _client().converse(
+            modelId=model,
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            inferenceConfig={"maxTokens": 8192, "temperature": 0},
         )
     except ConnectTimeoutError as e:
         log.error(
             "enrich_connect_timeout — possible VPC endpoint routing issue",
             extra={
-                "model_id": ENRICH_MODEL,
+                "model_id": model,
                 "endpoint_url": os.environ.get("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "<sdk-default>"),
                 "err": str(e)[:400],
             },
         )
         raise
     except ReadTimeoutError as e:
-        log.error("enrich_read_timeout", extra={"model_id": ENRICH_MODEL, "err": str(e)[:400]})
+        log.error("enrich_read_timeout", extra={"model_id": model, "err": str(e)[:400]})
         raise
-    body = json.loads(response["body"].read())
-    text = body["content"][0]["text"].strip()
+    blocks = (((response or {}).get("output") or {}).get("message") or {}).get("content") or []
+    text = "".join(str(b.get("text") or "") for b in blocks if isinstance(b, dict)).strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
     return text

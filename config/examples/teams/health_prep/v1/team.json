@@ -13,7 +13,7 @@
       "If anything reported could be an emergency, set seek_care_now and lead with being seen now. Suggestions for later are the wrong answer to a symptom that needs today.",
       "tool_results.query_health_record is the health knowledge base over the person's uploaded records. queries is what was searched. Each excerpts entry has content and sourceKey. found false means nothing in their records is relevant; an error key means the lookup did not happen. A query entry with its own error did not happen; the other queries still count. Neither is permission to invent a history. With no retrieved record, use only what they said in this request, say in data_gaps what was searched, and cite request.experiencing as the source. Never present a retrieved value as a diagnosis or as a clinician's opinion.",
       "The answer is insights and suggestions. A list of questions is not the answer. data_gaps states what is missing as an observation. follow_ups holds at most two optional items and is never the substance.",
-      "Act on what they asked. Analyze the records — trends, out-of-range values, changes since the last period — and give the next actions. Restating their paragraph is a failed turn.",
+      "Act on what they asked. Analyze the records \u2014 trends, out-of-range values, changes since the last period \u2014 and give the next actions. Restating their paragraph is a failed turn.",
       "This request may be a follow-up. When request.edit_instruction is present, request.previous_output is your own last answer: revise it to satisfy the instruction and change nothing else. Do not start over, and do not drop fields the instruction did not mention."
     ],
     "features": {
@@ -37,19 +37,10 @@
       "name": "Record Log",
       "role_id": "PBM-001",
       "department_id": "DEPT-001",
+      "model_category": "health_medical",
       "bedrock": {
         "agentId": "",
-        "aliasId": "",
-        "model_id": "us.amazon.nova-lite-v1:0",
-        "shadow_model_id": "us.amazon.nova-pro-v1:0",
-        "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "",
-          "us.amazon.nova-lite-v1:0": "",
-          "us.amazon.nova-pro-v1:0": "",
-          "us.amazon.nova-premier-v1:0": "",
-          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
-          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
-        }
+        "aliasId": ""
       },
       "goal_template": "Turn what was reported, and the health knowledge base, into a log of evidence. The lookups have already been run. Read tool_results.query_health_record first. queries is what was searched: the person's words, recent labs and vitals, medications, sleep and activity, and trends. excerpts entries have content and sourceKey; those passages are the record. An error key means that lookup did not happen. found false means nothing in the records was relevant. A query entry with its own error did not happen; the other queries still count. Neither is a history you may supply. Copy each query string into searched. Put each passage you rely on into evidence with its sourceKey as source, the date the passage states, and the value. reported is separate items for what they said, not their paragraph pasted back. data_gaps are observations about what those searches did not contain, written as statements. A list of questions is not a log. Set seek_care_now when anything reported should be seen urgently, and say why in seek_care_reason. Do not name a cause.",
       "schema_ref": "symptom_log_v1"
@@ -59,21 +50,12 @@
       "name": "Health Insights",
       "role_id": "PBM-003",
       "department_id": "DEPT-003",
+      "model_category": "health_medical",
       "bedrock": {
         "agentId": "",
-        "aliasId": "",
-        "model_id": "us.amazon.nova-lite-v1:0",
-        "shadow_model_id": "us.amazon.nova-pro-v1:0",
-        "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "",
-          "us.amazon.nova-lite-v1:0": "",
-          "us.amazon.nova-pro-v1:0": "",
-          "us.amazon.nova-premier-v1:0": "",
-          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
-          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
-        }
+        "aliasId": ""
       },
-      "goal_template": "Produce insights and suggestions from the health knowledge base and from the log. Do that analysis; do not echo the request back. The lookups have already been run. Read tool_results.query_health_record first: queries is what was searched, excerpts have content and sourceKey. An error key means that lookup did not happen; found false means nothing relevant was retrieved. If nothing useful came back, the summary says what was searched and that those searches returned nothing, data_gaps states that as an observation, and insights and suggestions use only what the person reported — evidence.source is request.experiencing and evidence.value is their words. Do not invent results, dates, or sources. Each insight has a title, a finding, evidence with source, date, and value, significance of low, moderate, or high, and confidence of low, medium, or high. Say what changed over time, what is out of range, and what moved since the last period, and only where a passage supports it. Each suggestion has an action, a rationale, the linked insight title, a priority of high, medium, or low, and a timeframe. Suggestions are specific next actions, never a medicine, a dose, or stopping one. State assumptions in data_gaps as observations. follow_ups has at most two optional items and is never the substance. A list of questions is not an insight and not a suggestion. safety_note is one short sentence: this is not a diagnosis and not a substitute for care. If anything should be seen urgently, set seek_care_now and lead the summary with being seen now.",
+      "goal_template": "Produce insights and suggestions from the health knowledge base and from the log. Do that analysis; do not echo the request back. The lookups have already been run. Read tool_results.query_health_record first: queries is what was searched, excerpts have content and sourceKey. An error key means that lookup did not happen; found false means nothing relevant was retrieved. If nothing useful came back, the summary says what was searched and that those searches returned nothing, data_gaps states that as an observation, and insights and suggestions use only what the person reported \u2014 evidence.source is request.experiencing and evidence.value is their words. Do not invent results, dates, or sources. Each insight has a title, a finding, evidence with source, date, and value, significance of low, moderate, or high, and confidence of low, medium, or high. Say what changed over time, what is out of range, and what moved since the last period, and only where a passage supports it. Each suggestion has an action, a rationale, the linked insight title, a priority of high, medium, or low, and a timeframe. Suggestions are specific next actions, never a medicine, a dose, or stopping one. State assumptions in data_gaps as observations. follow_ups has at most two optional items and is never the substance. A list of questions is not an insight and not a suggestion. safety_note is one short sentence: this is not a diagnosis and not a substitute for care. If anything should be seen urgently, set seek_care_now and lead the summary with being seen now.",
       "schema_ref": "health_insights_v1"
     }
   ],
@@ -123,7 +105,7 @@
     }
   },
   "request_schema": {
-    "summary": "Describe what you are experiencing. You get insights and suggestions grounded in your health records, with the dates and sources they come from — never a diagnosis, and not a list of questions. Follow-up turns in the same chat revise the last answer rather than starting over.",
+    "summary": "Describe what you are experiencing. You get insights and suggestions grounded in your health records, with the dates and sources they come from \u2014 never a diagnosis, and not a list of questions. Follow-up turns in the same chat revise the last answer rather than starting over.",
     "fields": [
       {
         "name": "experiencing",
@@ -144,7 +126,7 @@
         "label": "Change to make",
         "type": "text",
         "required": false,
-        "placeholder": "Only on a follow-up — what to change about the last answer"
+        "placeholder": "Only on a follow-up \u2014 what to change about the last answer"
       },
       {
         "name": "previous_output",

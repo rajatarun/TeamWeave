@@ -39,7 +39,10 @@ def _get_db_secret() -> dict:
 
 
 def _embed_text(text: str) -> Optional[List[float]]:
-    model_id = os.environ.get("VECTOR_EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v1").strip()
+    # Explicit pgvector embeddings run only when this is set. The embeddings
+    # category is Nova multimodal and takes a different request body, so this
+    # path does not borrow that id.
+    model_id = os.environ.get("VECTOR_EMBEDDING_MODEL_ID", "").strip()
     if not model_id or not text.strip():
         return None
 

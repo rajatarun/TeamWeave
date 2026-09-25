@@ -34,19 +34,10 @@
       "name": "Triage",
       "role_id": "PBM-001",
       "department_id": "DEPT-001",
+      "model_category": "planning",
       "bedrock": {
         "agentId": "",
-        "aliasId": "",
-        "model_id": "us.amazon.nova-lite-v1:0",
-        "shadow_model_id": "us.amazon.nova-pro-v1:0",
-        "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "",
-          "us.amazon.nova-lite-v1:0": "",
-          "us.amazon.nova-pro-v1:0": "",
-          "us.amazon.nova-premier-v1:0": "",
-          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
-          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
-        }
+        "aliasId": ""
       },
       "goal_template": "Decide what they actually asked, and do not hand their words back. A brain dump is sorted: each item to today, this week, someone else's, or dropped, with a one-line reason for every drop and delegation. A request to plan, explore, or decide is not a dump \u2014 set intent to plan or explore, put a one-sentence reading of the ask in read_as (not their paragraph copied), and put in today and this_week only the concrete next actions that fall out of that work. If the ask is vague, record the assumption instead of guessing silently.",
       "schema_ref": "day_triage_v1"
@@ -56,19 +47,10 @@
       "name": "Day Planner",
       "role_id": "PBM-003",
       "department_id": "DEPT-003",
+      "model_category": "planning",
       "bedrock": {
         "agentId": "",
-        "aliasId": "",
-        "model_id": "us.amazon.nova-lite-v1:0",
-        "shadow_model_id": "us.amazon.nova-pro-v1:0",
-        "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "",
-          "us.amazon.nova-lite-v1:0": "",
-          "us.amazon.nova-pro-v1:0": "",
-          "us.amazon.nova-premier-v1:0": "",
-          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
-          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
-        }
+        "aliasId": ""
       },
       "goal_template": "Produce the thing they asked for. the_one_thing is the decision or the single next move, not their sentence rewritten. work is the substance: the plan, the options you explored, or the day laid out, specific enough to act on without re-reading what they typed. blocks are the sequence. why_that_one says why this beats the alternatives. if_the_day_goes_wrong is the reduced version when half the time disappears. If they dumped tasks, schedule those. If they asked to plan or explore something else, that exploration is work \u2014 do not shoehorn it into a copy of their prompt.",
       "schema_ref": "day_plan_v1"

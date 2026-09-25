@@ -61,7 +61,17 @@ def _image_prompt(agent, step_inputs: Dict[str, Any]) -> str:
     return " ".join(p for p in parts if p)
 
 
-def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any]) -> Dict[str, Any]:
+def _image_choice(agent):
+    """The image model comes from the map. A model_id on the agent is an override."""
+    from .model_map import resolve_model
+    category = getattr(agent, "model_category", "") or "image_generation"
+    if category == "default":
+        category = "image_generation"
+    return resolve_model(category, override=getattr(agent.bedrock, "model_id", "") or "")
+
+
+def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any],
+                    team: str = "") -> Dict[str, Any]:
     """An image step's output: a reference, never the bytes.
 
     A base64 PNG is far past Step Functions' 256 KB state limit, and every
@@ -69,8 +79,18 @@ def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any
     the whole run at the state transition, after paying for the image.
     """
     prompt = _image_prompt(agent, step_inputs)
-    declared = getattr(agent.bedrock, "model_id", "") or ""
-    provider = (getattr(agent.bedrock, "image_provider", "") or "bedrock").lower()
+    choice = _image_choice(agent)
+    declared = choice.model_id
+    # The map's provider wins. An explicit image_provider that is not the
+    # default still overrides, and that override is logged.
+    provider = choice.provider
+    explicit = (getattr(agent.bedrock, "image_provider", "") or "").lower()
+    if explicit and explicit != "bedrock" and explicit != provider:
+        log.warning(
+            "model_id_override",
+            extra={"agent": getattr(agent, "id", ""), "image_provider": explicit, "map_provider": provider},
+        )
+        provider = explicit
     # One seam, two services. Everything around it -- the prompt, the S3
     # write, the presign, the degrade, the schema -- is provider-independent
     # and stays here; the provider answers only "prompt in, bytes out".
@@ -95,6 +115,7 @@ def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any
             "image_step_failed step=%s run_id=%s model=%s err=%s",
             step_id, run_id, generator.model_id(declared), str(exc)[:300],
         )
+        _emit_image_selection(agent, team, run_id, choice, success=False, error=str(exc)[:200])
         return {
             "image_uri": "",
             "image_url": "",
@@ -114,6 +135,7 @@ def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any
         summary=request_text((step_inputs or {}).get("request")),
     )
     log.info("image_step_complete step=%s run_id=%s uri=%s", step_id, run_id, uri)
+    _emit_image_selection(agent, team, run_id, choice, success=True)
     return {
         "image_uri": uri,
         # A browser cannot open an s3:// URI, so the run would produce an
@@ -127,6 +149,25 @@ def _run_image_step(agent, step_id: str, run_id: str, step_inputs: Dict[str, Any
         "content_type": content_type,
         "provider": provider,
     }
+
+
+def _emit_image_selection(agent, team, run_id, choice, *, success: bool, error: str = "") -> None:
+    from .model_map import emit_model_event, estimate_cost
+
+    emit_model_event({
+        "agent": getattr(agent, "id", ""),
+        "team": team,
+        "run_id": run_id,
+        "category": choice.category,
+        "model_id": choice.model_id,
+        "fallback_used": False,
+        "success": success,
+        "error": error,
+        "result_quality": "image" if success else "",
+        "estimated_cost_usd": estimate_cost(choice.model_id, images=1) if success else 0,
+        "cost_tier": choice.cost_tier,
+        "record_kind": "invocation",
+    })
 
 
 def _load_step_schema(team_raw: Dict[str, Any], schema_ref: str) -> Optional[Dict[str, Any]]:
@@ -257,6 +298,7 @@ def _invoke_with_dpo(
             qualifier=agent.bedrock.qualifier,
             team=team,
             model_id=agent.bedrock.model_id,
+            model_category=getattr(agent, "model_category", "") or "default",
         )
 
     return dpo_collector.collect_dpo_step(
@@ -365,7 +407,7 @@ def run_team_pipeline(
         # AgentCore runtime program speaks. It runs through bedrock_image and
         # rejoins the pipeline with an ordinary schema-shaped step output.
         if getattr(agent.bedrock, "modality", "text") == "image":
-            out_json = _run_image_step(agent, step_id, run_id, step_inputs)
+            out_json = _run_image_step(agent, step_id, run_id, step_inputs, team=team)
             out_json = execute_post_tools(step_def, out_json, step_inputs)
             artifact_uri = save_artifact(run_id, step_id, out_json, summary=run_summary)
             dao.put_step(run_id, step_id, "SUCCEEDED", step_inputs, out_json,
@@ -414,6 +456,7 @@ def run_team_pipeline(
                 qualifier=agent.bedrock.qualifier,
                 team=team,
                 model_id=agent.bedrock.model_id,
+                model_category=getattr(agent, "model_category", "") or "default",
             )
 
         try:
@@ -468,6 +511,24 @@ def run_team_pipeline(
 
         # ── Post-tools — enrich/transform agent output after schema coercion ─
         out_json = execute_post_tools(step_def, out_json, step_inputs)
+        from .model_map import emit_model_event, resolve_model
+        _choice = resolve_model(
+            getattr(agent, "model_category", "") or "default",
+            override=agent.bedrock.model_id,
+        )
+        emit_model_event({
+            "agent": agent.id,
+            "team": team,
+            "run_id": run_id,
+            "category": _choice.category,
+            "model_id": _choice.model_id,
+            "fallback_used": False,
+            "success": True,
+            "result_quality": "schema_valid" if schema_valid else "repair_needed",
+            "estimated_cost_usd": 0,
+            "cost_tier": _choice.cost_tier,
+            "record_kind": "quality",
+        })
 
         artifact_uri = save_artifact(run_id, step_id, out_json, summary=run_summary)
         dao.put_step(

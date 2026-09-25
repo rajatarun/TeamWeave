@@ -103,7 +103,7 @@ def gemini_research_brief(feats: Dict[str, Any], request_obj: Dict[str, Any], co
         log.warning("Gemini enabled but GEMINI_SECRET_ARN missing/empty")
         return ""
 
-    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+    model = _research_model()
     url = GEMINI_ENDPOINT.format(model=model)
 
     topic = request_obj.get("topic", "")
@@ -142,3 +142,58 @@ def gemini_research_brief(feats: Dict[str, Any], request_obj: Dict[str, Any], co
         return ""
     parts = (((cands[0] or {}).get("content") or {}).get("parts") or [])
     return "".join([p.get("text", "") for p in parts if isinstance(p, dict)]).strip()
+
+
+def _research_model() -> str:
+    """The research_web model. GEMINI_MODEL is an override and is logged."""
+    from .model_map import resolve_model
+
+    chosen = resolve_model("research_web")
+    override = os.environ.get("GEMINI_MODEL", "").strip()
+    if override and override != chosen.model_id:
+        log.warning(
+            "model_id_override",
+            extra={"category": "research_web", "model_id": override},
+        )
+        return override
+    return chosen.model_id
+
+
+def generate_text(prompt: str, *, model: str, max_tokens: int = 2048,
+                  temperature: float = 0) -> Dict[str, Any]:
+    """One Gemini text completion. Raises ModelUnavailable when the next model should run."""
+    from .model_map import ModelUnavailable
+
+    api_key = _get_gemini_key()
+    if not api_key:
+        raise ModelUnavailable("GEMINI_SECRET_ARN is empty")
+    url = GEMINI_ENDPOINT.format(model=model)
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "temperature": temperature,
+        },
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")[:300]
+        if exc.code in {404, 429, 503} or "not found" in detail.lower() or "model" in detail.lower():
+            raise ModelUnavailable(f"Gemini HTTP {exc.code}: {detail}") from exc
+        raise
+    usage = data.get("usageMetadata") or {}
+    parts = ((((data.get("candidates") or [{}])[0]).get("content") or {}).get("parts") or [])
+    text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+    return {
+        "text": text,
+        "prompt_tokens": int(usage.get("promptTokenCount") or 0),
+        "completion_tokens": int(usage.get("candidatesTokenCount") or 0),
+    }
