@@ -40,7 +40,6 @@ from .logger import get_logger
 
 log = get_logger("bedrock_image")
 
-DEFAULT_MODEL_ID = "amazon.nova-canvas-v1:0"
 # Nova Canvas and Titan Image both cap the prompt; over it the call is
 # rejected outright rather than truncated for you.
 MAX_PROMPT_CHARS = 1024
@@ -57,8 +56,7 @@ def model_id(declared: str = "") -> str:
     text agents told when `AGENT_MODEL_ID` was read only from the runtime's
     environment. Editing the config then changes nothing and says nothing.
     """
-    return (declared or "").strip() or (os.environ.get("IMAGE_MODEL_ID") or "").strip() \
-        or DEFAULT_MODEL_ID
+    return (declared or "").strip() or (os.environ.get("IMAGE_MODEL_ID") or "").strip()
 
 
 def _client():

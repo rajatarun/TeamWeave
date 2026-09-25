@@ -137,7 +137,12 @@ def search_one(query: str, *, retrieved_on: Optional[str] = None, post=None) -> 
     if not text:
         return {"error": "a query is required"}
     day = _retrieved_on(retrieved_on)
-    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+    from .model_map import resolve_model
+    model = resolve_model("research_web").model_id
+    override = os.environ.get("GEMINI_MODEL", "").strip()
+    if override and override != model:
+        log.warning("model_id_override", extra={"category": "research_web", "model_id": override})
+        model = override
     url = _ENDPOINT.format(model=model)
     body = {
         "contents": [{"parts": [{"text": (

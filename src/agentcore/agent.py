@@ -18,7 +18,6 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-DEFAULT_MODEL_ID = "us.amazon.nova-micro-v1:0"
 DEFAULT_MAX_TOKENS = 4096
 # What a Classic agent carried as its instruction. The per-agent part -- role,
 # step goal, output contract -- is already composed into the prompt by
@@ -70,6 +69,24 @@ def extract_prompt(payload: Any) -> str:
     return ""
 
 
+def default_model_id(env: Optional[Dict[str, str]] = None) -> str:
+    """The model when the payload names none.
+
+    AGENT_MODEL_ID is the stack override. Otherwise the model map's default
+    category. The deployed zip does not carry the map; the template sets
+    AGENT_MODEL_ID to that same default so the two agree.
+    """
+    env = env if env is not None else os.environ
+    explicit = (env.get("AGENT_MODEL_ID") or "").strip()
+    if explicit:
+        return explicit
+    try:
+        from src.orchestrator.model_map import resolve_model
+        return resolve_model("default").model_id
+    except Exception:
+        return ""
+
+
 def _text_from_converse(response: Dict[str, Any]) -> str:
     blocks = (((response or {}).get("output") or {}).get("message") or {}).get("content") or []
     return "".join(b.get("text", "") for b in blocks if isinstance(b, dict)).strip()
@@ -105,18 +122,28 @@ def run_turn(payload: Any, *, client=None, env: Optional[Dict[str, str]] = None)
     if isinstance(payload, dict):
         model_id = str(payload.get("modelId") or payload.get("model_id") or "").strip()
     if not model_id:
-        model_id = (env.get("AGENT_MODEL_ID") or "").strip()
-    if not model_id:
-        model_id = DEFAULT_MODEL_ID
-    try:
-        max_tokens = int(env.get("AGENT_MAX_TOKENS") or DEFAULT_MAX_TOKENS)
-    except ValueError:
-        max_tokens = DEFAULT_MAX_TOKENS
+        model_id = default_model_id(env)
+    temperature = 0.0
+    if isinstance(payload, dict) and payload.get("temperature") is not None:
+        try:
+            temperature = float(payload.get("temperature"))
+        except (TypeError, ValueError):
+            temperature = 0.0
+    if isinstance(payload, dict) and payload.get("maxTokens"):
+        try:
+            max_tokens = int(payload.get("maxTokens"))
+        except (TypeError, ValueError):
+            max_tokens = DEFAULT_MAX_TOKENS
+    else:
+        try:
+            max_tokens = int(env.get("AGENT_MAX_TOKENS") or DEFAULT_MAX_TOKENS)
+        except ValueError:
+            max_tokens = DEFAULT_MAX_TOKENS
 
     request: Dict[str, Any] = {
         "modelId": model_id,
         "messages": [{"role": "user", "content": [{"text": prompt}]}],
-        "inferenceConfig": {"maxTokens": max_tokens, "temperature": 0},
+        "inferenceConfig": {"maxTokens": max_tokens, "temperature": temperature},
     }
     if instruction:
         request["system"] = [{"text": instruction}]

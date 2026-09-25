@@ -17,7 +17,7 @@ env:
   SHARED_STACK_NAME: tarun-teamweave-shared
   BEDROCK_AGENTS_STACK_NAME: tarun-bedrock-agents
   CONTEXTWEAVE_STACK_NAME: contextweave-rag-prod
-  FOUNDATION_MODEL_ID: amazon.nova-micro-v1:0
+  FOUNDATION_MODEL_ID: deepseek.v3.2
   AGENT_SERVICE_ROLE_ARN: arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
   TEAM_CONFIG_PREFIX: teams
   VECTOR_DB_TABLE: resume-rag-db

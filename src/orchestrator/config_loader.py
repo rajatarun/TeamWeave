@@ -72,13 +72,26 @@ def load_team_config(team: str, version: str) -> Tuple[TeamConfig, Dict[str, Any
     agents = []
     for a in doc.get("agents", []):
         br = a.get("bedrock") or {}
+        category = str(a.get("model_category") or br.get("model_category") or "").strip()
+        if not category:
+            log.warning(
+                "agent_missing_model_category",
+                extra={"team": team, "agent": a.get("id", "")},
+            )
+            category = "default"
+        override = str(br.get("model_id") or "").strip()
+        if override:
+            log.warning(
+                "model_id_override",
+                extra={"team": team, "agent": a.get("id", ""), "category": category, "model_id": override},
+            )
         agents.append(AgentConfig(
             id=a["id"],
             name=a.get("name", a["id"]),
             bedrock=BedrockRef(
                 agentId=br.get("agentId",""),
                 aliasId=br.get("aliasId",""),
-                model_id=br.get("model_id", "us.amazon.nova-micro-v1:0"),
+                model_id=override,
                 shadow_model_id=br.get("shadow_model_id", ""),
                 model_aliases=br.get("model_aliases", {}),
                 runtimeArn=br.get("runtimeArn", ""),
@@ -88,6 +101,7 @@ def load_team_config(team: str, version: str) -> Tuple[TeamConfig, Dict[str, Any
             ),
             goal_template=a.get("goal_template",""),
             schema_ref=a.get("schema_ref",""),
+            model_category=category,
         ))
 
     tc = TeamConfig(

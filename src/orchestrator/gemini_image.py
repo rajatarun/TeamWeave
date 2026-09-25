@@ -1,9 +1,9 @@
 """Image generation through the Gemini API, as an alternative provider.
 
 Bedrock refused the illustration twice for reasons that had nothing to do with
-this code: `amazon.nova-canvas-v1:0` is a real id the account has no active
-access to, and `amazon.nova-canvas-v2:0` does not exist. Model access there is
-granted per model in a console. The Gemini key is already in Secrets Manager,
+this code: a real Canvas id the account has no active access to, and a Canvas
+id that does not exist. Model access there is granted per model in a console.
+The Gemini key is already in Secrets Manager,
 already read by `gemini.py`, and already reaching
 `generativelanguage.googleapis.com` out of the VPC for the research brief --
 so this path is blocked by nothing that is not already unblocked.
@@ -40,7 +40,6 @@ log = get_logger("gemini_image")
 GENERATE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 LIST_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models"
 
-DEFAULT_MODEL = "gemini-3.1-flash-lite-image"
 # The research brief uses 40 s; an image is slower but the worker's remaining
 # budget is the real ceiling -- see deadline.py and the caller.
 DEFAULT_TIMEOUT = 90
@@ -52,9 +51,25 @@ KNOWN_FAMILIES = ("gemini-",)
 
 
 def model_id(declared: str = "") -> str:
-    """Most specific first: the member's, then the stack's, then a default."""
-    return (declared or "").strip() or (os.environ.get("GEMINI_IMAGE_MODEL") or "").strip() \
-        or DEFAULT_MODEL
+    """Most specific first: the member's, then a stack override, then the map.
+
+    GEMINI_IMAGE_MODEL is an override and is logged when it differs from the
+    image_generation category. An empty value leaves the map in charge.
+    """
+    explicit = (declared or "").strip()
+    if explicit:
+        return explicit
+    from .model_map import resolve_model
+
+    chosen = resolve_model("image_generation").model_id
+    override = (os.environ.get("GEMINI_IMAGE_MODEL") or "").strip()
+    if override and override != chosen:
+        log.warning(
+            "model_id_override",
+            extra={"category": "image_generation", "model_id": override},
+        )
+        return override
+    return chosen
 
 
 def knows_shape(model: str) -> bool:

@@ -37,19 +37,10 @@
       "name": "Portfolio Log",
       "role_id": "PBM-001",
       "department_id": "DEPT-001",
+      "model_category": "finance",
       "bedrock": {
         "agentId": "",
-        "aliasId": "",
-        "model_id": "us.amazon.nova-lite-v1:0",
-        "shadow_model_id": "us.amazon.nova-pro-v1:0",
-        "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "",
-          "us.amazon.nova-lite-v1:0": "",
-          "us.amazon.nova-pro-v1:0": "",
-          "us.amazon.nova-premier-v1:0": "",
-          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
-          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
-        }
+        "aliasId": ""
       },
       "goal_template": "Turn the focus, the portfolio knowledge base, and the web search into a log of evidence. The lookups have already been run. Do not echo the request. Read tool_results.query_portfolio and tool_results.web_search first. query_portfolio.queries is what was searched: holdings, allocation, cost basis, performance, and risk. excerpts have content and sourceKey. web_search.results have url, title, snippet, and retrieved_on. An error key means that lookup did not happen. found false means nothing relevant came back. A query entry with its own error did not happen; the other queries still count. Neither is holdings or prices you may supply. Copy the portfolio query strings into searched and the web query strings into web_searched. Put each passage or page you rely on into evidence: source is the sourceKey or the url, date is the date the passage states or retrieved_on for the web, value is the figure, kind is portfolio or web. data_gaps are observations about what those searches did not contain, written as statements. A list of questions is not a log. Do not invent holdings, prices, rates, or headlines. Do not claim a guaranteed return.",
       "schema_ref": "financial_record_v1"
@@ -59,19 +50,10 @@
       "name": "Financial Insights",
       "role_id": "PBM-003",
       "department_id": "DEPT-003",
+      "model_category": "finance",
       "bedrock": {
         "agentId": "",
-        "aliasId": "",
-        "model_id": "us.amazon.nova-lite-v1:0",
-        "shadow_model_id": "us.amazon.nova-pro-v1:0",
-        "model_aliases": {
-          "us.amazon.nova-micro-v1:0": "",
-          "us.amazon.nova-lite-v1:0": "",
-          "us.amazon.nova-pro-v1:0": "",
-          "us.amazon.nova-premier-v1:0": "",
-          "us.anthropic.claude-3-haiku-20240307-v1:0": "",
-          "us.anthropic.claude-3-5-haiku-20241022-v1:0": ""
-        }
+        "aliasId": ""
       },
       "goal_template": "Produce insights and suggestions from the portfolio knowledge base, the web results, and the log. Do that analysis; do not echo the request back. Plan, explore, and compare. The lookups have already been run. Read tool_results.query_portfolio and tool_results.web_search first. The portfolio queries are holdings, allocation, cost basis, performance, and risk. Portfolio excerpts have content and sourceKey. Web results have url and retrieved_on. An error key means that lookup did not happen; found false means nothing relevant was retrieved. If the portfolio search returned nothing, the summary says what was searched and that those searches returned nothing, data_gaps states that as an observation, and you do not invent holdings. If the web search returned nothing or carries error, do not invent prices, rates, or headlines. Each insight has a title, a finding, evidence with source, date, value, and kind of portfolio or web, significance of low, moderate, or high, and confidence of low, medium, or high. A holding or figure from an upload cites sourceKey. A price, rate, or headline from the web cites url and uses retrieved_on as the date. Each suggestion has an action, a rationale, the linked insight title, a priority of high, medium, or low, and a timeframe. State assumptions in data_gaps as observations. follow_ups has at most two optional items and is never the substance. A list of questions is not an insight and not a suggestion. safety_note is one short sentence: this is not personalized financial advice; do your own research. Do not claim a guaranteed return.",
       "schema_ref": "financial_insights_v1"
@@ -160,7 +142,7 @@
         "label": "Change to make",
         "type": "text",
         "required": false,
-        "placeholder": "Only on a follow-up — what to change about the last answer"
+        "placeholder": "Only on a follow-up \u2014 what to change about the last answer"
       },
       {
         "name": "previous_output",

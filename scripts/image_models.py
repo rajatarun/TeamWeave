@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Which image models this account can actually call.
 
-Two deploys were spent guessing model ids. `amazon.nova-canvas-v1:0` came back
-*"marked by provider as Legacy and you have not been actively using the model
-in the last 30 days"* -- a real id the account has no active access to -- and
-`amazon.nova-canvas-v2:0` came back *"The provided model identifier is
-invalid"*, which is an id that does not exist at all. Those are different
+Two deploys were spent guessing model ids. One real Canvas id came back
+marked Legacy because the account had no active access, and another Canvas
+id came back as an identifier that does not exist. Those are different
 problems with the same symptom, and neither is answerable from a model
 catalogue held in someone's memory.
 

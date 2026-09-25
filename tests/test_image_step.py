@@ -108,9 +108,11 @@ def test_the_body_applies_the_cap():
 # ── the response ────────────────────────────────────────────────────────────
 
 def test_the_image_comes_back_as_bytes():
-    result = bedrock_image.generate("p", client=FakeBedrock())
+    result = bedrock_image.generate(
+        "p", declared_model_id="amazon.nova-canvas-v1:0", client=FakeBedrock(),
+    )
     assert result["bytes"] == PNG
-    assert result["model_id"] == bedrock_image.DEFAULT_MODEL_ID
+    assert result["model_id"] == "amazon.nova-canvas-v1:0"
 
 
 def test_a_filtered_response_raises_rather_than_writing_an_empty_object():
@@ -122,12 +124,17 @@ def test_a_filtered_response_raises_rather_than_writing_an_empty_object():
     """
     fake = FakeBedrock(payload={"error": "blocked by content filter"})
     with pytest.raises(RuntimeError, match="content filter"):
-        bedrock_image.generate("p", client=fake)
+        bedrock_image.generate(
+            "p", declared_model_id="amazon.nova-canvas-v1:0", client=fake,
+        )
 
 
 def test_an_empty_image_list_is_also_an_error():
     with pytest.raises(RuntimeError, match="no image"):
-        bedrock_image.generate("p", client=FakeBedrock(payload={"images": []}))
+        bedrock_image.generate(
+            "p", declared_model_id="amazon.nova-canvas-v1:0",
+            client=FakeBedrock(payload={"images": []}),
+        )
 
 
 def test_the_model_id_is_configurable(monkeypatch):
@@ -139,7 +146,10 @@ def test_the_model_id_is_configurable(monkeypatch):
 
 def test_the_call_declares_json_content_types():
     capture = {}
-    bedrock_image.generate("p", client=FakeBedrock(capture=capture))
+    bedrock_image.generate(
+        "p", declared_model_id="amazon.nova-canvas-v1:0",
+        client=FakeBedrock(capture=capture),
+    )
     assert capture["contentType"] == "application/json"
     assert capture["accept"] == "application/json"
     json.loads(capture["body"])  # body must be serialised, not a dict
@@ -585,8 +595,11 @@ def test_the_shipped_config_parses_with_its_provider(monkeypatch):
         f"parsed provider was {illustrator.bedrock.image_provider!r}; a Gemini "
         "model would be sent to Bedrock"
     )
-    # And the pairing survives the parse, not just the file.
-    assert illustrator.bedrock.model_id.startswith("gemini-")
+    assert illustrator.model_category == "image_generation"
+    from src.orchestrator.model_map import resolve_model
+    choice = resolve_model(illustrator.model_category)
+    assert choice.provider == "gemini"
+    assert choice.model_id.startswith("gemini-")
 
 
 def test_a_text_member_never_parses_as_an_image_provider(monkeypatch):
