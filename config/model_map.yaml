@@ -2,24 +2,24 @@
 # Change a price or a model here. Team configs name a category, not an id.
 # Prices are us-east-1 on-demand, checked 2026-09-25.
 # Claude rates are the provider rates Bedrock bills (Anthropic pricing).
+# Sonnet 4.6's US geo profile is a regional endpoint, so the stored price is
+# the $3/$15 base plus the documented 10% regional premium ($3.30/$16.50).
 # DeepSeek is the rate on the AWS Bedrock pricing page for N. Virginia.
 # Gemini rates are the Gemini API paid tier (introductory through 2026-12-31
 # for 3.8 Flash).
+# Claude Sonnet 5 and Claude Opus 5 are unavailable on this account.
+# resolve_model refuses the ids below, including as an override.
 price_checked: "2026-09-25"
 
+unavailable:
+  - us.anthropic.claude-sonnet-5
+  - us.anthropic.claude-opus-5
+
 models:
-  us.anthropic.claude-sonnet-5:
-    provider: bedrock
-    cost_per_1m_input: 2.0
-    cost_per_1m_output: 10.0
-    cost_tier: standard
-    latency_tier: fast
-    price_source: https://platform.claude.com/docs/en/about-claude/pricing
-    price_checked: "2026-09-25"
   us.anthropic.claude-sonnet-4-6:
     provider: bedrock
-    cost_per_1m_input: 3.0
-    cost_per_1m_output: 15.0
+    cost_per_1m_input: 3.30
+    cost_per_1m_output: 16.50
     cost_tier: standard
     latency_tier: fast
     price_source: https://platform.claude.com/docs/en/about-claude/pricing
@@ -30,14 +30,6 @@ models:
     cost_per_1m_output: 5.0
     cost_tier: low
     latency_tier: fastest
-    price_source: https://platform.claude.com/docs/en/about-claude/pricing
-    price_checked: "2026-09-25"
-  us.anthropic.claude-opus-5:
-    provider: bedrock
-    cost_per_1m_input: 5.0
-    cost_per_1m_output: 25.0
-    cost_tier: high
-    latency_tier: medium
     price_source: https://platform.claude.com/docs/en/about-claude/pricing
     price_checked: "2026-09-25"
   deepseek.v3.2:
@@ -84,31 +76,32 @@ models:
 
 categories:
   coding:
-    primary: us.anthropic.claude-sonnet-5
+    primary: us.anthropic.claude-sonnet-4-6
     fallbacks:
       - us.anthropic.claude-haiku-4-5-20251001-v1:0
       - deepseek.v3.2
+      - gemini-3.8-flash
     max_tokens: 8192
     temperature: 0
     cost_tier: standard
     rationale: >
-      Sonnet 5 is the current coding Sonnet and costs $2/$10, which is less
-      than Sonnet 4.6 ($3/$15) and Opus 5 ($5/$25). Opus is not the primary:
-      Sonnet 5 is the model Anthropic positions for coding, at less than half
-      Opus's price. Haiku 4.5 then DeepSeek V3.2 are the availability
-      fallbacks.
+      This account can call Claude Sonnet 4.6, and that is the coding model.
+      The US geo profile is $3.30/$16.50 per million tokens. Haiku 4.5, then
+      DeepSeek V3.2, then Gemini 3.8 Flash are the fallbacks this account
+      can reach.
   planning:
-    primary: us.anthropic.claude-sonnet-5
+    primary: us.anthropic.claude-sonnet-4-6
     fallbacks:
       - us.anthropic.claude-haiku-4-5-20251001-v1:0
       - deepseek.v3.2
+      - gemini-3.8-flash
     max_tokens: 8192
     temperature: 0
     cost_tier: standard
     rationale: >
       Planning is one of the categories where quality is worth paying for.
-      Sonnet 5 is near-Opus at $2/$10 versus Opus 5 at $5/$25, so Opus stays
-      off this path. Haiku then DeepSeek cover a throttle or a missing grant.
+      Sonnet 4.6 is the careful model this account can call. Haiku 4.5, then
+      DeepSeek V3.2, then Gemini 3.8 Flash cover a throttle or a missing grant.
   research_web:
     primary: gemini-3.8-flash
     fallbacks:
@@ -120,46 +113,48 @@ categories:
     rationale: >
       Gemini 3.8 Flash is the research model this stack already calls, and
       its introductory price through 31 Dec 2026 is $0.75/$3.75, below
-      Sonnet 5. The orchestrator can call it with the existing Gemini secret.
+      Sonnet 4.6. The orchestrator can call it with the existing Gemini secret.
       A missing key or a throttle falls through to DeepSeek, then Haiku.
   finance:
-    primary: us.anthropic.claude-sonnet-5
+    primary: us.anthropic.claude-sonnet-4-6
     fallbacks:
       - us.anthropic.claude-haiku-4-5-20251001-v1:0
       - deepseek.v3.2
+      - gemini-3.8-flash
     max_tokens: 8192
     temperature: 0
     cost_tier: standard
     rationale: >
       A financial insight that invents a holding is worse than a slow one.
-      Sonnet 5 is the quality pick. It is still cheaper than Sonnet 4.6 and
-      Opus 5, so the frontier price is not what this category pays.
+      Sonnet 4.6 is the careful model this account can call, at the US geo
+      rate of $3.30/$16.50. Haiku, DeepSeek, and Gemini are the fallbacks.
   health_medical:
-    primary: us.anthropic.claude-sonnet-5
+    primary: us.anthropic.claude-sonnet-4-6
     fallbacks:
       - us.anthropic.claude-haiku-4-5-20251001-v1:0
       - deepseek.v3.2
+      - gemini-3.8-flash
     max_tokens: 8192
     temperature: 0
     cost_tier: standard
     rationale: >
-      Health answers have to follow the schema's safety rules. Sonnet 5 is
-      the careful model at the best price in the current Sonnet line. Haiku
-      is the first fallback so a throttle still lands on an instruction-
-      following model rather than the cheapest one.
+      Health answers have to follow the schema's safety rules. Sonnet 4.6 is
+      the careful model this account can call. Haiku is the first fallback so
+      a throttle still lands on an instruction-following model. DeepSeek and
+      Gemini 3.8 Flash follow it.
   writing_creative:
     primary: us.anthropic.claude-haiku-4-5-20251001-v1:0
     fallbacks:
-      - us.anthropic.claude-sonnet-5
+      - us.anthropic.claude-sonnet-4-6
       - deepseek.v3.2
     max_tokens: 4096
     temperature: 0.4
     cost_tier: low
     rationale: >
       Publishable prose needs care, and Haiku 4.5 is Anthropic's near-frontier
-      fast model at $1/$5, half of Sonnet 5. Writing is not one of the
-      categories that justify the Sonnet price on every turn. Sonnet 5 is the
-      fallback when Haiku is throttled or not enabled.
+      fast model at $1/$5. Writing is not one of the categories that justify
+      the Sonnet price on every turn. Sonnet 4.6 is the fallback when Haiku
+      is throttled or not enabled, then DeepSeek.
   summarization:
     primary: gemini-3.1-flash-lite
     fallbacks:
@@ -176,14 +171,15 @@ categories:
     primary: deepseek.v3.2
     fallbacks:
       - us.anthropic.claude-haiku-4-5-20251001-v1:0
-      - us.anthropic.claude-sonnet-5
+      - us.anthropic.claude-sonnet-4-6
     max_tokens: 8192
     temperature: 0
     cost_tier: low
     rationale: >
-      DeepSeek V3.2 is $0.62/$1.85 on us-east-1, a third of Sonnet 5's input
-      price, and it is a strong analysis model. Sonnet 5 is the last fallback
-      for a hard comparison, not the model every fit-read pays for.
+      DeepSeek V3.2 is $0.62/$1.85 on us-east-1, about a fifth of Sonnet 4.6's
+      US geo input price, and it is a strong analysis model. Sonnet 4.6 is
+      the last fallback for a hard comparison, not the model every fit-read
+      pays for.
   customer_support:
     primary: gemini-3.1-flash-lite
     fallbacks:
@@ -211,14 +207,14 @@ categories:
   multimodal_vision:
     primary: gemini-3.8-flash
     fallbacks:
-      - us.anthropic.claude-sonnet-5
+      - us.anthropic.claude-sonnet-4-6
       - us.anthropic.claude-haiku-4-5-20251001-v1:0
     max_tokens: 4096
     temperature: 0
     cost_tier: low
     rationale: >
       Gemini 3.8 Flash accepts images and costs $0.75/$3.75 through 2026.
-      Sonnet 5 also accepts images on Bedrock Converse and is the fallback
+      Sonnet 4.6 also accepts images on Bedrock Converse and is the fallback
       when Gemini cannot be called. No team uses this category yet.
   image_generation:
     primary: gemini-3.1-flash-lite-image
@@ -245,19 +241,20 @@ categories:
   schema_repair:
     primary: us.anthropic.claude-haiku-4-5-20251001-v1:0
     fallbacks:
-      - us.anthropic.claude-sonnet-5
+      - us.anthropic.claude-sonnet-4-6
     max_tokens: 4096
     temperature: 0
     cost_tier: low
     rationale: >
       Repair reshapes an answer into the step schema. Haiku 4.5 supports
-      Converse and is $1/$5. Sonnet 5 is the fallback. The old pinned Haiku
-      3 id is refused by Bedrock as legacy.
+      Converse and is $1/$5. Sonnet 4.6 is the fallback, and it stays on
+      Bedrock because repair calls Converse. The old pinned Haiku 3 id is
+      refused by Bedrock as legacy.
   default:
     primary: deepseek.v3.2
     fallbacks:
       - us.anthropic.claude-haiku-4-5-20251001-v1:0
-      - us.anthropic.claude-sonnet-5
+      - us.anthropic.claude-sonnet-4-6
     max_tokens: 4096
     temperature: 0
     cost_tier: low

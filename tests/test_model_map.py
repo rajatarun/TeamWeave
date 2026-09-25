@@ -86,10 +86,10 @@ def test_an_override_becomes_the_primary_and_is_logged(caplog):
     caplog.set_level(logging.WARNING, logger="model_map")
     choice = resolve_model(
         "writing_creative",
-        override="us.anthropic.claude-sonnet-5",
+        override="us.anthropic.claude-sonnet-4-6",
     )
     assert choice.override is True
-    assert choice.model_id == "us.anthropic.claude-sonnet-5"
+    assert choice.model_id == "us.anthropic.claude-sonnet-4-6"
     assert choice.cost_tier == "standard"
     assert [spec.model_id for spec in choice.fallbacks] == [
         "deepseek.v3.2",
@@ -97,21 +97,54 @@ def test_an_override_becomes_the_primary_and_is_logged(caplog):
     assert any(r.message == "model_id_override" for r in caplog.records)
 
 
+_SONNET_46 = "us.anthropic.claude-sonnet-4-6"
+_UNREACHABLE = (
+    "us.anthropic.claude-sonnet-5",
+    "us.anthropic.claude-opus-5",
+)
+
+
 def test_quality_categories_pay_for_sonnet_and_the_rest_stay_cheap():
     doc = load_model_map()
     expensive = {"coding", "planning", "finance", "health_medical"}
+    reachable = [
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "deepseek.v3.2",
+        "gemini-3.8-flash",
+    ]
     for name in expensive:
-        assert doc["categories"][name]["primary"] == "us.anthropic.claude-sonnet-5"
+        assert doc["categories"][name]["primary"] == _SONNET_46
         assert doc["categories"][name]["cost_tier"] == "standard"
+        assert doc["categories"][name]["fallbacks"] == reachable
     for name, cat in doc["categories"].items():
         if name in expensive:
             continue
         assert cat["cost_tier"] in {"low", "infra"}, name
-        assert cat["primary"] != "us.anthropic.claude-opus-5"
+        assert cat["primary"] != _SONNET_46, name
+
+
+def test_unreachable_models_never_resolve(caplog):
+    logging.getLogger("model_map").propagate = True
+    caplog.set_level(logging.WARNING, logger="model_map")
+    doc = load_model_map()
+    assert set(_UNREACHABLE) <= set(doc["unavailable"])
+    for bad in _UNREACHABLE:
+        assert bad not in doc["models"]
+    for name in doc["categories"]:
+        choice = resolve_model(name)
+        ids = [spec.model_id for spec in choice.chain]
+        for bad in _UNREACHABLE:
+            assert bad not in ids, (name, bad)
+        refused = resolve_model(name, override=_UNREACHABLE[0])
+        assert refused.model_id == choice.model_id
+        assert refused.override is False
+        assert _UNREACHABLE[0] not in [spec.model_id for spec in refused.chain]
+    assert any(r.message == "unavailable_model_refused" for r in caplog.records)
 
 
 def test_estimate_cost_is_tokens_times_the_map_price():
-    assert estimate_cost("us.anthropic.claude-sonnet-5", 1_000_000, 1_000_000) == 12.0
+    # $3.30 input + $16.50 output: base $3/$15 plus the 10% US geo premium.
+    assert estimate_cost(_SONNET_46, 1_000_000, 1_000_000) == 19.8
     assert estimate_cost("deepseek.v3.2", 1_000_000, 1_000_000) == 2.47
     assert estimate_cost("gemini-3.1-flash-lite", 2_000_000, 0) == 0.5
     assert estimate_cost("gemini-3.1-flash-lite-image", images=2) == 0.0672

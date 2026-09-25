@@ -83,8 +83,7 @@ log.setLevel(getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), loggi
 _MODEL_ALIAS_SLUG: dict[str, str] = {
     "deepseek.v3.2":                                "deepseek-v3",
     "us.anthropic.claude-haiku-4-5-20251001-v1:0":  "claude-haiku-4-5",
-    "us.anthropic.claude-sonnet-5":                 "claude-sonnet-5",
-    "us.anthropic.claude-opus-5":                   "claude-opus-5",
+    "us.anthropic.claude-sonnet-4-6":               "claude-sonnet-4-6",
 }
 
 _RETRYABLE_AGENT_STATES = {"PREPARING", "UPDATING", "VERSIONING"}
