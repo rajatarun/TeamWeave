@@ -8,10 +8,10 @@ Called after every agent step in worker_handler.py to:
   2. Enforce voice — rewrite copy fields to Tarun's first-person LinkedIn voice
   3. Enforce schema — ensure all required fields are present and correctly typed
 
-Uses Claude 3.5 Haiku via InvokeModel (direct, not Bedrock Agents).
+Uses the model map's schema_repair category via Converse.
 
 Environment variables:
-  ENRICH_MODEL  — Bedrock model ID (default: us.anthropic.claude-3-5-haiku-20241022-v1:0)
+  ENRICH_MODEL  — override of schema_repair; unset uses the map
   AWS_REGION    — AWS region (default: us-east-1)
 """
 
@@ -22,10 +22,11 @@ from .logger import get_logger
 
 log = get_logger("enrich")
 
-ENRICH_MODEL = os.environ.get(
-    "ENRICH_MODEL",
-    "us.anthropic.claude-3-5-haiku-20241022-v1:0",
-)
+def _default_enrich_model() -> str:
+    from src.orchestrator.model_map import resolve_model
+    return resolve_model("schema_repair").model_id
+
+ENRICH_MODEL = os.environ.get("ENRICH_MODEL", "").strip() or _default_enrich_model()
 
 # Phrases that indicate Nova summarised instead of generating
 _REFUSAL_PHRASES = [

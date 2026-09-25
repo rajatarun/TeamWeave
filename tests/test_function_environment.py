@@ -45,6 +45,14 @@ OPTIONAL = {
     "SCHEMAS_DIR": "defaults to the schemas directory beside the module",
     "GEMINI_LAMBDA_ARN": "optional research integration; empty disables it. Set on the\n                          functions that use it, absent on ProvisionTeamFunction, where\n                          it degrades to off rather than failing",
     "FOUNDATION_MODEL": "has a default model id",
+    "GEMINI_MODEL": "override of the model map's research_web category; unset uses the map",
+    "STRUCTURED_TRANSFORM_MODEL_ID": "empty uses schema_repair; a value is a logged override",
+    "ENRICH_MODEL": "override of schema_repair; unset uses the map",
+    "IMAGE_MODEL_ID": "optional Bedrock image override; empty uses the map",
+    "GEMINI_IMAGE_MODEL": "override of image_generation; unset uses the map",
+    "VECTOR_EMBEDDING_MODEL_ID": "explicit pgvector embeddings run only when set",
+    "MODEL_MAP_PATH": "tests point the loader at a fixture; production uses config/model_map.yaml",
+    "AGENT_MODEL_ID": "set on AgentCore runtimes; the program's last resort when a turn omits modelId",
     "CONTEXTWEAVE_API_KEY": "optional; injected via Secrets Manager, not a parameter",
 }
 

@@ -76,8 +76,13 @@ def test_the_other_personal_teams_are_told_to_produce_the_work():
     assert "retrieved_on" in insights["goal_template"]
 
 
-def test_personal_teams_are_not_left_on_the_smallest_model():
-    """nova-micro is what made a 'do the work' instruction come back as a copy."""
+def test_personal_teams_name_a_model_category():
+    """The model map chooses the id. A missing category would run the default."""
+    from src.orchestrator.model_map import categories
+
+    known = set(categories())
     for name in PERSONAL:
         for agent in _load(name)["agents"]:
-            assert agent["bedrock"]["model_id"] != "us.amazon.nova-micro-v1:0", agent["id"]
+            category = agent.get("model_category")
+            assert category in known, agent["id"]
+            assert "model_id" not in agent.get("bedrock", {}), agent["id"]

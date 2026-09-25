@@ -578,3 +578,48 @@ def observe_agentcore_request(
     )
 
     return result.output, _get_plain_span_metrics(result.span)
+
+
+class _SelectionSpan:
+    """The few span fields ``_push_metric`` reads for a model-selection row."""
+
+    def __init__(self, record: dict):
+        self.trace_id = str(record.get("run_id") or record.get("trace_id") or "model-map")
+        self.prompt_tokens = int(record.get("prompt_tokens") or 0)
+        self.completion_tokens = int(record.get("completion_tokens") or 0)
+        self.cost_usd = float(record.get("estimated_cost_usd") or 0)
+        self.shadow_disagreement_score = None
+        self.shadow_numeric_variance = None
+
+
+class _SelectionDecision:
+    def __init__(self, record: dict):
+        ok = record.get("success")
+        self.action = "allow" if ok else "error"
+        self.reason = str(record.get("error") or record.get("result_quality") or "model_selection")
+
+
+def record_model_selection(record: dict) -> None:
+    """Persist one model-selection row. Failures stay inside this function.
+
+    The same Observatory table the agent spans use. ``estimated_cost_usd`` is
+    tokens times the model map's prices, which is the cost this row reports
+    even when the wrapper's own price table does not know the model.
+    """
+    span = _SelectionSpan(record)
+    decision = _SelectionDecision(record)
+    extra = {
+        "agent_id": str(record.get("agent") or ""),
+        "team": str(record.get("team") or ""),
+        "session_id": str(record.get("run_id") or ""),
+        "model_id": str(record.get("model_id") or ""),
+        "model_category": str(record.get("category") or ""),
+        "fallback_used": bool(record.get("fallback_used")),
+        "latency_ms": int(record.get("latency_ms") or 0),
+        "result_quality": str(record.get("result_quality") or ""),
+        "estimated_cost_usd": str(record.get("estimated_cost_usd") or 0),
+        "cost_tier": str(record.get("cost_tier") or ""),
+        "record_kind": str(record.get("record_kind") or "invocation"),
+        "success": bool(record.get("success")),
+    }
+    _push_metric("model_selection", span, decision, extra)

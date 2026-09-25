@@ -552,7 +552,7 @@ def create_bedrock_agent(
     schema_ref: str,
     role_obj: dict,
     bedrock_role_arn: str,
-    foundation_model: str = "amazon.nova-micro-v1:0",
+    foundation_model: str = "deepseek.v3.2",
     gemini_lambda_arn: str = "",
 ) -> tuple[str, str]:
     """
@@ -709,7 +709,7 @@ def parse_args():
     parser.add_argument("--region", default=None,   help="AWS region (or AWS_REGION env var)")
     parser.add_argument("--bedrock-role-arn", default=None, dest="bedrock_role_arn",
                         help="IAM role ARN for Bedrock agents (or BEDROCK_ROLE_ARN env var)")
-    parser.add_argument("--foundation-model", default="amazon.nova-micro-v1:0",
+    parser.add_argument("--foundation-model", default="deepseek.v3.2",
                         dest="foundation_model", help="Bedrock foundation model ID")
     parser.add_argument("--assume-role-arn", default=None, dest="assume_role_arn",
                         help="IAM role ARN to assume via STS before making AWS calls (or ASSUME_ROLE_ARN env var)")

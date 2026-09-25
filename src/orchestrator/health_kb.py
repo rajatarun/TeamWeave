@@ -4,7 +4,7 @@ The documents are ContextWeave's. Deploy reads that stack's
 ``HealthDocsBucketName`` and ``KMSKeyArn`` outputs and points a Bedrock
 knowledge base at the bucket. This module does not create a bucket and does
 not embed. The base is a managed knowledge base built with
-``amazon.nova-2-multimodal-embeddings-v1:0``. Querying it is
+the model map's embeddings category. Querying it is
 ``bedrock-agent-runtime:Retrieve`` with ``managedSearchConfiguration``.
 ``vectorSearchConfiguration`` is the self-managed shape and does not apply.
 
@@ -30,10 +30,16 @@ from .logger import get_logger
 
 log = get_logger("health_kb")
 
-# The model the base is created with. Retrieval does not send it — Bedrock
-# already embedded the bucket with it — and a second id here would be a
-# second source of truth. The template is the one that is deployed.
-EMBEDDING_MODEL_ID = "amazon.nova-2-multimodal-embeddings-v1:0"
+def embedding_model_id() -> str:
+    """The embeddings category. Retrieval does not send it.
+
+    Bedrock already embedded the bucket with the id in the template. This
+    function is the same id, read from the model map, so the two can be
+    compared rather than copied.
+    """
+    from .model_map import resolve_model
+
+    return resolve_model("embeddings").model_id
 
 
 def knowledge_base_id() -> str:
