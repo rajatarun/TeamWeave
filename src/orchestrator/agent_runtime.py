@@ -74,6 +74,10 @@ class AgentRef:
     # agent silently runs on whatever AGENT_MODEL_ID the runtime was created
     # with, and the per-agent model_id in team.json means nothing.
     model_id: str = ""
+    # From the model map for this turn. 0 / None means the runtime keeps its
+    # own token and temperature defaults.
+    max_tokens: int = 0
+    temperature: Optional[float] = None
 
 
 class AgentRuntime(Protocol):
@@ -316,7 +320,8 @@ class AgentCoreRuntime:
         return ""
 
     def build_payload(self, session_id: str, input_text: str, instruction: str = "",
-                      model_id: str = "") -> bytes:
+                      model_id: str = "", max_tokens: int = 0,
+                      temperature: Optional[float] = None) -> bytes:
         # The entrypoint receives this unchanged, so the shape is TeamWeave's
         # to define. `prompt` is what the agent reads; `instruction` and
         # `modelId` are this turn's system prompt and model, which is what
@@ -327,6 +332,10 @@ class AgentCoreRuntime:
             body["instruction"] = instruction
         if model_id:
             body["modelId"] = model_id
+        if max_tokens:
+            body["maxTokens"] = int(max_tokens)
+        if temperature is not None:
+            body["temperature"] = temperature
         return json.dumps(body, ensure_ascii=False).encode("utf-8")
 
     def invoke(
@@ -361,6 +370,7 @@ class AgentCoreRuntime:
             # connected to anything.
             payload=self.build_payload(
                 session_id, input_text, model_id=ref.model_id,
+                max_tokens=ref.max_tokens, temperature=ref.temperature,
             ),
         )
 

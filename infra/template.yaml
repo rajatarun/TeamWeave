@@ -208,30 +208,28 @@ Parameters:
     Description: Key of the agent code artifact within the config bucket.
   AgentCoreDefaultModelId:
     Type: String
-    Default: "us.amazon.nova-micro-v1:0"
+    Default: "deepseek.v3.2"
     Description: >
-      Model the agent program falls back to when a runtime does not override
-      AGENT_MODEL_ID, mirroring a Classic agent's own foundation model.
+      Last-resort model inside the AgentCore program when a turn arrives
+      without modelId. The model map's default category is the same id.
+      A turn from the worker always carries the id resolve_model chose.
   ImageModelId:
     Type: String
-    Default: "amazon.nova-canvas-v1:0"
+    Default: ""
     Description: >
-      Bedrock image model for members declaring modality "image". A member's
-      own model_id in team.json wins over this; this is the stack-level
-      fallback. Only Nova Canvas and Titan Image are supported -- the
-      InvokeModel body is provider-defined and bedrock_image refuses a family
-      whose shape it does not know. Model access is granted per model in the
-      Bedrock console; a model that is not enabled is refused at the call.
+      Optional Bedrock image-model override. Empty means the model map's
+      image_generation category chooses the illustrator. A non-empty value
+      is an IMAGE_MODEL_ID override for bedrock_image when a caller passes
+      no declared id. Nova Canvas and Titan Image are the families
+      bedrock_image knows how to build a body for.
 
   GeminiImageModel:
     Type: String
-    Default: "gemini-3.1-flash-lite-image"
+    Default: ""
     Description: >
-      Gemini model for image members with image_provider "gemini". A member's
-      own model_id in team.json wins over this. Only the `:generateContent`
-      family is supported -- Imagen answers on `:predict` with a different
-      body and needs its own builder, not just a new id. The key comes from
-      GEMINI_SECRET_ARN, which the research brief already uses.
+      Optional override of the model map's image_generation category.
+      Empty leaves the map in charge. Only the `:generateContent` family
+      is supported. The key comes from GEMINI_SECRET_ARN.
 
   AgentCoreGatewayName:
     Type: String
@@ -358,10 +356,9 @@ Globals:
         # two travel together.
         AGENT_RUNTIME: !If [AgentCoreEnabled, "agentcore", "classic"]
         AGENTCORE_RUNTIME_ARN: !If [AgentCoreEnabled, !GetAtt AgentCoreRuntime.AgentRuntimeArn, ""]
-        # The model that reshapes an agent's answer when it is not schema-shaped.
-        # Same model the turns themselves run on, so the platform has one model
-        # decision rather than a second one hardcoded in a module.
-        STRUCTURED_TRANSFORM_MODEL_ID: !Ref AgentCoreDefaultModelId
+        # Empty uses the model map's schema_repair category. A non-empty
+        # value is a logged override of that category.
+        STRUCTURED_TRANSFORM_MODEL_ID: ""
         IMAGE_MODEL_ID: !Ref ImageModelId
         GEMINI_IMAGE_MODEL: !Ref GeminiImageModel
         # team name -> its runtime ARN. One variable rather than one per team:
@@ -1463,7 +1460,6 @@ Resources:
           VECTOR_DB_SSLMODE: verify-full
           VECTOR_DB_SSL_ROOT_CERT: /var/task/certs/rds-ca-bundle.pem
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
-          GEMINI_MODEL: gemini-3.8-flash
           CONTEXTWEAVE_URL: !Ref ContextWeaveUrl
           STATE_MACHINE_ARN: !Ref StateMachine
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
@@ -1515,7 +1511,6 @@ Resources:
           VECTOR_DB_SSLMODE: verify-full
           VECTOR_DB_SSL_ROOT_CERT: /var/task/certs/rds-ca-bundle.pem
           GEMINI_SECRET_ARN: !Ref GeminiSecretArn
-          GEMINI_MODEL: gemini-3.8-flash
           CONTEXTWEAVE_URL: !Ref ContextWeaveUrl
           CONTEXTWEAVE_FEEDBACK_ON_VALID_OUTPUT: !Ref ContextWeaveFeedbackOnValidOutput
           # The health_prep pre-tool retrieves from this base. Empty when
@@ -1699,7 +1694,6 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
-          GEMINI_MODEL: gemini-3.8-flash
           MAX_TOKENS: "1024"
       VpcConfig: !If
         - HasVpcConfig
@@ -1894,7 +1888,7 @@ Resources:
           # workflow writes, where the Lambda reads -- and compares them, so
           # the two cannot drift apart again in silence.
           OUTPUT_PREFIX: ""
-          FOUNDATION_MODEL: amazon.nova-micro-v1:0
+          FOUNDATION_MODEL: deepseek.v3.2
       VpcConfig: !If
         - HasVpcConfig
         - SecurityGroupIds:

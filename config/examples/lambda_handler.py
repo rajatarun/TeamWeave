@@ -11,7 +11,7 @@ Environment variables:
     ARTIFACT_BUCKET   (required) S3 bucket — all state lives here
     BEDROCK_ROLE_ARN  (required) IAM role ARN Bedrock agents assume
     OUTPUT_PREFIX     (default: agent-management)
-    FOUNDATION_MODEL  (default: amazon.nova-micro-v1:0)
+    FOUNDATION_MODEL  (default: the model map's default category)
     AWS_REGION        (default: us-east-1)
 
 ROUTE TABLE
@@ -81,12 +81,10 @@ log.setLevel(getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), loggi
 # ─────────────────────────────────────────────────────────────────────────────
 
 _MODEL_ALIAS_SLUG: dict[str, str] = {
-    "us.amazon.nova-micro-v1:0":                    "nova-micro",
-    "us.amazon.nova-lite-v1:0":                     "nova-lite",
-    "us.amazon.nova-pro-v1:0":                      "nova-pro",
-    "us.amazon.nova-premier-v1:0":                  "nova-premier",
-    "us.anthropic.claude-3-haiku-20240307-v1:0":    "claude-3-haiku",
-    "us.anthropic.claude-3-5-haiku-20241022-v1:0":  "claude-35-haiku",
+    "deepseek.v3.2":                                "deepseek-v3",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0":  "claude-haiku-4-5",
+    "us.anthropic.claude-sonnet-5":                 "claude-sonnet-5",
+    "us.anthropic.claude-opus-5":                   "claude-opus-5",
 }
 
 _RETRYABLE_AGENT_STATES = {"PREPARING", "UPDATING", "VERSIONING"}
@@ -176,7 +174,7 @@ def get_config() -> dict:
         "schemas_dir":      os.environ.get(
             "SCHEMAS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "schemas")
         ),
-        "foundation_model": os.environ.get("FOUNDATION_MODEL", "amazon.nova-micro-v1:0"),
+        "foundation_model": os.environ.get("FOUNDATION_MODEL", "deepseek.v3.2"),
         "region":           os.environ.get("AWS_REGION",       "us-east-1"),
         "gemini_lambda_arn": os.environ.get("GEMINI_LAMBDA_ARN", "").strip(),
     }

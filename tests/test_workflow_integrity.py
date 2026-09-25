@@ -164,18 +164,17 @@ def test_the_image_members_provider_and_model_agree():
     """A Gemini model on the Bedrock provider (or the reverse) deploys fine
     and fails at the call, naming only the id -- which is how two deploys were
     spent on Bedrock ids. The pairing is checkable here."""
+    from src.orchestrator.model_map import resolve_model
+
     config = load(TEAMS_DIR / "tarun_visibility_team" / "v1" / "team.json")
     agent = next(a for a in config["agents"]
                  if (a.get("bedrock") or {}).get("modality") == "image")
     bedrock = agent["bedrock"]
-    provider = bedrock.get("image_provider", "bedrock")
-    model = bedrock["model_id"].lower()
+    choice = resolve_model(agent["model_category"], override=bedrock.get("model_id") or "")
+    provider = bedrock.get("image_provider") or choice.provider
 
     assert provider in {"bedrock", "gemini"}, provider
-    if provider == "gemini":
-        assert model.startswith("gemini-"), (provider, model)
-    else:
-        assert model.startswith("amazon."), (provider, model)
+    assert provider == choice.provider, (provider, choice.provider, choice.model_id)
 
 
 def test_every_text_member_still_declares_a_text_model():

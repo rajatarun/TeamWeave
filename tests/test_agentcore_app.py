@@ -118,8 +118,9 @@ def test_the_model_id_comes_from_the_environment():
 def test_the_model_id_falls_back_to_a_default():
     client = FakeBedrock()
     out = agent_app.run_turn({"prompt": "p"}, client=client, env={})
-    assert client.calls[0]["modelId"] == agent_app.DEFAULT_MODEL_ID
-    assert out["modelId"] == agent_app.DEFAULT_MODEL_ID
+    assert client.calls[0]["modelId"] == agent_app.default_model_id({})
+    assert out["modelId"] == agent_app.default_model_id({})
+    assert client.calls[0]["modelId"] == "deepseek.v3.2"
 
 
 def test_a_nonsense_max_tokens_falls_back_rather_than_crashing():

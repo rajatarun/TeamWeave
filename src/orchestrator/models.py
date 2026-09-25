@@ -20,7 +20,7 @@ class BedrockRef:
 
     agentId: str
     aliasId: str
-    model_id: str = "us.amazon.nova-micro-v1:0"
+    model_id: str = ""
     shadow_model_id: str = ""
     model_aliases: Dict[str, str] = field(default_factory=dict)
     runtimeArn: str = ""
@@ -44,6 +44,8 @@ class AgentConfig:
     bedrock: BedrockRef
     goal_template: str
     schema_ref: str
+    # Which row of config/model_map.yaml picks this agent's model.
+    model_category: str = "default"
 
 @dataclass
 class TeamGlobals:

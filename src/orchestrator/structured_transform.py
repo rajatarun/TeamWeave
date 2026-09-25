@@ -6,22 +6,42 @@ from .json_utils import extract_json_payload
 
 
 # The repair model: when an agent returns something that is not schema-shaped,
-# this reshapes it rather than losing the answer.
-#
-# It was pinned to anthropic.claude-3-haiku-20240307-v1:0, hardcoded with no
-# way to change it without a deploy, and Bedrock now refuses that id outright:
-#
-#   ResourceNotFoundException: This Model is marked by provider as Legacy and
-#   you have not been actively using the model in the last 30 days.
-#
-# So every repair failed, and a working pipeline returned its answer wrapped in
-# a fallback envelope instead of the schema the team declared. The run still
-# succeeded -- which is why this survived a green deploy.
-#
-# The default is now the model this account actually uses for its agent turns,
-# so one model decision covers the platform, and the environment overrides it.
-DEFAULT_MODEL_ID = "us.amazon.nova-micro-v1:0"
-MODEL_ID = os.environ.get("STRUCTURED_TRANSFORM_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
+# this reshapes it rather than losing the answer. The id comes from the model
+# map's schema_repair category. STRUCTURED_TRANSFORM_MODEL_ID overrides it
+# and is logged. An earlier pin was a legacy Claude id Bedrock now refuses,
+# and every repair failed while the run still succeeded.
+
+
+def repair_model_id() -> str:
+    """The schema_repair model. An env override is logged and used."""
+    from .logger import get_logger
+    from .model_map import resolve_model
+
+    chosen = resolve_model("schema_repair")
+    override = os.environ.get("STRUCTURED_TRANSFORM_MODEL_ID", "").strip()
+    if override and override != chosen.model_id:
+        get_logger("structured_transform").warning(
+            "model_id_override",
+            extra={"category": "schema_repair", "model_id": override},
+        )
+        return override
+    return chosen.model_id
+
+
+class _CurrentModel:
+    """Compares as the model repair will use, read at the moment of the check."""
+
+    def __str__(self) -> str:
+        return repair_model_id()
+
+    def __eq__(self, other: object) -> bool:
+        return repair_model_id() == other
+
+    def __contains__(self, item: object) -> bool:
+        return str(item) in repair_model_id()
+
+
+MODEL_ID = _CurrentModel()
 
 
 def transform_json_to_schema(
@@ -31,9 +51,11 @@ def transform_json_to_schema(
     region_name: str = "us-east-1",
     client: Optional[Any] = None,
     max_tokens: int = 1024,
-    model_id: str = MODEL_ID,
+    model_id: str = "",
 ) -> Dict[str, Any]:
     """Use Bedrock Claude to transform an input object into the requested schema shape."""
+    if not model_id:
+        model_id = repair_model_id()
     runtime = client
     if runtime is None:
         import boto3
