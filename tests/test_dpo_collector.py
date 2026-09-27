@@ -106,6 +106,14 @@ class DpoCollectorTests(unittest.TestCase):
         result, _ = self._run_collect(score_a=0.3, score_b=None)
         self.assertEqual(result, "response-A")
 
+    def test_one_missing_score_is_not_a_preference_label(self):
+        """The scored answer is still returned, but no pair is uploaded: the
+        missing side's infinity made delta infinite and cleared every threshold."""
+        for a, b in ((None, 0.9), (0.3, None)):
+            with _setenv(DPO_TRAINING_BUCKET="bucket", DPO_DELTA_THRESHOLD="0.4"):
+                _, mock_s3 = self._run_collect(score_a=a, score_b=b)
+            mock_s3.put_object.assert_not_called()
+
     # ── collect_dpo_step — upload gating ─────────────────────────────────────
 
     def test_no_upload_when_delta_below_threshold(self):
