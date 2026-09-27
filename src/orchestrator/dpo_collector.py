@@ -83,6 +83,11 @@ def _upload_dpo_record(
     key = f"{project}/{team}/{step_id}/{run_id}/dpo_{ts_safe}.json"
     record = {
         "schema_version": "dpo-v1",
+        # What decided chosen vs rejected. A lexical risk heuristic, not a
+        # judgement of quality (see contracts/score_envelope.json kinds in
+        # ContextWeave and mcp-observatory's scores.json); TrainWeave's
+        # label_audit checks it against a judge model before training on it.
+        "label_source": "observatory.composite_risk_score",
         "timestamp": timestamp,
         "project": project,
         "team": team,
@@ -204,6 +209,19 @@ def collect_dpo_step(
         better_text, worse_text = text_b, text_a
         chosen_score, rejected_score = eff_b, eff_a
         metrics_chosen, metrics_rejected = metrics_b, metrics_a
+
+    # One missing score still decides which answer the pipeline returns (a real
+    # score beats none), but it is not a preference label. The infinity standing
+    # in for the missing side made delta infinite, which cleared every
+    # threshold: the pair was uploaded, labelled by which side happened to be
+    # scored rather than by anything in the answers, and serialised as the
+    # non-JSON token ``Infinity``.
+    if score_a is None or score_b is None:
+        log.info(
+            "dpo_skipped_one_score_missing",
+            extra={"step_id": step_id, "run_id": run_id, "score_a": score_a, "score_b": score_b},
+        )
+        return better_text
 
     delta = abs(rejected_score - chosen_score)
 
