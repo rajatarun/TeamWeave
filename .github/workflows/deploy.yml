@@ -17,6 +17,11 @@ env:
   SHARED_STACK_NAME: tarun-teamweave-shared
   BEDROCK_AGENTS_STACK_NAME: tarun-bedrock-agents
   CONTEXTWEAVE_STACK_NAME: contextweave-rag-prod
+  # DeviceWeave's own deploy workflow sets
+  # STACK_NAME: deviceweave-${{ github.event.inputs.stage || 'prod' }}.
+  # One named stack. A dev fallback would point live device control at a
+  # different registry and still report success.
+  DEVICEWEAVE_STACK_NAME: deviceweave-prod
   FOUNDATION_MODEL_ID: deepseek.v3.2
   AGENT_SERVICE_ROLE_ARN: arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
   TEAM_CONFIG_PREFIX: teams
@@ -469,6 +474,46 @@ jobs:
           fi
           PARAM_OVERRIDES+=("HealthDocsBucketName=${HEALTH_DOCS_BUCKET}")
           PARAM_OVERRIDES+=("HealthDocsKmsKeyArn=${HEALTH_DOCS_KMS}")
+
+          # DeviceWeave is an HTTP API, not an MCP server, so it is not a
+          # gateway target. device_controller calls GET /devices and POST
+          # /execute. The URL is that stack's ApiBaseUrl. A missing stack
+          # warns and passes an empty URL: the tool then reports that it is
+          # not configured. Failing the TeamWeave deploy would take the rest
+          # of the platform down because one sibling is absent.
+          #
+          # Stack name from DeviceWeave's CI:
+          #   .github/workflows/deploy.yml
+          #   STACK_NAME: deviceweave-${{ github.event.inputs.stage || 'prod' }}
+          # Output key ApiBaseUrl is the base, not a path.
+          dw_stack_json=$(aws cloudformation describe-stacks \
+            --stack-name "${DEVICEWEAVE_STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --output json 2>/dev/null) || dw_stack_json=""
+          DEVICEWEAVE_URL=""
+          if [ -z "${dw_stack_json}" ]; then
+            dw_near=$(aws cloudformation list-stacks \
+              --region "${AWS_REGION}" \
+              --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE \
+              --query "StackSummaries[?starts_with(StackName, 'deviceweave')].StackName" \
+              --output text 2>/dev/null | tr '\t' ' ') || dw_near=""
+            if [ -n "${dw_near}" ]; then
+              echo "::warning::No stack '${DEVICEWEAVE_STACK_NAME}' for DeviceWeave; found: ${dw_near}. device_controller will report DeviceWeave as not configured."
+            else
+              echo "::warning::No stack '${DEVICEWEAVE_STACK_NAME}', and none named deviceweave* — DeviceWeave is not deployed. device_controller will report that."
+            fi
+          else
+            DEVICEWEAVE_URL=$(printf '%s' "${dw_stack_json}" \
+              | python -c "import json,sys;o=json.load(sys.stdin)['Stacks'][0].get('Outputs') or [];print(next((x['OutputValue'] for x in o if x['OutputKey']=='ApiBaseUrl'),''))" 2>/dev/null) || DEVICEWEAVE_URL=""
+            if [ -n "${DEVICEWEAVE_URL}" ]; then
+              echo "DeviceWeave URL from ${DEVICEWEAVE_STACK_NAME}: ${DEVICEWEAVE_URL}"
+            else
+              dw_keys=$(printf '%s' "${dw_stack_json}" \
+                | python -c "import json,sys;o=json.load(sys.stdin)['Stacks'][0].get('Outputs') or [];print(' '.join(x['OutputKey'] for x in o))" 2>/dev/null) || dw_keys=""
+              echo "::warning::Stack '${DEVICEWEAVE_STACK_NAME}' exists but publishes no ApiBaseUrl; it has: ${dw_keys:-none}."
+            fi
+          fi
+          PARAM_OVERRIDES+=("DeviceWeaveApiBaseUrl=${DEVICEWEAVE_URL}")
 
           # The weave systems that are MCP servers, as AgentCore Gateway
           # targets. Resolved from each sibling's own stack output, never

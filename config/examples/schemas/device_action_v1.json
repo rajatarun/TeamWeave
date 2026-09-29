@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "device_action_v1",
+  "description": "What DeviceWeave did with the instruction: the actions that ran, the state read back afterwards, and any command that was held for confirmation. Not a restatement of the request.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What changed, or that nothing was executed because confirmation is required or the call failed."
+    },
+    "actions_taken": {
+      "type": "array",
+      "description": "Commands DeviceWeave actually executed. Empty when the call was held or failed.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "device": {"type": "string", "minLength": 1},
+          "command": {"type": "string", "minLength": 1},
+          "result": {"type": "string", "minLength": 1}
+        },
+        "required": ["device", "command", "result"]
+      }
+    },
+    "current_state": {
+      "type": "array",
+      "description": "State read back after the command, one entry per device DeviceWeave reported.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "device": {"type": "string", "minLength": 1},
+          "state": {"type": "string", "minLength": 1}
+        },
+        "required": ["device", "state"]
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "errors": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "needs_confirmation": {
+      "type": "array",
+      "description": "Risky commands that were not executed. Empty when nothing was held.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "device": {"type": "string", "minLength": 1},
+          "command": {"type": "string", "minLength": 1},
+          "reason": {"type": "string", "minLength": 1}
+        },
+        "required": ["device", "command", "reason"]
+      }
+    }
+  },
+  "required": [
+    "summary",
+    "actions_taken",
+    "current_state",
+    "assumptions",
+    "errors",
+    "needs_confirmation"
+  ]
+}

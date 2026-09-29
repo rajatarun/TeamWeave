@@ -100,6 +100,21 @@ Parameters:
       Optional Secrets Manager ARN that overrides GeminiSecretArn for
       financial_advisors web search only. Same JSON shape. Empty keeps the
       Gemini secret.
+  DeviceWeaveApiBaseUrl:
+    Type: String
+    Default: ""
+    Description: >-
+      Base URL of the DeviceWeave HTTP API, taken from the deviceweave-prod
+      stack output ApiBaseUrl during deploy. Empty means device_controller
+      reports that DeviceWeave is not configured. Do not hardcode a URL.
+  DeviceWeaveSecretArn:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional Secrets Manager ARN. DeviceWeave's HTTP API has no authorizer,
+      so this stays empty and calls are unauthenticated. When set, the worker
+      sends Authorization Bearer from the secret (JSON key or token, or the
+      raw token). Never a literal key.
   DdbTableName:
     Type: String
     Default: ""
@@ -310,6 +325,7 @@ Conditions:
   CreateDdbTable: !Equals [!Ref DdbTableName, ""]
   HasGeminiSecret: !Not [!Equals [!Ref GeminiSecretArn, ""]]
   HasWebSearchSecret: !Not [!Equals [!Ref WebSearchSecretArn, ""]]
+  HasDeviceWeaveSecret: !Not [!Equals [!Ref DeviceWeaveSecretArn, ""]]
   HasVpcConfig: !And
     - !Not [!Equals [!Ref VpcId, ""]]
     - !Not [!Equals [!Ref RdsSecurityGroupId, ""]]
@@ -370,13 +386,14 @@ Globals:
         AGENTCORE_TEAM_RUNTIME_ARNS: !If
           - AgentCoreEnabled
           - !Sub
-            - '{"tarun_visibility_team":"${ArnTarunVisibilityTeam}","daily_operator":"${ArnDailyOperator}","linkedin_quick_post":"${ArnLinkedinQuickPost}","job_hunter":"${ArnJobHunter}","health_prep":"${ArnHealthPrep}","financial_advisors":"${ArnFinancialAdvisors}"}'
+            - '{"tarun_visibility_team":"${ArnTarunVisibilityTeam}","daily_operator":"${ArnDailyOperator}","linkedin_quick_post":"${ArnLinkedinQuickPost}","job_hunter":"${ArnJobHunter}","health_prep":"${ArnHealthPrep}","financial_advisors":"${ArnFinancialAdvisors}","device_controller":"${ArnDeviceController}"}'
             - ArnTarunVisibilityTeam: !GetAtt AgentCoreRuntimeTarunVisibilityTeam.AgentRuntimeArn
               ArnDailyOperator: !GetAtt AgentCoreRuntimeDailyOperator.AgentRuntimeArn
               ArnLinkedinQuickPost: !GetAtt AgentCoreRuntimeLinkedinQuickPost.AgentRuntimeArn
               ArnJobHunter: !GetAtt AgentCoreRuntimeJobHunter.AgentRuntimeArn
               ArnHealthPrep: !GetAtt AgentCoreRuntimeHealthPrep.AgentRuntimeArn
               ArnFinancialAdvisors: !GetAtt AgentCoreRuntimeFinancialAdvisors.AgentRuntimeArn
+              ArnDeviceController: !GetAtt AgentCoreRuntimeDeviceController.AgentRuntimeArn
           - "{}"
         # Route all AWS SDK calls through dual-stack endpoints so boto3 resolves
         # {service}.{region}.api.aws (returns AAAA records). Lambda ENIs with IPv6
@@ -640,6 +657,12 @@ Resources:
                 - Effect: Allow
                   Action: [secretsmanager:GetSecretValue]
                   Resource: !Ref WebSearchSecretArn
+                - !Ref "AWS::NoValue"
+              - !If
+                - HasDeviceWeaveSecret
+                - Effect: Allow
+                  Action: [secretsmanager:GetSecretValue]
+                  Resource: !Ref DeviceWeaveSecretArn
                 - !Ref "AWS::NoValue"
               - Effect: Allow
                 Action: [secretsmanager:GetSecretValue]
@@ -1530,6 +1553,14 @@ Resources:
           WEB_SEARCH_SECRET_ARN: !If
             - HasWebSearchSecret
             - !Ref WebSearchSecretArn
+            - !Ref "AWS::NoValue"
+          # device_controller calls DeviceWeave before the turn. The URL is
+          # the deviceweave-prod ApiBaseUrl. The secret is optional: that
+          # API has no authorizer, and a set ARN is sent as a bearer.
+          DEVICEWEAVE_URL: !Ref DeviceWeaveApiBaseUrl
+          DEVICEWEAVE_SECRET_ARN: !If
+            - HasDeviceWeaveSecret
+            - !Ref DeviceWeaveSecretArn
             - !Ref "AWS::NoValue"
           GEMINI_LAMBDA_ARN: !GetAtt GeminiResearchFunction.Arn
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
@@ -2446,6 +2477,28 @@ Resources:
         AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
         AGENT_TEAM: "financial_advisors"
 
+  AgentCoreRuntimeDeviceController:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: AgentCoreEnabled
+    Properties:
+      AgentRuntimeName: "teamweave_device_controller"
+      Description: "AgentCore runtime serving device_controller. The worker calls DeviceWeave before the turn; this runtime does not."
+      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Code:
+            S3:
+              Bucket: !If [CreateConfigBucket, !Ref TeamConfigBucket, !Ref ConfigBucketName]
+              Prefix: !Ref AgentCoreRuntimeCodePrefix
+          Runtime: PYTHON_3_12
+          EntryPoint:
+            - app.py
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      EnvironmentVariables:
+        AGENT_MODEL_ID: !Ref AgentCoreDefaultModelId
+        AGENT_TEAM: "device_controller"
+
   # ── AgentCore Gateway ──────────────────────────────────────────────────────
   # Managed tool access for agents. AWS_IAM rather than CUSTOM_JWT: the
   # authorizer types include one that needs no external identity provider, and
@@ -3325,6 +3378,13 @@ Outputs:
       configured. GET /observability returns null (not an error) for its
       routingGraph and routingDecisions sections in that case, so a harness
       reads this to tell "not configured" from "configured and broken".
+
+  DeviceWeaveUrl:
+    Value: !Ref DeviceWeaveApiBaseUrl
+    Description: >
+      Base URL of the DeviceWeave HTTP API, or empty when deviceweave-prod
+      did not publish ApiBaseUrl. device_controller reports that as an error
+      rather than calling a guessed host.
 
   HealthKnowledgeBaseId:
     Condition: HealthKnowledgeBaseEnabled

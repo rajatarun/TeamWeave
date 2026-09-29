@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List
 
-READ, PROPOSE, COMMIT = "read", "propose", "commit"
+READ, PROPOSE, COMMIT, ACT = "read", "propose", "commit", "act"
 MCP, HTTP = "mcp", "http"
 
 # Siblings reached over their own HTTP API rather than over MCP, and the
@@ -43,6 +43,9 @@ HTTP_SIBLING_ENV = {
     "contextweave": "CONTEXTWEAVE_URL",
     "portfolio": "PORTFOLIO_KNOWLEDGE_BASE_ID",
     "websearch": "GEMINI_SECRET_ARN",
+    # DeviceWeave's HTTP API. The deploy resolves ApiBaseUrl from the
+    # deviceweave-prod stack. There is no MCP server to point a gateway at.
+    "deviceweave": "DEVICEWEAVE_URL",
 }
 
 
@@ -220,6 +223,32 @@ RULES: Dict[str, ToolRule] = {rule.tool: rule for rule in [
         never_when="the figure is already in the uploaded statement, or any "
                    "team that would treat a live page as background for a "
                    "post; and never to promise a return",
+    ),
+
+    # ── DeviceWeave: list, status, and command over its HTTP API ────────────
+    #
+    # DeviceWeave does not speak MCP, so this is not a gateway target. The
+    # worker calls GET /devices, GET /devices/{id}, and POST /execute. The
+    # API has no authorizer. effect is "act" rather than "commit": commit is
+    # the propose-then-token split DataDictionary and ToolWeave use, and
+    # refusing it here would make the team unable to do the thing it exists
+    # for. The confirm flag inside the tool is the gate for unlock, disable
+    # security, factory reset, and powering off a critical device. The
+    # allowlist is the other gate — a team config is JSON in S3.
+    ToolRule(
+        tool="deviceweave",
+        sibling="deviceweave",
+        mcp_tool="GET /devices, GET /devices/{device_id}, POST /execute",
+        effect=ACT,
+        transport=HTTP,
+        only_teams=("device_controller",),
+        use_when="a device step must list the registry, read live status, or "
+                 "send a command through DeviceWeave rather than invent a "
+                 "device or a resulting state",
+        never_when="any team that is not device_controller; and never to send "
+                   "unlock, disable security, factory reset, or power-off of "
+                   "a lock, camera, alarm, doorbell, garage door, or sensor "
+                   "unless the request sets confirm",
     ),
 ]}
 
