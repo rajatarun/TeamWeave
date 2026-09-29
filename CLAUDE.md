@@ -609,6 +609,7 @@ clutter, each with its runtime and its map entry.
 | `job_hunter` | 3 | ScreenWeave crawl + ContextWeave | a posting URL → an honest fit read and an outreach note |
 | `health_prep` | 2 | ContextWeave health store | symptoms plus the person's records → insights and suggestions, never a diagnosis |
 | `financial_advisors` | 2 | portfolio knowledge base + live web search | a focus plus uploaded statements → insights and suggestions, with URLs and dates, never a guaranteed return |
+| `device_controller` | 1 | DeviceWeave HTTP API | an instruction → the device change, or a proposed action when the command is risky and `confirm` is not set |
 
 **Say which parts are grounded and which are reasoning.** An agent cannot
 choose to call a tool here, so a team is grounded only where a *pre-tool*
@@ -620,7 +621,9 @@ section below is about why that separation survives being wired to.
 in someone's head — and its constraints say so rather than letting an agent
 imply otherwise. `financial_advisors` reads two live sources before it writes:
 the portfolio knowledge base, and a web search that has to come back with a
-URL and the day it was retrieved. A grounded team may not treat a retrieval
+URL and the day it was retrieved. `device_controller` calls DeviceWeave
+before the turn — list, then execute, then a status read — and an `error`
+on that result means the call did not happen. A grounded team may not treat a retrieval
 as a history it is free to supply: a fabricated medical timeline, a fabricated
 holding, and a fabricated price are exactly as schema-valid as real ones, so
 the team constraint and the consuming agent's `goal_template` name what
@@ -750,12 +753,22 @@ for this tool only. Neither value is hardcoded. With no secret, the tool
 returns `error` and the agent is told not to invent prices, rates, or
 headlines. See `docs/portfolios.md`.
 
+**`device_controller` has one agent, `device_operator`.** The pre-tool is
+`deviceweave`. DeviceWeave's HTTP API (`deviceweave-prod`, output
+`ApiBaseUrl`) has no authorizer and no MCP server, so this is not a gateway
+target. The calls are `GET /devices`, `GET /devices/{id}`, and
+`POST /execute`. Unlock, disable security, factory reset, and powering off
+a lock, camera, alarm, doorbell, garage door, or sensor are not sent unless
+`request.confirm` is yes; the tool returns `needs_confirmation` instead.
+The model category is `planning`. See `docs/devices.md`.
+
 The tool plumbing the removed teams introduced stays, because `job_hunter`
 uses it: `mcp_client` speaks MCP over HTTP, `tool_rules` says when each sibling
 tool applies, and the commit halves of DataDictionary and ToolWeave are refused
 in `execute_tool` and absent from `TOOL_REGISTRY`. Only ScreenWeave is reached
 over MCP by a team today. `financial_advisors` reaches the portfolio base and
-Gemini web search, which are not gateway targets. The other three gateway
+Gemini web search, which are not gateway targets. `device_controller` reaches
+DeviceWeave's HTTP API, which is also not a gateway target. The other three gateway
 targets are capacity, not a defect,
 and the test asserts only that a sibling a team *does* reach has an endpoint
 wired — never the reverse.

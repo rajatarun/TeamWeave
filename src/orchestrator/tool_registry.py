@@ -48,6 +48,7 @@ from .tools.weave_tools import (
     plan_api_call,
     propose_data_element,
     query_health_record,
+    deviceweave,
     query_portfolio,
     search_data_elements,
     site_metrics,
@@ -99,6 +100,10 @@ TOOL_REGISTRY: Dict[str, Callable[..., Any]] = {
     # Gemini secret the research brief already uses.
     "query_portfolio": query_portfolio,
     "web_search": web_search,
+    # Restricted to device_controller. DeviceWeave's HTTP API has no
+    # authorizer; the allowlist is the barrier. Risky commands are held
+    # inside the tool until the request sets confirm.
+    "deviceweave": deviceweave,
 }
 
 

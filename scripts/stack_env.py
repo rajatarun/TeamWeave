@@ -57,6 +57,7 @@ OPTIONAL_OUTPUTS = {
     "TEAMWEAVE_PORTFOLIO_BUCKET": "PortfolioBucketName",
     "TEAMWEAVE_PORTFOLIO_KNOWLEDGE_BASE_ID": "PortfolioKnowledgeBaseId",
     "TEAMWEAVE_PORTFOLIO_DATA_SOURCE_ID": "PortfolioDataSourceId",
+    "TEAMWEAVE_DEVICEWEAVE_URL": "DeviceWeaveUrl",
 }
 
 

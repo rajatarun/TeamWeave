@@ -84,6 +84,7 @@ Quality-for-cost picks the primary. Sonnet 4.6 is reserved for coding, planning,
 | daily_operator | triage, plan | planning |
 | health_prep | both | health_medical |
 | financial_advisors | both | finance |
+| device_controller | device_operator | planning |
 
 ## Observatory
 
