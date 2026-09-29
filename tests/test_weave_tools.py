@@ -142,7 +142,7 @@ def test_every_rule_says_when_and_when_not():
     for name, rule in tool_rules.RULES.items():
         assert rule.use_when.strip(), f"{name} has no use_when"
         assert rule.never_when.strip(), f"{name} has no never_when"
-        assert rule.effect in {tool_rules.READ, tool_rules.PROPOSE, tool_rules.COMMIT}
+        assert rule.effect in {tool_rules.READ, tool_rules.PROPOSE, tool_rules.COMMIT, tool_rules.ACT}
         assert rule.transport in {tool_rules.MCP, tool_rules.HTTP}
         # Whichever map matches the transport -- a rule naming a sibling in
         # neither points at a service nothing can supply an address for.

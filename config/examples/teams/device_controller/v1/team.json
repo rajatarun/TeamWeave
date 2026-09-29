@@ -1,0 +1,108 @@
+{
+  "team": {
+    "name": "device_controller",
+    "version": "v1",
+    "owner": "Tarun Raja"
+  },
+  "globals": {
+    "north_star": "Turn a clear instruction into a device change through DeviceWeave, then report the state that resulted.",
+    "default_channel": "personal",
+    "hard_constraints": [
+      "tool_results.deviceweave is the DeviceWeave call. It has already listed devices and either executed or held the command. An error key means the call did not happen. Do not invent devices, commands, or states to fill that gap.",
+      "actions_taken is only what DeviceWeave executed. needs_confirmation is a command that was not sent. Copy both from the tool result. An empty actions_taken with a needs_confirmation entry is the correct answer for a risky command that was not confirmed.",
+      "Risky commands are unlock, disable security, factory reset, and powering off a lock, camera, alarm, doorbell, garage door, or sensor. Those run only when request.confirm is yes. Otherwise report the proposed action in needs_confirmation and do not claim it happened.",
+      "Do not echo request.instruction. Do not ask a question when the instruction is clear. State the assumption in assumptions instead.",
+      "current_state is the state read back after the command. If the status read failed, say so in errors and do not invent a state.",
+      "This request may be a follow-up. When request.edit_instruction is present, request.previous_output is your own last answer: revise it to satisfy the instruction and change nothing else. Do not start over, and do not drop fields the instruction did not mention."
+    ],
+    "features": {
+      "gemini_research": false,
+      "explicit_rag": false
+    },
+    "rag": {
+      "mode": "none"
+    },
+    "artifact_store": {
+      "artifact_bucket_env": "ARTIFACT_BUCKET",
+      "dynamo_table_env": "DDB_TABLE"
+    },
+    "revision": {
+      "default_jump_to_step": "device_operator"
+    }
+  },
+  "agents": [
+    {
+      "id": "device_operator",
+      "name": "Device Operator",
+      "role_id": "PBM-001",
+      "department_id": "DEPT-001",
+      "model_category": "planning",
+      "bedrock": {
+        "agentId": "",
+        "aliasId": ""
+      },
+      "goal_template": "Interpret request.instruction and report what DeviceWeave did. The lookup and the command have already run: read tool_results.deviceweave first. It listed the registry, and either executed or returned needs_confirmation. Do not echo the request. Do not ask a question when the instruction is clear; put the assumption in assumptions. Copy actions_taken (device, command, result), current_state (device, state), assumptions, errors, and needs_confirmation from the tool result. An error key means the call did not happen — say that in summary and errors, and do not invent a device or a state. If needs_confirmation is non-empty, the command was not executed: summary says what was proposed and why, actions_taken stays empty, and you do not claim the device changed. request.confirm set to yes is the only reason a risky command (unlock, disable security, factory reset, powering off a lock, camera, alarm, doorbell, garage door, or sensor) appears in actions_taken.",
+      "schema_ref": "device_action_v1"
+    }
+  ],
+  "workflow": [
+    {
+      "step": "device_operator",
+      "inputs": [
+        "request"
+      ],
+      "pre_tools": [
+        {
+          "name": "deviceweave",
+          "args": {
+            "source_key": "request",
+            "output_key": "request"
+          }
+        }
+      ]
+    }
+  ],
+  "schemas": {
+    "device_action_v1": {
+      "path": "config/examples/schemas/device_action_v1.json"
+    }
+  },
+  "request_schema": {
+    "summary": "Say what you want a device to do. The operator looks up your devices, sends the command through DeviceWeave, and reports the state afterwards. Unlock, disable security, factory reset, and powering off a lock, camera, alarm, doorbell, garage door, or sensor wait until you type yes in Confirm.",
+    "fields": [
+      {
+        "name": "instruction",
+        "label": "What should happen",
+        "type": "textarea",
+        "required": true,
+        "placeholder": "Turn on the office light"
+      },
+      {
+        "name": "confirm",
+        "label": "Confirm a risky command",
+        "type": "text",
+        "required": false,
+        "placeholder": "Type yes to allow unlock, disable security, factory reset, or powering off a lock, camera, alarm, doorbell, garage door, or sensor"
+      },
+      {
+        "name": "edit_instruction",
+        "label": "Change to make",
+        "type": "text",
+        "required": false,
+        "placeholder": "Only on a follow-up — what to change about the last answer"
+      },
+      {
+        "name": "previous_output",
+        "label": "Previous answer",
+        "type": "hidden",
+        "required": false
+      },
+      {
+        "name": "previous_run_id",
+        "label": "Previous run",
+        "type": "hidden",
+        "required": false
+      }
+    ]
+  }
+}

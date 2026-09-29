@@ -263,6 +263,33 @@ def query_portfolio(question: str = "", top_k: int = 6, facets: Any = None,
     return result
 
 
+def deviceweave(request: Any = None, command: str = "", confirm: Any = None,
+                 operation: str = "", device_id: str = "", name: str = "",
+                 **_ignored: Any) -> Dict[str, Any]:
+    """List DeviceWeave's registry, then act on the instruction.
+
+    The team passes the whole request: ``instruction`` is the command and
+    ``confirm`` is the flag a risky command requires. ``operation`` selects
+    ``list``, ``status``, ``command``, or the default ``act`` sequence.
+    """
+    from ..deviceweave import run
+
+    rule = rule_for("deviceweave")
+    payload = request if isinstance(request, dict) else {}
+    text = str(command or payload.get("instruction") or payload.get("command") or "")
+    flag = payload.get("confirm") if confirm is None else confirm
+    result = run(
+        (operation or "act"),
+        command=text,
+        confirm=flag,
+        device_id=str(device_id or payload.get("device_id") or ""),
+        name=str(name or ""),
+    )
+    if isinstance(result, dict):
+        result.setdefault("used_for", rule.use_when)
+    return result
+
+
 def web_search(query: str = "", facets: Any = None, **_ignored: Any) -> Dict[str, Any]:
     """Current pages, with URL and the day they were retrieved.
 
