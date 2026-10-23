@@ -787,6 +787,36 @@ What executes is `tool_registry`: deterministic Python before or after a turn.
 step is **given** a lookup; it cannot **decide** to make one. That is a real
 constraint on team design rather than a detail.
 
+**Sibling calls carry a CipherWeave token** (`src/orchestrator/cipherweave_tokens.py`).
+ScreenWeave, ToolWeave, CipherWeave's MCP server and DeviceWeave's REST API
+verify a CipherWeave access token, and each keeps its auth in audit mode
+until its callers send one. The worker is that caller, so it now mints one
+per sibling (`client_credentials` at `CipherWeaveTokenEndpoint`, which the
+deploy reads from `cipherweave-prod`'s `IssuerTokenEndpoint`). Each token is
+cached until 60 s before it expires.
+
+- **One client per sibling.** The issuer treats a standing client with
+  several audiences as a master key, so there are four clients,
+  `teamweave-<sibling>`. Each has its own secret, `CipherWeaveClientSecret<Sibling>`,
+  listed in the `CipherWeaveClientSecrets` output. Only the worker role can
+  read them.
+- **Created unfilled.** A secret holding `{}` means *not configured*: that
+  sibling gets no token, and the call goes out as before. Fill one with
+  `issuer_admin.py rotate-secret --client-id teamweave-<sibling> --secret-arn
+  <arn>`, which also lets `rotate-due` rotate it later. The worker re-reads
+  its secrets every 5 minutes, and once more on `invalid_client`.
+- **Never fatal.** No issuer, an unfilled secret or a refusing issuer each
+  log `cipherweave_token_*` and send nothing. The run is not stopped by a
+  token outage before any sibling requires a token. Once a sibling
+  enforces, its 401 is the error the step reports. A 401 also drops the
+  cached token.
+- **DeviceWeave.** The CipherWeave token comes first. Without one, the
+  static `DEVICEWEAVE_SECRET_ARN` is used, then nothing.
+- **Gateway targets.** They have no credential. `scripts/mcp_handshake.py`
+  therefore skips a sibling that answers `401` with a Bearer/DPoP challenge.
+  Wiring that target would fail AgentCore's handshake and roll the stack
+  back.
+
 **`tool_rules.py` says when each tool applies — and refuses two of them.**
 DataDictionary splits `propose_data_element` → `commit_data_element`, and
 ToolWeave splits `pre_tool` → `commit_api_call`, each returning a token the

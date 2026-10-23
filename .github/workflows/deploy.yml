@@ -634,6 +634,27 @@ jobs:
           [ -n "${NAT_INSTANCE_ID}" ]              && PARAM_OVERRIDES+=("NatInstanceId=${NAT_INSTANCE_ID}")
           [ -n "${DUAL_STACK_ENABLED}" ]            && PARAM_OVERRIDES+=("DualStackEnabled=${DUAL_STACK_ENABLED}")
 
+          # CipherWeave's token endpoint, so the worker can send each sibling
+          # a CipherWeave access token (src/orchestrator/cipherweave_tokens.py).
+          # Optional like the targets above: without it no token is minted and
+          # every call goes out as it did before, which the siblings accept
+          # while their auth is in audit mode. Same stack name as the
+          # CipherWeave target in the loop above.
+          CW_TOKEN_URL=$(aws cloudformation describe-stacks \
+            --stack-name cipherweave-prod \
+            --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='IssuerTokenEndpoint'].OutputValue" \
+            --output text 2>/dev/null) || CW_TOKEN_URL=""
+          # The CLI prints the string None for an absent output.
+          [ "${CW_TOKEN_URL}" = "None" ] && CW_TOKEN_URL=""
+          if [ -n "${CW_TOKEN_URL}" ]; then
+            PARAM_OVERRIDES+=("CipherWeaveTokenEndpoint=${CW_TOKEN_URL}")
+            echo "CipherWeave token endpoint: ${CW_TOKEN_URL}"
+          else
+            PARAM_OVERRIDES+=("CipherWeaveTokenEndpoint=")
+            echo "::warning::cipherweave-prod publishes no IssuerTokenEndpoint. The worker sends no CipherWeave tokens; siblings that enforce auth will refuse its calls."
+          fi
+
           sam deploy \
             --stack-name "${STACK_NAME}" \
             --region "${AWS_REGION}" \

@@ -26,6 +26,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, Optional
 
+from . import cipherweave_tokens
 from .logger import get_logger
 
 log = get_logger("mcp_client")
@@ -75,7 +76,8 @@ def _parse(raw: str) -> Optional[dict]:
     return None
 
 
-def _rpc(url: str, method: str, params: dict, request_id: int, timeout: float, opener=None) -> dict:
+def _rpc(url: str, method: str, params: dict, request_id: int, timeout: float, opener=None,
+         auth: Optional[Dict[str, str]] = None) -> dict:
     if opener is None:
         # Resolved here, not as a default argument: a default is captured at
         # definition time, so patching urlopen in a test would leave the
@@ -91,6 +93,7 @@ def _rpc(url: str, method: str, params: dict, request_id: int, timeout: float, o
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "MCP-Protocol-Version": PROTOCOL_VERSION,
+            **(auth or {}),
         },
         method="POST",
     )
@@ -119,6 +122,11 @@ def call_tool(
         return {"error": f"{sibling} has no endpoint configured ({SIBLING_ENV.get(sibling)})",
                 "sibling": sibling, "tool": tool}
 
+    # A CipherWeave token for this sibling, or nothing when none is
+    # configured -- in which case the call goes out exactly as it did before
+    # tokens existed. One token for both requests of the call.
+    auth = cipherweave_tokens.authorization(sibling, env)
+
     try:
         # The handshake is not ceremony: a server may refuse the revision, and
         # finding that out here names the cause rather than leaving a confusing
@@ -127,16 +135,21 @@ def call_tool(
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": {"name": "teamweave", "version": "1.0.0"},
-        }, 1, timeout, opener)
+        }, 1, timeout, opener, auth)
         served = (hello.get("result") or {}).get("protocolVersion")
         if served and served != PROTOCOL_VERSION:
             return {"error": f"{sibling} speaks MCP {served}, not {PROTOCOL_VERSION}",
                     "sibling": sibling, "tool": tool}
 
         answer = _rpc(url, "tools/call", {"name": tool, "arguments": arguments},
-                      2, timeout, opener)
+                      2, timeout, opener, auth)
     except urllib.error.HTTPError as exc:
-        log.warning("mcp_http_error sibling=%s tool=%s status=%s", sibling, tool, exc.code)
+        if exc.code == 401 and auth:
+            # Revoked, or signed by a key the sibling no longer trusts: the
+            # next call mints a new one rather than resending this one.
+            cipherweave_tokens.forget(sibling)
+        log.warning("mcp_http_error sibling=%s tool=%s status=%s token=%s",
+                    sibling, tool, exc.code, "cipherweave" if auth else "none")
         return {"error": f"HTTP {exc.code} from {sibling}", "sibling": sibling, "tool": tool}
     except Exception as exc:
         log.warning("mcp_call_failed sibling=%s tool=%s err=%s", sibling, tool, exc)

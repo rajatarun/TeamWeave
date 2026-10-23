@@ -15,12 +15,17 @@ reached by a command whose text contains "status". ``GET /devices/{id}``
 returns the registry record (id, name, type, capabilities) and not the live
 power state.
 
-Auth: that HTTP API has no authorizer. Calls go out with no credential.
-``DEVICEWEAVE_SECRET_ARN`` is optional. When it is set, the secret is read
-from Secrets Manager and sent as ``Authorization: Bearer``. DeviceWeave does
-not check that header today; the hook is for a deployment that has put a
-bearer in front of the API. The secret value is ``{"key": "..."}``,
-``{"token": "..."}``, or the raw token. Nothing here embeds a key.
+Auth: DeviceWeave checks a bearer on every REST route except ``GET /health``
+(``src/rest_auth.py`` there): a CipherWeave access token for ``deviceweave``,
+or its legacy static token while ``ACCEPT_LEGACY_TOKEN`` is true. Its
+``REST_AUTH_MODE`` is ``audit`` until its callers send one, which is why a
+call with no credential still works today. The routes used here need
+``read`` (the ``GET``s) and ``execute`` (``POST /execute``).
+
+So the header is, in order: a CipherWeave token for ``deviceweave`` when
+``cipherweave_tokens`` is configured and the issuer answers; else the static
+secret at ``DEVICEWEAVE_SECRET_ARN`` (``{"key": "..."}``, ``{"token":
+"..."}``, or the raw token); else nothing. Nothing here embeds a key.
 
 The stack that publishes the URL is ``deviceweave-prod`` (DeviceWeave's
 deploy workflow: ``deviceweave-${{ inputs.stage || 'prod' }}``), output
@@ -36,6 +41,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from . import cipherweave_tokens
 from .deadline import budget_for_call
 from .logger import get_logger
 
@@ -100,14 +106,18 @@ def _read_secret(arn: str) -> str:
 
 
 def headers(env: Optional[Dict[str, str]] = None,
-            secret_reader: Optional[Callable[[str], str]] = None) -> Dict[str, str]:
-    """Headers for one call. No Authorization unless a secret ARN is set.
+            secret_reader: Optional[Callable[[str], str]] = None,
+            token_auth: Optional[Callable[..., Dict[str, str]]] = None) -> Dict[str, str]:
+    """Headers for one call: a CipherWeave token, else the static secret, else none.
 
-    A set ARN that does not yield a token is an error: calling anyway would
-    drop the credential the operator configured and look like success.
+    A set static ARN that does not yield a token is an error: calling anyway
+    would drop the credential the operator configured and look like success.
     """
     source = os.environ if env is None else env
     built = {"Content-Type": "application/json", "Accept": "application/json"}
+    built.update((token_auth or cipherweave_tokens.authorization)("deviceweave", source))
+    if "Authorization" in built:
+        return built
     arn = str(source.get("DEVICEWEAVE_SECRET_ARN") or "").strip()
     if not arn:
         return built
@@ -271,6 +281,9 @@ def _request(method: str, path: str, body: Optional[Dict[str, Any]] = None, *,
         return {"ok": False, "status": 0, "error": f"DeviceWeave request failed: {exc}"}
     if not isinstance(payload, dict):
         payload = {"error": _result_text(payload)}
+    if status == 401:
+        # A refused CipherWeave token is not resent: the next call mints anew.
+        cipherweave_tokens.forget("deviceweave")
     if status < 200 or status >= 300:
         message = str(payload.get("error") or f"DeviceWeave returned HTTP {status}")
         return {"ok": False, "status": status, "error": message, "body": payload}
