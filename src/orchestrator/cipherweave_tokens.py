@@ -9,7 +9,7 @@ this module is what unblocks that switch.
 **One client per sibling.** The issuer's `audit-clients` treats a standing
 client with more than one audience as a master key, so TeamWeave holds four:
 `teamweave-<sibling>`, each in its own Secrets Manager secret
-(`CIPHERWEAVE_<SIBLING>_SECRET_ARN`). That is also the shape `issuer_admin.py
+(named `<CIPHERWEAVE_SECRET_PREFIX><sibling>`). That is also the shape `issuer_admin.py
 rotate-secret --secret-arn` writes, so a secret rotated there, or by
 `rotate-due`, is picked up here within `SECRET_TTL_S` with no deploy.
 
@@ -51,6 +51,7 @@ log = get_logger("cipherweave_tokens")
 # an audience the issuer knows, so asking would be refused on every call.
 AUDIENCES = ("screenweave", "toolweave", "cipherweave", "deviceweave")
 TOKEN_URL_ENV = "CIPHERWEAVE_TOKEN_URL"
+SECRET_PREFIX_ENV = "CIPHERWEAVE_SECRET_PREFIX"
 CLIENT_PREFIX = "teamweave-"
 SECRET_TTL_S = 300.0
 REFRESH_MARGIN_S = 60.0
@@ -61,8 +62,15 @@ _tokens: Dict[str, Tuple[str, float]] = {}
 _secrets: Dict[str, Tuple[Optional[Tuple[str, str]], float]] = {}
 
 
-def secret_env(audience: str) -> str:
-    return f"CIPHERWEAVE_{audience.upper()}_SECRET_ARN"
+def secret_id(audience: str, env: Dict[str, str]) -> str:
+    """Secrets Manager name of `audience`'s client secret, or "" if unconfigured.
+
+    One prefix variable instead of one ARN per sibling: a Lambda's environment
+    is capped at 4 KB in total, and four ARNs (about 570 bytes) took the
+    worker from under the cap to 4472 bytes, which failed the deploy.
+    """
+    prefix = str(env.get(SECRET_PREFIX_ENV) or "").strip()
+    return prefix + audience if prefix else ""
 
 
 def _read_secret(arn: str) -> str:
@@ -148,7 +156,7 @@ def authorization(audience: str, env: Optional[Dict[str, str]] = None, *,
     if audience not in AUDIENCES:
         return {}
     token_url = str(source.get(TOKEN_URL_ENV) or "").strip()
-    arn = str(source.get(secret_env(audience)) or "").strip()
+    arn = secret_id(audience, source)
     if not token_url or not arn:
         return {}
     if not token_url.startswith("https://"):
