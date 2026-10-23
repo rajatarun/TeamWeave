@@ -23,7 +23,8 @@ ours, which is the refusal the Gateway acts on.
 Three outcomes, kept distinct because they call for different actions:
 
     ok          the server echoed the requested revision -- wire the target
-    refused     it answered with another revision -- skip, and say which
+    refused     it answered with another revision, or requires a token the
+                target cannot send -- skip, and say which
     unverified  no answer, or an answer this script could not read -- wire it
                 anyway
 
@@ -110,6 +111,17 @@ def check(url: str, timeout: float = 15.0, opener=None) -> tuple[str, str]:
         with opener(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
+        # A 401 with a Bearer/DPoP challenge is not weak evidence: the target
+        # is created with no outbound credential, so AgentCore's own handshake
+        # gets the same 401 and the stack rolls back. That is what a sibling
+        # that has switched its CipherWeave auth to enforce answers.
+        challenge = str((exc.headers or {}).get("WWW-Authenticate") or "")
+        if exc.code == 401 and challenge.split(" ", 1)[0].lower() in ("bearer", "dpop"):
+            return REFUSED, (
+                "the endpoint requires a token (HTTP 401) and a gateway target is "
+                "created with no credential, so AgentCore's handshake would fail "
+                "the stack; the worker's own calls carry a CipherWeave token instead"
+            )
         return UNVERIFIED, f"HTTP {exc.code} from the endpoint"
     except Exception as exc:  # network, TLS, timeout -- all weak evidence
         return UNVERIFIED, f"{type(exc).__name__}: {str(exc)[:120]}"

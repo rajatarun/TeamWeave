@@ -279,6 +279,14 @@ Parameters:
     Description: >
       ToolWeave's MCP endpoint (https://.../mcp), published by that stack as
       ToolWeaveApiEndpoint. Empty means no target is created for it.
+  CipherWeaveTokenEndpoint:
+    Type: String
+    Default: ""
+    Description: >
+      CipherWeave's token endpoint (https://.../token), published by the
+      cipherweave-prod stack as IssuerTokenEndpoint. With it, the worker sends
+      a CipherWeave access token to each sibling whose client secret is
+      filled. Empty means no tokens are minted and calls go out as before.
   A2AAgentVersion:
     Type: String
     Default: "1.0.0"
@@ -465,6 +473,42 @@ Resources:
           "password": "${VectorDbPassword}",
           "url": "${VectorDbUrl}"
         }
+
+  # One CipherWeave client per sibling (`teamweave-<sibling>`), because the
+  # issuer treats a standing multi-audience client as a master key. Created
+  # unfilled: "{}" means not configured, and the worker sends no token for
+  # that sibling. Fill one with
+  #   issuer_admin.py rotate-secret --client-id teamweave-<sibling> --secret-arn <arn>
+  # which also lets `rotate-due` rotate it. CloudFormation writes the value
+  # only on create or when this literal changes, so a deploy leaves a filled
+  # secret alone. Nothing is lost if one is deleted: a rotate-secret reissues it.
+  CipherWeaveClientSecretScreenweave:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}/cipherweave-client/screenweave"
+      Description: Client secret for the CipherWeave client teamweave-screenweave
+      SecretString: "{}"
+
+  CipherWeaveClientSecretToolweave:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}/cipherweave-client/toolweave"
+      Description: Client secret for the CipherWeave client teamweave-toolweave
+      SecretString: "{}"
+
+  CipherWeaveClientSecretCipherweave:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}/cipherweave-client/cipherweave"
+      Description: Client secret for the CipherWeave client teamweave-cipherweave
+      SecretString: "{}"
+
+  CipherWeaveClientSecretDeviceweave:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}/cipherweave-client/deviceweave"
+      Description: Client secret for the CipherWeave client teamweave-deviceweave
+      SecretString: "{}"
 
   TeamConfigBucket:
     Type: AWS::S3::Bucket
@@ -664,6 +708,15 @@ Resources:
                   Action: [secretsmanager:GetSecretValue]
                   Resource: !Ref DeviceWeaveSecretArn
                 - !Ref "AWS::NoValue"
+              # The worker is the only function that calls a sibling, so it is
+              # the only one that can read the CipherWeave client secrets.
+              - Effect: Allow
+                Action: [secretsmanager:GetSecretValue]
+                Resource:
+                  - !Ref CipherWeaveClientSecretScreenweave
+                  - !Ref CipherWeaveClientSecretToolweave
+                  - !Ref CipherWeaveClientSecretCipherweave
+                  - !Ref CipherWeaveClientSecretDeviceweave
               - Effect: Allow
                 Action: [secretsmanager:GetSecretValue]
                 Resource: !Ref VectorDbSecret
@@ -1562,6 +1615,14 @@ Resources:
             - HasDeviceWeaveSecret
             - !Ref DeviceWeaveSecretArn
             - !Ref "AWS::NoValue"
+          # CipherWeave tokens for the siblings (cipherweave_tokens.py). The
+          # secrets are on the worker only: it is the one function that calls
+          # a sibling. An unfilled secret means that sibling gets no token.
+          CIPHERWEAVE_TOKEN_URL: !Ref CipherWeaveTokenEndpoint
+          CIPHERWEAVE_SCREENWEAVE_SECRET_ARN: !Ref CipherWeaveClientSecretScreenweave
+          CIPHERWEAVE_TOOLWEAVE_SECRET_ARN: !Ref CipherWeaveClientSecretToolweave
+          CIPHERWEAVE_CIPHERWEAVE_SECRET_ARN: !Ref CipherWeaveClientSecretCipherweave
+          CIPHERWEAVE_DEVICEWEAVE_SECRET_ARN: !Ref CipherWeaveClientSecretDeviceweave
           GEMINI_LAMBDA_ARN: !GetAtt GeminiResearchFunction.Arn
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
           OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTableName
@@ -3290,6 +3351,16 @@ Resources:
 
 
 Outputs:
+  CipherWeaveClientSecrets:
+    Description: >-
+      The secrets to fill with issuer_admin.py rotate-secret, one per client:
+      screenweave, toolweave, cipherweave, deviceweave (comma-separated, in that order).
+    Value: !Join
+      - ","
+      - - !Ref CipherWeaveClientSecretScreenweave
+        - !Ref CipherWeaveClientSecretToolweave
+        - !Ref CipherWeaveClientSecretCipherweave
+        - !Ref CipherWeaveClientSecretDeviceweave
   HttpApiUrl:
     Value: !Sub "https://${TeamWeaveApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
   StateMachineArn:
