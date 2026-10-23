@@ -22,8 +22,8 @@ from src.orchestrator import deviceweave, mcp_client
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 TOKEN_URL = "https://issuer.test/prod/token"
-ARN = "arn:aws:secretsmanager:us-east-1:1:secret:teamweave-screenweave"
-ENV = {cwt.TOKEN_URL_ENV: TOKEN_URL, cwt.secret_env("screenweave"): ARN}
+PREFIX = "teamweave/cipherweave-client/"
+ENV = {cwt.TOKEN_URL_ENV: TOKEN_URL, cwt.SECRET_PREFIX_ENV: PREFIX}
 SECRET = "s3cr3t-value-never-logged"
 
 
@@ -140,7 +140,7 @@ def test_the_secret_is_re_read_after_its_ttl():
 # ── not configured, or failing: the call goes out as before ─────────────────
 
 @pytest.mark.parametrize("env", [
-    {}, {cwt.TOKEN_URL_ENV: TOKEN_URL}, {cwt.secret_env("screenweave"): ARN},
+    {}, {cwt.TOKEN_URL_ENV: TOKEN_URL}, {cwt.SECRET_PREFIX_ENV: PREFIX},
 ], ids=["nothing", "no-secret", "no-issuer"])
 def test_unconfigured_sends_nothing_and_asks_nobody(env):
     issuer = Issuer()
@@ -156,7 +156,7 @@ def test_an_unfilled_secret_sends_nothing(value):
 
 
 def test_a_sibling_the_issuer_does_not_know_gets_nothing():
-    env = {**ENV, cwt.secret_env("datadictionary"): ARN}
+    env = ENV
     issuer = Issuer()
     assert auth(issuer, env=env, audience="datadictionary") == {}
     assert issuer.requests == []
@@ -252,7 +252,7 @@ def test_a_sibling_401_drops_the_cached_token(monkeypatch):
     assert len(issuer.requests) == 2, "minted again, not reused"
 
 
-DW_ENV = {cwt.TOKEN_URL_ENV: TOKEN_URL, cwt.secret_env("deviceweave"): ARN,
+DW_ENV = {cwt.TOKEN_URL_ENV: TOKEN_URL, cwt.SECRET_PREFIX_ENV: PREFIX,
           "DEVICEWEAVE_SECRET_ARN": "arn:static"}
 
 
@@ -307,11 +307,17 @@ def test_each_sibling_has_its_own_unfilled_secret():
         assert cwt.parse_credential(secret["Properties"]["SecretString"], audience) is None
 
 
-def test_the_worker_is_given_the_issuer_and_every_secret():
+def test_the_worker_is_given_the_issuer_and_the_secret_prefix():
     env = RESOURCES["WorkerFunction"]["Properties"]["Environment"]["Variables"]
     assert env[cwt.TOKEN_URL_ENV] == {"Ref": "CipherWeaveTokenEndpoint"}
+    assert env[cwt.SECRET_PREFIX_ENV] == {"Fn::Sub": "${AWS::StackName}/cipherweave-client/"}
+
+
+def test_each_secret_is_named_prefix_plus_sibling():
+    """The worker builds the name from the prefix, so a rename here silently unconfigures it."""
     for audience, logical in SECRETS.items():
-        assert env[cwt.secret_env(audience)] == {"Ref": logical}
+        name = RESOURCES[logical]["Properties"]["Name"]
+        assert name == {"Fn::Sub": "${AWS::StackName}/cipherweave-client/" + audience}
 
 
 def _statements(role):
