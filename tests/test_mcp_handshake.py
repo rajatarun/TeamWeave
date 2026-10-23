@@ -113,6 +113,26 @@ def test_an_http_error_is_unverified():
     assert "403" in detail
 
 
+@pytest.mark.parametrize("scheme", ["Bearer", "DPoP"])
+def test_a_token_challenge_is_refused_not_wired(scheme):
+    """A sibling enforcing CipherWeave auth. The target has no credential, so
+    wiring it would fail AgentCore's handshake and roll the stack back."""
+    challenge = f'{scheme} resource_metadata="https://x/.well-known/oauth-protected-resource"'
+    def _open(request, timeout=None):
+        raise urllib.error.HTTPError("https://x/mcp", 401, "Unauthorized",
+                                     {"WWW-Authenticate": challenge}, None)
+    outcome, detail = mcp_handshake.check("https://x/mcp", opener=_open)
+    assert outcome == mcp_handshake.REFUSED
+    assert "401" in detail
+
+
+def test_a_401_without_a_token_challenge_stays_unverified():
+    def _open(request, timeout=None):
+        raise urllib.error.HTTPError("https://x/mcp", 401, "Unauthorized", {}, None)
+    outcome, _ = mcp_handshake.check("https://x/mcp", opener=_open)
+    assert outcome == mcp_handshake.UNVERIFIED
+
+
 def test_a_network_failure_is_unverified_and_never_raises():
     def _open(request, timeout=None):
         raise OSError("connection reset")
