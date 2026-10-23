@@ -1615,14 +1615,14 @@ Resources:
             - HasDeviceWeaveSecret
             - !Ref DeviceWeaveSecretArn
             - !Ref "AWS::NoValue"
-          # CipherWeave tokens for the siblings (cipherweave_tokens.py). The
-          # secrets are on the worker only: it is the one function that calls
-          # a sibling. An unfilled secret means that sibling gets no token.
+          # CipherWeave tokens for the siblings (cipherweave_tokens.py). One
+          # prefix, not one ARN per sibling: a function's environment is
+          # capped at 4 KB in total, and four secret ARNs took this one from
+          # under the cap to 4472 bytes and failed the deploy. The secrets are
+          # named <prefix><sibling>; the grant above names them by Ref. An
+          # unfilled secret means that sibling gets no token.
           CIPHERWEAVE_TOKEN_URL: !Ref CipherWeaveTokenEndpoint
-          CIPHERWEAVE_SCREENWEAVE_SECRET_ARN: !Ref CipherWeaveClientSecretScreenweave
-          CIPHERWEAVE_TOOLWEAVE_SECRET_ARN: !Ref CipherWeaveClientSecretToolweave
-          CIPHERWEAVE_CIPHERWEAVE_SECRET_ARN: !Ref CipherWeaveClientSecretCipherweave
-          CIPHERWEAVE_DEVICEWEAVE_SECRET_ARN: !Ref CipherWeaveClientSecretDeviceweave
+          CIPHERWEAVE_SECRET_PREFIX: !Sub "${AWS::StackName}/cipherweave-client/"
           GEMINI_LAMBDA_ARN: !GetAtt GeminiResearchFunction.Arn
           PROVISION_FUNCTION_NAME: !Ref ProvisionTeamFunction
           OBSERVATORY_METRICS_TABLE: !Ref ObservatoryMetricsTableName

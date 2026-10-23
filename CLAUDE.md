@@ -810,6 +810,13 @@ cached until 60 s before it expires.
   token outage before any sibling requires a token. Once a sibling
   enforces, its 401 is the error the step reports. A 401 also drops the
   cached token.
+- **One prefix, not four ARNs.** The worker is told `CIPHERWEAVE_SECRET_PREFIX`
+  and reads each secret by name (`<prefix><sibling>`); the IAM grant still
+  names the four by Ref. A function's environment is capped at 4096 bytes in
+  total, and one variable per sibling ARN (about 570 bytes) took the worker
+  to 4472 and failed the first deploy, which rolled back cleanly.
+  `tests/test_function_env_size.py` estimates every function's environment
+  against the cap, since nothing else checks it before `sam deploy` does.
 - **DeviceWeave.** The CipherWeave token comes first. Without one, the
   static `DEVICEWEAVE_SECRET_ARN` is used, then nothing.
 - **Gateway targets.** They have no credential. `scripts/mcp_handshake.py`
