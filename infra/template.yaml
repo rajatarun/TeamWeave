@@ -32,8 +32,8 @@ Parameters:
     Description: Vector store collection/table identifier (used for explicit RAG mode)
   VectorDbHost:
     Type: String
-    Default: "resume-rag-db.cplgkqp9qd3a.us-east-1.rds.amazonaws.com"
-    Description: PostgreSQL host for explicit RAG mode (pgvector)
+    Default: ""
+    Description: PostgreSQL host for explicit RAG mode (pgvector). Set via deploy --parameter-overrides or VECTOR_DB_HOST repository variable in CI.
   VectorDbPort:
     Type: String
     Default: "5432"
@@ -54,8 +54,8 @@ Parameters:
   VectorDbUrl:
     Type: String
     NoEcho: true
-    Default: "postgresql://masteruser:YourStrongPassword123!@resume-rag-db.cplgkqp9qd3a.us-east-1.rds.amazonaws.com:5432/postgres"
-    Description: Full PostgreSQL connection URL. When set, this overrides host/port/name/user/password parameters.
+    Default: ""
+    Description: Full PostgreSQL connection URL. When set, this overrides host/port/name/user/password parameters. Prefer VECTOR_DB_SECRET_ARN at runtime instead of storing credentials in stack parameters.
   ContextWeaveUrl:
     Type: String
     Default: ""
@@ -121,8 +121,8 @@ Parameters:
     Description: Optional. Leave blank to create a new DynamoDB table.
   VpcId:
     Type: String
-    Default: "vpc-f3c92a8a"
-    Description: VPC ID for Lambda networking to RDS.
+    Default: ""
+    Description: VPC ID for Lambda networking to RDS. Required on first deploy (CI passes VPC_ID repository variable).
   LambdaSubnetIds:
     Type: String
     Default: ""
@@ -131,8 +131,8 @@ Parameters:
       LambdaSubnetIds output. Subnets are created and owned by shared.yaml.
   RdsSecurityGroupId:
     Type: String
-    Default: "sg-06e6751625773c1bf"
-    Description: RDS security group ID (resume-rag-sg) to allow PostgreSQL traffic from Lambda.
+    Default: ""
+    Description: RDS security group ID allowing PostgreSQL traffic from Lambda. Required on first deploy (CI passes RDS_SECURITY_GROUP_ID repository variable).
   SamDeployerRoleName:
     Type: String
     Default: ""
@@ -143,8 +143,8 @@ Parameters:
     Description: Optional IAM role name assumed during `sam deploy` that needs S3 team config upload permissions.
   BedrockAgentServiceRoleArn:
     Type: String
-    Default: "arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun"
-    Description: IAM role ARN passed to Bedrock CreateAgent as AgentResourceRoleArn.
+    Default: ""
+    Description: IAM role ARN passed to Bedrock CreateAgent as AgentResourceRoleArn (CI passes BEDROCK_AGENT_SERVICE_ROLE_ARN secret).
   AllowedCorsOrigin:
     Type: String
     Default: "'*'"
@@ -156,7 +156,7 @@ Parameters:
     Description: Set to 'true' to deploy a WAF WebACL with AWS managed rule sets and attach it to the API Gateway stage.
   SharedStackName:
     Type: String
-    Default: "tarun-teamweave-shared"
+    Default: "teamweave-shared"
     Description: >
       Name of the shared infrastructure CloudFormation stack (shared.yaml). Its outputs
       supply the Observatory DynamoDB table, AMP workspace, and shared networking outputs used here.

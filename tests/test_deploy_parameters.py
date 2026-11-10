@@ -33,6 +33,8 @@ WORKFLOW_PATH = REPO / ".github" / "workflows" / "deploy.yml"
 # forces a decision about whether the stack needs to be told.
 ENV_TO_PARAMETER = {
     "ENABLE_AGENTCORE": "EnableAgentCore",
+    # Optional CI step only — no matching CloudFormation parameter.
+    "EXPERTISE_RAG_ARTIFACTS_BUCKET": "",
 }
 
 
@@ -62,6 +64,8 @@ def gating_env_vars(workflow) -> set[str]:
 
 @pytest.mark.parametrize("env_name,parameter", sorted(ENV_TO_PARAMETER.items()))
 def test_a_feature_switch_is_sent_to_the_stack(deploy_run, env_name, parameter):
+    if not parameter:
+        pytest.skip(f"{env_name} gates CI only, not a template parameter")
     assert f'"{parameter}=${{{env_name}}}"' in deploy_run, (
         f"{parameter} is not in --parameter-overrides, so sam deploy will send "
         f"UsePreviousValue=true and the stack will ignore {env_name} entirely"
@@ -89,6 +93,8 @@ def test_the_switch_has_a_workflow_level_value(workflow, env_name):
 
 @pytest.mark.parametrize("env_name,parameter", sorted(ENV_TO_PARAMETER.items()))
 def test_the_workflow_value_is_one_the_parameter_accepts(workflow, parameter, env_name):
+    if not parameter:
+        pytest.skip(f"{env_name} gates CI only, not a template parameter")
     template = yaml.safe_load(
         re.sub(r"!\w+", "", (REPO / "infra" / "template.yaml").read_text())
     )
