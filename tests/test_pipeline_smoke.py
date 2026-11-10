@@ -119,7 +119,7 @@ def test_it_runs_after_the_configs_it_exercises_are_uploaded():
 import json as _json  # noqa: E402
 
 
-STATE_MACHINE_ARN = "arn:aws:states:us-east-1:239571291755:stateMachine:tarun-content-team-state-machine"
+STATE_MACHINE_ARN = "arn:aws:states:us-east-1:123456789012:stateMachine:teamweave-state-machine"
 
 
 class FakeSfn:

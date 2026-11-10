@@ -41,7 +41,7 @@ skinparam rectangle {
     FontSize 10
 }
 
-title <size:18><b>TeamWeave — AWS Infrastructure Diagram</b></size>\n<size:12>Region: us-east-1 | Account: 239571291755</size>
+title <size:18><b>TeamWeave — AWS Infrastructure Diagram</b></size>\n<size:12>Region: us-east-1 | Account: 123456789012 (example)</size>
 
 ' ─── INTERNET / EXTERNAL ──────────────────────────────────────────────────────
 actor "End User /\nAdmin Client" as client #LightBlue
@@ -54,7 +54,7 @@ rectangle "Google\nGemini 2.0 Flash" as gemini_ext #FFF3E0 {
 }
 
 ' ─── AWS ACCOUNT BOUNDARY ─────────────────────────────────────────────────────
-package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD {
+package "AWS Account: 123456789012 (example)  |  Region: us-east-1" as aws_account #E8F4FD {
 
     ' ─── API LAYER ────────────────────────────────────────────────────────────
     package "API Layer" as api_layer #E3F2FD {
@@ -77,7 +77,7 @@ package "AWS Account: 239571291755  |  Region: us-east-1" as aws_account #E8F4FD
     }
 
     ' ─── VPC ──────────────────────────────────────────────────────────────────
-    package "VPC: vpc-f3c92a8a" as vpc #FCE4EC {
+    package "VPC: vpc-0123456789abcdef0 (example)" as vpc #FCE4EC {
         package "Private Subnets (us-east-1a/b)" as private_subnets #F8BBD9 {
             Lambda(worker_fn, "Worker\nLambda", "worker_handler.py\nPython 3.12\n(VPC-enabled)")
             RDS(rds, "PostgreSQL 15\n+ pgvector", "resume-rag-db\nrag_chunks table\nSSL verify-full")
