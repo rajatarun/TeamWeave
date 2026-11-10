@@ -403,8 +403,8 @@ Contains the raw JSON output from the Bedrock agent for that step, validated aga
 ## Infrastructure
 
 ### AWS Region & Account
-- **Region:** `us-east-1`
-- **Account:** `239571291755`
+- **Region:** `us-east-1` (typical; override via `AWS_REGION` repository variable in CI)
+- **Account:** your AWS account ID (see `docs/DEPLOY_CONFIG.md` — not stored in git)
 
 ### Lambda Functions
 
@@ -445,7 +445,7 @@ Contains the raw JSON output from the Bedrock agent for that step, validated aga
 ### Networking
 
 ```
-VPC: vpc-f3c92a8a (us-east-1)
+VPC: `vpc-xxxxxxxx` (example; set `VPC_ID` in CI — see `docs/DEPLOY_CONFIG.md`)
 │
 ├── Private Subnets
 │   └── WorkerFunction ENIs (for RDS access)
@@ -458,7 +458,7 @@ The Worker Lambda is deployed in VPC private subnets to access the RDS PostgreSQ
 
 ### Bedrock Agent Service Role
 
-`BedrockAgentServiceRole-Tarun` — allows Bedrock agents to invoke Lambda action groups (Gemini research tool).
+`BedrockAgentServiceRole` (example IAM role name) — allows Bedrock agents to invoke Lambda action groups (Gemini research tool). Pass the full role ARN via `BEDROCK_AGENT_SERVICE_ROLE_ARN` in CI (see `docs/DEPLOY_CONFIG.md`).
 
 ---
 
@@ -538,7 +538,7 @@ Trigger: push to main | manual workflow_dispatch
          ▼
 2. Configure AWS credentials
    - OIDC role assumption (no long-lived keys)
-   - Role: teamweave-github-actions-sam-deployer
+   - Role: `AWS_DEPLOY_ROLE_ARN` repository secret (OIDC deployer role)
          │
          ▼
 3. SAM Build

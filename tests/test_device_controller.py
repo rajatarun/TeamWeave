@@ -295,8 +295,8 @@ def test_the_worker_is_given_the_url_from_the_deviceweave_stack():
     assert "DeviceWeaveSecretArn:" in TEMPLATE
     assert 'AgentRuntimeName: "teamweave_device_controller"' in TEMPLATE
     assert "device_controller" in TEMPLATE
-    # Provenance: DeviceWeave's deploy workflow, stage default prod.
-    assert "DEVICEWEAVE_STACK_NAME: deviceweave-prod" in WORKFLOW
+    # Resolved from a repository variable, not a hardcoded stack name in the workflow.
+    assert "DEVICEWEAVE_STACK_NAME: ${{ vars.DEVICEWEAVE_STACK_NAME }}" in WORKFLOW
     assert "DeviceWeaveApiBaseUrl=${DEVICEWEAVE_URL}" in WORKFLOW
     assert "ApiBaseUrl" in WORKFLOW
     doc = yaml.load(TEMPLATE, Loader=CfnLoader)

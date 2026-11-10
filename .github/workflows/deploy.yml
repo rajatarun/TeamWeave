@@ -10,27 +10,32 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: ${{ vars.AWS_REGION }}
   # Mirrors the EnableAgentCore template parameter; see the provisioning step.
   ENABLE_AGENTCORE: "true"
-  STACK_NAME: tarun-content-team
-  SHARED_STACK_NAME: tarun-teamweave-shared
-  BEDROCK_AGENTS_STACK_NAME: tarun-bedrock-agents
-  CONTEXTWEAVE_STACK_NAME: contextweave-rag-prod
+  STACK_NAME: ${{ vars.TEAMWEAVE_STACK_NAME }}
+  SHARED_STACK_NAME: ${{ vars.TEAMWEAVE_SHARED_STACK_NAME }}
+  BEDROCK_AGENTS_STACK_NAME: ${{ vars.BEDROCK_AGENTS_STACK_NAME }}
+  CONTEXTWEAVE_STACK_NAME: ${{ vars.CONTEXTWEAVE_STACK_NAME }}
   # DeviceWeave's own deploy workflow sets
   # STACK_NAME: deviceweave-${{ github.event.inputs.stage || 'prod' }}.
   # One named stack. A dev fallback would point live device control at a
   # different registry and still report success.
-  DEVICEWEAVE_STACK_NAME: deviceweave-prod
+  DEVICEWEAVE_STACK_NAME: ${{ vars.DEVICEWEAVE_STACK_NAME }}
+  SIWE_STACK_NAME: ${{ vars.SIWE_STACK_NAME }}
+  CIPHERWEAVE_STACK_NAME: ${{ vars.CIPHERWEAVE_STACK_NAME }}
   FOUNDATION_MODEL_ID: deepseek.v3.2
-  AGENT_SERVICE_ROLE_ARN: arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun
+  AGENT_SERVICE_ROLE_ARN: ${{ secrets.BEDROCK_AGENT_SERVICE_ROLE_ARN }}
   TEAM_CONFIG_PREFIX: teams
-  VECTOR_DB_TABLE: resume-rag-db
-  GEMINI_SECRET_ARN: arn:aws:secretsmanager:us-east-1:239571291755:secret:gemini/api_key-SKx2NV
-  SAM_DEPLOYER_ROLE_NAME: teamweave-github-actions-sam-deployer
-  ASSUME_ROLE_ARN: arn:aws:iam::239571291755:role/teamweave-github-actions-sam-deployer
+  VECTOR_DB_TABLE: ${{ vars.VECTOR_DB_TABLE }}
+  GEMINI_SECRET_ARN: ${{ secrets.GEMINI_SECRET_ARN }}
+  ASSUME_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+  SAM_DEPLOYER_ROLE_NAME: ${{ vars.SAM_DEPLOYER_ROLE_NAME }}
   # VPC / networking config consumed by the shared stack
-  VPC_ID: vpc-f3c92a8a
+  VPC_ID: ${{ vars.VPC_ID }}
+  RDS_SECURITY_GROUP_ID: ${{ vars.RDS_SECURITY_GROUP_ID }}
+  VECTOR_DB_HOST: ${{ vars.VECTOR_DB_HOST }}
+  EXPERTISE_RAG_ARTIFACTS_BUCKET: ${{ vars.EXPERTISE_RAG_ARTIFACTS_BUCKET }}
   INTERNET_GATEWAY_ID: ""
   LAMBDA_SUBNET_CIDR_AZ1: "172.31.96.0/24"
   LAMBDA_SUBNET_CIDR_AZ2: "172.31.97.0/24"
@@ -71,11 +76,12 @@ jobs:
         uses: aws-actions/setup-sam@v2
 
       - name: Push docs to expertise RAG artifacts
+        if: env.EXPERTISE_RAG_ARTIFACTS_BUCKET != ''
         run: |
           REPO_NAME="${GITHUB_REPOSITORY##*/}"
           find . \( -name "*.md" -o -name "*.puml" \) \
             -not -path "*/assets/*" | while read -r file; do
-            aws s3 cp "$file" "s3://expertise-rag-artifacts-239571291755-prod/raw/${REPO_NAME}/${file#./}"
+            aws s3 cp "$file" "s3://${EXPERTISE_RAG_ARTIFACTS_BUCKET}/raw/${REPO_NAME}/${file#./}"
           done
 
       # CLAUDE.md has said "run pytest before any PR" for as long as the suite
@@ -312,12 +318,12 @@ jobs:
       - name: Fetch SIWE Authorizer ARN from siwe-infra stack
         run: |
           SIWE_AUTHORIZER_FUNCTION_ARN=$(aws cloudformation describe-stacks \
-            --stack-name siwe-infra \
+            --stack-name "${SIWE_STACK_NAME}" \
             --region "${AWS_REGION}" \
             --query "Stacks[0].Outputs[?OutputKey=='AuthorizerFunctionArn'].OutputValue" \
             --output text)
           if [ -z "${SIWE_AUTHORIZER_FUNCTION_ARN}" ]; then
-            echo "ERROR: AuthorizerFunctionArn not found in siwe-infra stack outputs"
+            echo "ERROR: AuthorizerFunctionArn not found in ${SIWE_STACK_NAME} stack outputs"
             exit 1
           fi
           echo "SIWE_AUTHORIZER_FUNCTION_ARN=${SIWE_AUTHORIZER_FUNCTION_ARN}" >> $GITHUB_ENV
@@ -404,7 +410,11 @@ jobs:
             "EnableAgentCore=${ENABLE_AGENTCORE}"
             "TeamConfigPrefix=${TEAM_CONFIG_PREFIX}"
             "VectorDbTable=${VECTOR_DB_TABLE}"
+            "VectorDbHost=${VECTOR_DB_HOST}"
             "GeminiSecretArn=${GEMINI_SECRET_ARN}"
+            "BedrockAgentServiceRoleArn=${AGENT_SERVICE_ROLE_ARN}"
+            "VpcId=${VPC_ID}"
+            "RdsSecurityGroupId=${RDS_SECURITY_GROUP_ID}"
             "SamDeployerRoleName=${SAM_DEPLOYER_ROLE_NAME}"
             "SamAssumeRoleName=${ASSUME_ROLE_NAME}"
             "SiweAuthorizerFunctionArn=${SIWE_AUTHORIZER_FUNCTION_ARN}"
@@ -641,7 +651,7 @@ jobs:
           # while their auth is in audit mode. Same stack name as the
           # CipherWeave target in the loop above.
           CW_TOKEN_URL=$(aws cloudformation describe-stacks \
-            --stack-name cipherweave-prod \
+            --stack-name "${CIPHERWEAVE_STACK_NAME}" \
             --region "${AWS_REGION}" \
             --query "Stacks[0].Outputs[?OutputKey=='IssuerTokenEndpoint'].OutputValue" \
             --output text 2>/dev/null) || CW_TOKEN_URL=""
@@ -652,7 +662,7 @@ jobs:
             echo "CipherWeave token endpoint: ${CW_TOKEN_URL}"
           else
             PARAM_OVERRIDES+=("CipherWeaveTokenEndpoint=")
-            echo "::warning::cipherweave-prod publishes no IssuerTokenEndpoint. The worker sends no CipherWeave tokens; siblings that enforce auth will refuse its calls."
+            echo "::warning::${CIPHERWEAVE_STACK_NAME} publishes no IssuerTokenEndpoint. The worker sends no CipherWeave tokens; siblings that enforce auth will refuse its calls."
           fi
 
           sam deploy \

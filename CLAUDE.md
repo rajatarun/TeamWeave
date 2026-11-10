@@ -1431,10 +1431,9 @@ curl -sS "$TEAMWEAVE_API_BASE/observability"
 
 ## AWS Context
 
-- **Region**: `us-east-1`
-- **Account**: `239571291755`
-- **GitHub Actions Role**: `teamweave-github-actions-sam-deployer` (OIDC)
-- **Bedrock Service Role**: `arn:aws:iam::239571291755:role/BedrockAgentServiceRole-Tarun`
+Deploy coordinates (account ID, role ARNs, stack names, VPC IDs, and similar) are **not** checked into this repository. Configure them as GitHub Actions **secrets** and **variables** before CI deploy; see `docs/DEPLOY_CONFIG.md` for the full list and placeholder examples.
+
+Local defaults use `us-east-1` unless overridden. Integration tests and deploy scripts expect AWS credentials from the environment or `aws login`, not literals in source.
 
 ---
 
