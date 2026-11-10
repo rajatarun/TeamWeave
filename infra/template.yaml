@@ -143,7 +143,7 @@ Parameters:
     Description: Optional IAM role name assumed during `sam deploy` that needs S3 team config upload permissions.
   BedrockAgentServiceRoleArn:
     Type: String
-    Default: ""
+    AllowedPattern: "^arn:(aws[a-zA-Z-]*)?:iam::[0-9]{12}:role/.+$"
     Description: IAM role ARN passed to Bedrock CreateAgent as AgentResourceRoleArn (CI passes BEDROCK_AGENT_SERVICE_ROLE_ARN secret).
   AllowedCorsOrigin:
     Type: String
