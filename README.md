@@ -1,166 +1,152 @@
 # TeamWeave
 
-Config-driven multi-agent orchestration platform on AWS. Define AI pipelines as JSON — no code changes needed to add new teams or workflows.
+**Define multi-agent AI pipelines in JSON and run them on AWS** — no Lambda
+redeploy to add teams, steps, or schemas.
 
-Two production patterns ship out of the box:
+**Who it is for:** Platform and product engineers building async agent workflows
+on Bedrock (AgentCore), with structured outputs, optional RAG, and HTTP/A2A
+clients.
 
-| Pattern | What it does |
-|---------|-------------|
-| **Visibility Team** | Content marketing assembly line (strategy → draft → edit → distribute) |
-| **Improvement Team** | Personal learning system (coach → plan → daily tasks) |
-
----
-
-## Architecture
-
-> Full detail: [docs/architecture.md](docs/architecture.md)
-
-TeamWeave is split into two planes:
-
-- **Control Plane** — API Gateway → Trigger Lambda starts an async Step Functions execution and returns a `run_id`. Status Lambda polls execution state via `DescribeExecution`.
-- **Execution Plane** — Worker Lambda loads a `team.json` from S3 and runs each workflow step: fetch RAG context → build prompt → invoke Bedrock Agent → validate + persist output.
-
-```
-Client → API Gateway → Trigger Lambda → Step Functions → Worker Lambda → Bedrock Agents
-                                              │
-                                    Status Lambda (polls)
-```
-
-### C4 Diagrams
-
-#### Level 1 — System Context
-![C4 Level 1: System Context](docs/c4/TeamWeave%20-%20C4%20Level%201:%20System%20Context.png)
-
-> [Source PUML](docs/c4/context.puml) · [Architecture: System Overview](docs/architecture.md#system-overview)
-
-#### Level 2 — Container Diagram
-![C4 Level 2: Container Diagram](docs/c4/TeamWeave%20-%20C4%20Level%202:%20Container%20Diagram.png)
-
-> [Source PUML](docs/c4/container.puml) · [Architecture: System Components](docs/architecture.md#system-components)
-
-#### Level 3 — Worker Lambda Components
-![C4 Level 3: Component Diagram (Worker Lambda)](docs/c4/TeamWeave%20-%20C4%20Level%203:%20Component%20Diagram%20(Worker%20Lambda).png)
-
-> [Source PUML](docs/c4/component.puml) · [Architecture: Data Flow](docs/architecture.md#data-flow)
-
-#### AWS Infrastructure
-![AWS Infrastructure Diagram](docs/TeamWeave%20-%20AWS%20Infrastructure%20Diagram.png)
-
-> [Source PUML](docs/aws-infrastructure.puml) · [Architecture: Infrastructure](docs/architecture.md#infrastructure)
+> **Demo recording:** A walkthrough GIF or short video will be linked here
+> after the first public demo is recorded. Until then, use the offline examples
+> below.
 
 ---
 
-## Repository Layout
+## What you get
 
-```
-src/orchestrator/       Runtime Lambda handlers and orchestration modules
-  trigger_handler.py    API entry point — validates requests, starts executions
-  worker_handler.py     Pipeline engine — runs workflow steps via Bedrock Agents
-  status_handler.py     Status polling — wraps DescribeExecution
-  config_loader.py      Loads team.json from S3
-  rag.py                RAG retrieval (pgvector explicit mode + history mode)
-  db.py                 DynamoDB DAO for runs, steps, tasks
-  gemini.py             Gemini API key retrieval from Secrets Manager
-config/examples/        Example team configs, schemas, roles, departments
-infra/                  SAM/CloudFormation templates — see infra/README.md
-tests/                  Unit tests
-docs/                   Architecture doc, C4 diagrams, AWS infrastructure diagram
-```
+| Area | Description |
+|------|-------------|
+| **Workflows** | Step Functions + Worker Lambda execute `team.json` pipelines |
+| **Configs** | Agents, prompts, JSON Schema, RAG mode, pre/post tools |
+| **Example teams** | Personal productivity flows under `config/examples/teams/` (e.g. `daily_operator`, `linkedin_quick_post`, `job_hunter`) plus `tarun_visibility_team` (content pipeline) |
+| **Integrations** | A2A agent card, optional MCP sibling calls, OpenTelemetry-friendly spans — see [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) |
+| **API** | REST per [openapi/teamweave.yaml](openapi/teamweave.yaml); SIWE JWT on protected routes |
+
+**Not local-first:** A full production run needs **AWS** (Lambda, Step Functions,
+DynamoDB, S3, Bedrock/AgentCore). Without cloud resources you can still develop
+with **unit tests** and **offline config tools** in [`examples/`](examples/).
 
 ---
 
-## Quick Start
+## 5-minute quickstart (no AWS account)
+
+Verified on Python 3.12:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest -q tests/test_workflow_integrity.py tests/test_example_team_lint.py
+python examples/validate_team.py --all-examples
+python examples/generate_a2a_card.py --base-url https://api.example.com | head -30
+```
+
+Install virtualenv support on Debian if needed: `sudo apt install python3.12-venv`.
+
+---
+
+## Deploy (AWS required)
 
 ```bash
 sam build -t infra/template.yaml
 sam deploy --guided -t infra/template.yaml
 ```
 
-See [infra/README.md](infra/README.md) for parameters and Bedrock agent provisioning.
+Parameters, Bedrock setup, and stack layout: [infra/README.md](infra/README.md).
+
+After deploy, resolve stack outputs for scripts and curl:
+
+```bash
+eval "$(python scripts/stack_env.py --stack YOUR_STACK_NAME --format sh)"
+```
 
 ---
 
-## API
+## Copy-paste examples
 
-### Workflow
+### 1. Lint a team config (offline)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/team/task` | Start a pipeline run → returns `{ run_id, execution_arn }` |
-| `GET` | `/team/task/{run_id}` | Poll status → `RUNNING \| SUCCEEDED \| FAILED` + result |
-| `GET` | `/improve/tasks` | List improvement tasks for an owner |
-| `POST` | `/improve/task/done` | Mark improvement task complete |
+```bash
+python examples/validate_team.py config/examples/teams/daily_operator/v1/team.json
+```
 
-### Management (async via Step Functions)
+### 2. Preview the A2A Agent Card from example teams (offline)
 
-`/agents`, `/teams`, `/roles`, `/departments` — full CRUD, dispatched to the Provision Lambda.
+```bash
+python examples/generate_a2a_card.py --base-url "https://YOUR_API_GATEWAY_URL"
+```
 
-### Observability
+### 3. Start a pipeline run (after deploy)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/observability/metrics` | Bedrock telemetry from Amazon Managed Prometheus |
+Replace the base URL and use a valid SIWE bearer token if your stage enforces auth:
 
-Full request/response shapes: [Architecture: API Reference](docs/architecture.md#api-reference)
+```bash
+export API_URL="https://YOUR_API_GATEWAY_URL"
+curl -sS -X POST "$API_URL/team/task" \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer YOUR_JWT_IF_REQUIRED" \
+  -d '{
+    "team": "daily_operator",
+    "version": "v1",
+    "request": {
+      "brain_dump": "Inbox full, need to ship blog post and fix CI flake."
+    }
+  }'
+# Poll: curl -sS "$API_URL/team/task/RUN_ID"
+```
 
 ---
 
-## Team Configuration
+## Architecture
 
-A team lives at `teams/{team}/{version}/team.json` in S3:
+```
+Client → API Gateway → Trigger Lambda → Step Functions → Worker Lambda → AgentCore / tools
+                              │
+                    Status Lambda (poll)
+```
+
+Diagrams and detail: [docs/architecture.md](docs/architecture.md) · [docs/design/overview.md](docs/design/overview.md)
+
+---
+
+## Repository layout
+
+```
+src/orchestrator/     Lambda handlers and pipeline logic
+src/agentcore/        AgentCore runtime entrypoint (ARM64 artifact)
+config/examples/      Example teams, schemas, roles
+infra/                SAM / CloudFormation
+tests/                pytest suite
+examples/             Offline lint and A2A card preview
+docs/                 Architecture, integrations, extending guide
+```
+
+---
+
+## Configuration sketch
+
+Teams live at `teams/{name}/{version}/team.json` in the config bucket (examples
+in-repo under `config/examples/teams/`):
 
 ```json
 {
-  "team":     { "name": "...", "version": "v1", "owner": "..." },
-  "globals":  { "north_star": "...", "features": { "explicit_rag": true } },
-  "agents":   [{ "id": "...", "bedrock": { "agentId": "...", "aliasId": "..." }, "goal_template": "..." }],
-  "workflow": [{ "step": "agent_id", "inputs": ["field1"] }]
+  "team": { "name": "daily_operator", "version": "v1" },
+  "agents": [{ "id": "triage", "goal_template": "...", "schema_ref": "day_triage_v1" }],
+  "workflow": [{ "step": "triage", "inputs": ["request.brain_dump"] }],
+  "schemas": { "day_triage_v1": { "type": "object" } }
 }
 ```
 
-Full schema: [Architecture: Data Models](docs/architecture.md#data-models)
+Extend teams: [docs/EXTENDING.md](docs/EXTENDING.md)
 
 ---
 
-## Key Environment Variables
+## Contributing
 
-| Variable | Purpose |
-|----------|---------|
-| `CONFIG_BUCKET` | S3 bucket for team configs |
-| `ARTIFACT_BUCKET` | S3 bucket for run artifacts |
-| `DDB_TABLE` | DynamoDB table for runs and tasks |
-| `STATE_MACHINE_ARN` | Step Functions state machine |
-| `VECTOR_DB_SECRET_ARN` | Secrets Manager ARN for pgvector credentials |
-| `GEMINI_SECRET_ARN` | Secrets Manager ARN for Gemini API key |
-
-All wired automatically by `infra/template.yaml`.
-
----
-
-## Local Development
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pytest
-```
-
----
-
-## Example
-
-```bash
-# Start a run
-curl -X POST "$API_URL/team/task" \
-  -H 'content-type: application/json' \
-  -d '{"team":"tarun_visibility_team","version":"v1","request":{"topic":"AI orchestration","objective":"LinkedIn post","audience":"engineering leaders"}}'
-
-# Poll for result
-curl "$API_URL/teams/task/<run_id>"
-```
+[CONTRIBUTING.md](CONTRIBUTING.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) ·
+[SECURITY.md](SECURITY.md)
 
 ---
 
 ## License
 
-MIT
+Apache License 2.0 — see [LICENSE](LICENSE).
