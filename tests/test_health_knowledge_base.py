@@ -411,7 +411,7 @@ def test_the_create_body_is_the_documented_managed_shape():
     create = validator.validate(
         {
             "name": "health-registry-teamweave",
-            "roleArn": "arn:aws:iam::239571291755:role/kb",
+            "roleArn": "arn:aws:iam::123456789012:role/kb",
             "description": "Index of ContextWeave's health bucket for the health_prep team.",
             "knowledgeBaseConfiguration": configuration,
         },
@@ -419,12 +419,12 @@ def test_the_create_body_is_the_documented_managed_shape():
     )
     assert not create.has_errors(), create.generate_report()
 
-    fields = data_source_fields("contextweave-health-docs", "239571291755")
+    fields = data_source_fields("contextweave-health-docs", "123456789012")
     assert fields["dataSourceConfiguration"]["type"] == "MANAGED_KNOWLEDGE_BASE_CONNECTOR"
     connection = fields["dataSourceConfiguration"]["managedKnowledgeBaseConnectorConfiguration"]
     assert connection["connectorParameters"]["connectionConfiguration"] == {
         "bucketName": "contextweave-health-docs",
-        "bucketOwnerAccountId": "239571291755",
+        "bucketOwnerAccountId": "123456789012",
     }
     assert fields["dataDeletionPolicy"] == "DELETE"
     assert fields["vectorIngestionConfiguration"]["parsingConfiguration"]["parsingStrategy"] == "SMART_PARSING"
@@ -470,18 +470,18 @@ def _event(request_type, physical=""):
     event = {
         "RequestType": request_type,
         "ResponseURL": "https://cloudformation-custom-resource-response.s3.amazonaws.com/response",
-        "StackId": "arn:aws:cloudformation:us-east-1:239571291755:stack/teamweave/guid",
+        "StackId": "arn:aws:cloudformation:us-east-1:123456789012:stack/teamweave/guid",
         "RequestId": REQUEST_ID,
         "LogicalResourceId": "HealthKnowledgeBase",
         "ResourceProperties": {
-            "ServiceToken": "arn:aws:lambda:us-east-1:239571291755:function:provision",
+            "ServiceToken": "arn:aws:lambda:us-east-1:123456789012:function:provision",
             "KnowledgeBaseName": "health-registry-teamweave",
             "Description": "Index of ContextWeave's health bucket for the health_prep team.",
-            "RoleArn": "arn:aws:iam::239571291755:role/health-kb",
+            "RoleArn": "arn:aws:iam::123456789012:role/health-kb",
             "EmbeddingModelArn": MODEL_ARN,
-            "MultimodalBucket": "tw-health-mm-239571291755-us-east-1",
+            "MultimodalBucket": "tw-health-mm-123456789012-us-east-1",
             "DocsBucketName": "contextweave-health-docs",
-            "DocsBucketOwnerAccountId": "239571291755",
+            "DocsBucketOwnerAccountId": "123456789012",
         },
     }
     if physical:
@@ -531,7 +531,7 @@ def test_create_calls_the_managed_api_and_returns_the_ids(monkeypatch):
         def get_knowledge_base(self, **kwargs):
             return {"knowledgeBase": {
                 "knowledgeBaseId": "KBHEALTH",
-                "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:239571291755:knowledge-base/KBHEALTH",
+                "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/KBHEALTH",
                 "status": "ACTIVE",
             }}
 
@@ -556,7 +556,7 @@ def test_create_calls_the_managed_api_and_returns_the_ids(monkeypatch):
     assert managed["embeddingModelArn"].endswith(EMBEDDING_MODEL_ID)
     assert managed["embeddingModelConfiguration"]["bedrockEmbeddingModelConfiguration"]["embeddingDataType"] == "FLOAT32"
     assert managed["supplementalDataStorageConfiguration"]["storageLocations"][0]["s3Location"]["uri"] == (
-        "s3://tw-health-mm-239571291755-us-east-1/"
+        "s3://tw-health-mm-123456789012-us-east-1/"
     )
     source = seen["data_source"]
     assert source["dataSourceConfiguration"]["type"] == "MANAGED_KNOWLEDGE_BASE_CONNECTOR"
@@ -593,7 +593,7 @@ def test_update_keeps_the_same_base(monkeypatch):
         def get_knowledge_base(self, **kwargs):
             return {"knowledgeBase": {
                 "knowledgeBaseId": "KBHEALTH",
-                "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:239571291755:knowledge-base/KBHEALTH",
+                "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/KBHEALTH",
                 "status": "ACTIVE",
                 "knowledgeBaseConfiguration": {
                     "type": "MANAGED",
@@ -649,7 +649,7 @@ def test_a_different_embedding_model_replaces_the_base(monkeypatch):
                     )
                 return {"knowledgeBase": {
                     "knowledgeBaseId": "KBOLD",
-                    "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:239571291755:knowledge-base/KBOLD",
+                    "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/KBOLD",
                     "status": "ACTIVE",
                     "knowledgeBaseConfiguration": {
                         "type": "MANAGED",
@@ -658,7 +658,7 @@ def test_a_different_embedding_model_replaces_the_base(monkeypatch):
                 }}
             return {"knowledgeBase": {
                 "knowledgeBaseId": "KBNEW",
-                "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:239571291755:knowledge-base/KBNEW",
+                "knowledgeBaseArn": "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/KBNEW",
                 "status": "ACTIVE",
                 "knowledgeBaseConfiguration": {
                     "type": "MANAGED",
@@ -841,7 +841,7 @@ def test_the_provision_client_model_accepts_the_body_it_sends():
     create = validator.validate(
         {
             "name": "health-registry-teamweave",
-            "roleArn": "arn:aws:iam::239571291755:role/kb",
+            "roleArn": "arn:aws:iam::123456789012:role/kb",
             "description": "Index of ContextWeave's health bucket for the health_prep team.",
             "knowledgeBaseConfiguration": knowledge_base_configuration(
                 MODEL_ARN, "tw-health-mm-1-us-east-1",
@@ -851,7 +851,7 @@ def test_the_provision_client_model_accepts_the_body_it_sends():
     )
     assert not create.has_errors(), create.generate_report()
     source = validator.validate(
-        {"knowledgeBaseId": "KBID123456", **data_source_fields("contextweave-health-docs", "239571291755")},
+        {"knowledgeBaseId": "KBID123456", **data_source_fields("contextweave-health-docs", "123456789012")},
         model.operation_model("CreateDataSource").input_shape,
     )
     assert not source.has_errors(), source.generate_report()
@@ -859,7 +859,7 @@ def test_the_provision_client_model_accepts_the_body_it_sends():
         {
             "knowledgeBaseId": "KBID123456",
             "name": "health-registry-teamweave",
-            "roleArn": "arn:aws:iam::239571291755:role/kb",
+            "roleArn": "arn:aws:iam::123456789012:role/kb",
             "knowledgeBaseConfiguration": knowledge_base_configuration(
                 MODEL_ARN, "tw-health-mm-1-us-east-1",
             ),

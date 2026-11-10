@@ -25,7 +25,7 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 from scripts import agentcore_smoke as smoke  # noqa: E402
 
-ARN = "arn:aws:bedrock-agentcore:us-east-1:239571291755:runtime/teamweave_agent-X"
+ARN = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/teamweave_agent-X"
 
 
 class FakeClient:

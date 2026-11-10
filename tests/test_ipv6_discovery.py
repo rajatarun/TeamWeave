@@ -57,7 +57,7 @@ def discovery_query() -> str:
 
 def describe_vpcs_response(state: str = "associated") -> dict:
     return {"Vpcs": [{
-        "VpcId": "vpc-f3c92a8a",
+        "VpcId": "vpc-0123456789abcdef0",
         "CidrBlock": "172.31.0.0/16",
         "Ipv6CidrBlockAssociationSet": [{
             "AssociationId": "vpc-cidr-assoc-0abc123",
@@ -90,7 +90,7 @@ def test_the_deploy_query_ignores_a_block_still_associating():
 
 def test_the_deploy_query_is_empty_when_no_block_is_assigned():
     # The genuine first-deploy case, which the two-pass logic exists to handle.
-    empty = {"Vpcs": [{"VpcId": "vpc-f3c92a8a", "Ipv6CidrBlockAssociationSet": []}]}
+    empty = {"Vpcs": [{"VpcId": "vpc-0123456789abcdef0", "Ipv6CidrBlockAssociationSet": []}]}
     assert jmespath.search(discovery_query(), empty) is None
 
 

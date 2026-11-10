@@ -3,17 +3,17 @@ version = 0.1
 [default]
 [default.deploy]
 [default.deploy.parameters]
-stack_name = "tarun-content-team"
+stack_name = "teamweave"
 region = "us-east-1"
 capabilities = "CAPABILITY_NAMED_IAM"
 confirm_changeset = false
 resolve_s3 = true
-s3_prefix = "tarun-content-team"
+s3_prefix = "teamweave"
 parameter_overrides = [
   "TeamConfigPrefix=teams",
-  "VectorDbTable=",
-  "VpcId=vpc-f3c92a8a",
-  "RdsSecurityGroupId=sg-06e6751625773c1bf",
+  "VectorDbTable=rag_chunks",
+  "VpcId=",
+  "RdsSecurityGroupId=",
   "LambdaSubnetIds=",
   "GeminiSecretArn=",
   "DualStackEnabled=false"

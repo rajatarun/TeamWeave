@@ -12,7 +12,7 @@
 #   AWS_REGION=us-east-1 \
 #   STACK_NAME=tarun-content-team \
 #   SHARED_STACK_NAME=tarun-teamweave-shared \
-#   VPC_ID=vpc-f3c92a8a \
+#   VPC_ID=vpc-0123456789abcdef0 \
 #   INTERNET_GATEWAY_ID=igw-1234567890abcdef0 \
 #   PRIVATE_ROUTE_TABLE_ID="" \
 #   EIGW_ID="" \

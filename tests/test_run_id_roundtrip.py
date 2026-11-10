@@ -33,7 +33,7 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 from botocore.exceptions import ClientError  # noqa: E402
 
-STATE_MACHINE_ARN = "arn:aws:states:us-east-1:239571291755:stateMachine:tarun-content-team-state-machine"
+STATE_MACHINE_ARN = "arn:aws:states:us-east-1:123456789012:stateMachine:teamweave-state-machine"
 EXECUTION_PREFIX = STATE_MACHINE_ARN.replace(":stateMachine:", ":execution:", 1)
 
 

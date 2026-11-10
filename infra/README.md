@@ -9,8 +9,8 @@ This directory contains a CloudFormation template that provisions:
   - `tarun_improvement_team-coach`
 
 ## Prerequisites
-- AWS account: `239571291755`
-- Region: `us-east-1`
+- An AWS account with Bedrock and IAM permissions for this stack (see `docs/DEPLOY_CONFIG.md`)
+- Region: `us-east-1` (or your chosen region, passed consistently in deploy parameters)
 - IAM role for all agents is created by CloudFormation in this stack (`<stack-name>-bedrock-agent-service-role`).
 
 ## Deploy
@@ -26,7 +26,7 @@ Deploy:
 ```bash
 sam deploy \
   --template-file infra/bedrock-agents.yaml \
-  --stack-name tarun-bedrock-agents \
+  --stack-name teamweave-bedrock-agents \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
   --region us-east-1 \
   --resolve-s3 \
@@ -64,7 +64,7 @@ The stack exports these key values:
 ## Inspect stack outputs
 ```bash
 aws cloudformation describe-stacks \
-  --stack-name tarun-bedrock-agents \
+  --stack-name teamweave-bedrock-agents \
   --region us-east-1 \
   --query 'Stacks[0].Outputs'
 ```
