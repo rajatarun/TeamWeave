@@ -137,7 +137,7 @@ class SQLiteTeamRunStore:
         self.db_path = str(db_path)
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path)
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._configure()
         self._init_schema()
@@ -536,14 +536,94 @@ class LocalTeamRunner:
             self.store.close()
 
 
+def _run_serve(
+    team_path: str,
+    *,
+    db_path: str,
+    host: str,
+    port: int,
+    base_url: str,
+    model: str,
+) -> int:
+    from .local_a2a_server import LocalA2AService, create_http_server
+
+    executor: AgentExecutor | None = None
+    if base_url:
+        executor = OpenAICompatExecutor(
+            base_url=base_url,
+            api_key=os.environ.get("TEAMWEAVE_LLM_API_KEY", ""),
+            model=model,
+        )
+
+    store = SQLiteTeamRunStore(db_path)
+    runner = LocalTeamRunner(team_path, store=store, agent_executor=executor)
+    team_meta = runner.config.get("team") or {}
+    team_name = str(team_meta.get("name") or team_meta.get("team_id") or Path(team_path).stem)
+    service = LocalA2AService(
+        {team_name: runner.config},
+        runner,
+        store,
+        base_url=f"http://{host}:{port}",
+    )
+    server = create_http_server(service, host, port)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+        store.close()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    import sys
+
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv and raw_argv[0] == "serve":
+        serve_parser = argparse.ArgumentParser(
+            prog="teamweave-local serve",
+            description="Serve a TeamWeave team.json over a local A2A v1.0 HTTP/JSON-RPC server.",
+        )
+        serve_parser.add_argument("--team", required=True, help="Path to team.json")
+        serve_parser.add_argument("--db", default="teamweave_runs.db", help="SQLite database path")
+        serve_parser.add_argument("--host", default="127.0.0.1", help="Bind host")
+        serve_parser.add_argument("--port", type=int, default=8787, help="Bind port")
+        serve_parser.add_argument("--base-url", default="", help="OpenAI-compatible API base URL")
+        serve_parser.add_argument("--model", default="local", help="Model name for OpenAI-compatible API")
+        s_args = serve_parser.parse_args(raw_argv[1:])
+        return _run_serve(
+            s_args.team,
+            db_path=s_args.db,
+            host=s_args.host,
+            port=s_args.port,
+            base_url=s_args.base_url,
+            model=s_args.model,
+        )
+
     parser = argparse.ArgumentParser(description="Run a TeamWeave team.json locally with SQLite persistence.")
     parser.add_argument("--team", required=True, help="Path to team.json")
-    parser.add_argument("--request", required=True, help="Input request (JSON string or plain text)")
+    parser.add_argument("--request", default=None, help="Input request (JSON string or plain text)")
     parser.add_argument("--db", default="teamweave_runs.db", help="SQLite database path")
     parser.add_argument("--base-url", default="", help="OpenAI-compatible API base URL")
     parser.add_argument("--model", default="local", help="Model name for OpenAI-compatible API")
-    args = parser.parse_args(argv)
+    parser.add_argument("--serve", action="store_true", help="Start local A2A v1.0 HTTP/JSON-RPC server")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind host when --serve is set")
+    parser.add_argument("--port", type=int, default=8787, help="Bind port when --serve is set")
+    args = parser.parse_args(raw_argv)
+
+    if args.serve:
+        return _run_serve(
+            args.team,
+            db_path=args.db,
+            host=args.host,
+            port=args.port,
+            base_url=args.base_url,
+            model=args.model,
+        )
+
+    if args.request is None:
+        parser.error("the following arguments are required: --request (unless --serve or 'serve' is used)")
 
     try:
         req_payload: dict[str, Any] | str = json.loads(args.request)
