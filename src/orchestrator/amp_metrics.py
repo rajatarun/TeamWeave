@@ -27,11 +27,23 @@ import struct
 import time
 from typing import Any
 
-import boto3
-import botocore.auth
-import botocore.awsrequest
-import requests
-import snappy
+try:
+    import boto3
+    import botocore.auth
+    import botocore.awsrequest
+except ImportError:
+    boto3 = None  # type: ignore[assignment]
+    botocore = None  # type: ignore[assignment]
+
+try:
+    import requests
+except ImportError:
+    requests = None  # type: ignore[assignment]
+
+try:
+    import snappy
+except ImportError:
+    snappy = None  # type: ignore[assignment]
 
 from .logger import get_logger
 
@@ -134,6 +146,17 @@ def push_to_amp(series: _Series) -> None:
     """
     workspace_id = os.environ.get("AMP_WORKSPACE_ID")
     if not workspace_id:
+        return
+
+    if requests is None or snappy is None or boto3 is None or botocore is None:
+        log.warning(
+            "amp_optional_dependencies_missing",
+            extra={
+                "has_requests": requests is not None,
+                "has_snappy": snappy is not None,
+                "has_boto3": boto3 is not None,
+            },
+        )
         return
 
     region = os.environ.get("AMP_REGION", "us-east-1")
