@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import sqlite3
+import time
 import urllib.request
 import uuid
 from collections import deque
@@ -24,6 +25,13 @@ from typing import Any
 
 from jsonschema.exceptions import ValidationError
 
+from .local_policy import (
+    LocalTeamPolicy,
+    PolicyDeniedError,
+    append_telemetry_event,
+    format_team_telemetry_event,
+    normalize_trace_id,
+)
 from .schema_validate import validate_output
 
 AMBIENT_INPUTS: frozenset[str] = frozenset(
@@ -371,6 +379,8 @@ class LocalTeamRunner:
         db_path: str | Path | None = None,
         agent_executor: AgentExecutor | None = None,
         base_dir: Path | None = None,
+        policy: LocalTeamPolicy | None = None,
+        telemetry_path: str | Path | None = None,
     ) -> None:
         if isinstance(team_config, (str, Path)):
             cfg_path = Path(team_config)
@@ -383,6 +393,8 @@ class LocalTeamRunner:
         self._owns_store = store is None
         self.store = store if store is not None else SQLiteTeamRunStore(db_path or ":memory:")
         self.agent_executor = agent_executor or self._default_executor()
+        self.policy = policy
+        self.telemetry_path = Path(telemetry_path) if telemetry_path is not None else None
         self.agents_by_id: dict[str, dict[str, Any]] = {
             a["id"]: a for a in (self.config.get("agents") or []) if isinstance(a, dict) and "id" in a
         }
@@ -447,6 +459,32 @@ class LocalTeamRunner:
                 resolved[ref_str] = ambient[ref_str]
         return resolved
 
+    def _emit_telemetry(
+        self,
+        *,
+        team_name: str,
+        run_id: str,
+        step_name: str,
+        status: str,
+        latency_ms: float,
+        trace_id: str,
+        attributes: dict[str, Any] | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        if self.telemetry_path is None:
+            return
+        event = format_team_telemetry_event(
+            team_name=team_name,
+            run_id=run_id,
+            step_name=step_name,
+            status=status,
+            latency_ms=latency_ms,
+            trace_id=trace_id,
+            attributes=attributes,
+            error_message=error_message,
+        )
+        append_telemetry_event(self.telemetry_path, event)
+
     def run(
         self,
         request: dict[str, Any] | str,
@@ -454,6 +492,7 @@ class LocalTeamRunner:
         run_id: str | None = None,
         ambient_context: dict[str, Any] | None = None,
         raise_on_error: bool = False,
+        trace_id: str | None = None,
     ) -> TeamRunResult:
         """Validate workflow, execute all steps in DAG order, and persist to SQLite."""
         ambient: dict[str, Any] = {"request": request, **(ambient_context or {})}
@@ -465,6 +504,8 @@ class LocalTeamRunner:
         team_id = str(team_meta.get("team_id") or team_meta.get("name") or "local_team")
         team_name = str(team_meta.get("name") or team_id)
         active_run_id = run_id or str(uuid.uuid4())
+        run_trace_id = normalize_trace_id(trace_id)
+        run_started_monotonic = time.monotonic()
 
         self.store.create_run(active_run_id, team_id, team_name, request)
         outputs: dict[str, dict[str, Any]] = {}
@@ -472,9 +513,50 @@ class LocalTeamRunner:
         for seq, step in enumerate(ordered_steps):
             step_id = step["step"]
             agent = self.agents_by_id[step_id]
+            step_role = str(agent.get("role") or agent.get("id") or step_id)
             schema_ref = agent.get("schema_ref")
             step_inputs = self._build_step_inputs(step, ambient, outputs)
+            step_started_monotonic = time.monotonic()
             started_at = _utc_now()
+            elapsed_seconds = step_started_monotonic - run_started_monotonic
+
+            if self.policy is not None:
+                allowed, denial_reason = self.policy.validate_step(seq, step_role, elapsed_seconds)
+                if not allowed:
+                    err_msg = denial_reason or f"Step {step_id!r} denied by LocalTeamPolicy"
+                    latency_ms = (time.monotonic() - step_started_monotonic) * 1000.0
+                    self.store.record_step(
+                        active_run_id,
+                        step_id,
+                        seq,
+                        "policy_denied",
+                        step_inputs,
+                        output=None,
+                        schema_ref=schema_ref,
+                        error=err_msg,
+                        started_at=started_at,
+                        finished_at=_utc_now(),
+                    )
+                    self.store.update_run_status(active_run_id, "policy_denied", error=err_msg)
+                    self._emit_telemetry(
+                        team_name=team_name,
+                        run_id=active_run_id,
+                        step_name=step_id,
+                        status="policy_denied",
+                        latency_ms=latency_ms,
+                        trace_id=run_trace_id,
+                        attributes={"role": step_role, "step_index": seq, "policy_denied": True},
+                        error_message=err_msg,
+                    )
+                    if raise_on_error:
+                        raise PolicyDeniedError(err_msg)
+                    return TeamRunResult(
+                        run_id=active_run_id,
+                        status="policy_denied",
+                        step_outputs=outputs,
+                        failed_step=step_id,
+                        error=err_msg,
+                    )
 
             try:
                 schema = self._resolve_schema(schema_ref)
@@ -492,6 +574,7 @@ class LocalTeamRunner:
                         ) from exc
             except Exception as exc:  # noqa: BLE001
                 err_msg = str(exc)
+                latency_ms = (time.monotonic() - step_started_monotonic) * 1000.0
                 self.store.record_step(
                     active_run_id,
                     step_id,
@@ -505,6 +588,16 @@ class LocalTeamRunner:
                     finished_at=_utc_now(),
                 )
                 self.store.update_run_status(active_run_id, "FAILED", error=err_msg)
+                self._emit_telemetry(
+                    team_name=team_name,
+                    run_id=active_run_id,
+                    step_name=step_id,
+                    status="error",
+                    latency_ms=latency_ms,
+                    trace_id=run_trace_id,
+                    attributes={"role": step_role, "step_index": seq},
+                    error_message=err_msg,
+                )
                 if raise_on_error:
                     raise
                 return TeamRunResult(
@@ -516,6 +609,7 @@ class LocalTeamRunner:
                 )
 
             outputs[step_id] = output
+            latency_ms = (time.monotonic() - step_started_monotonic) * 1000.0
             self.store.record_step(
                 active_run_id,
                 step_id,
@@ -526,6 +620,15 @@ class LocalTeamRunner:
                 schema_ref=schema_ref,
                 started_at=started_at,
                 finished_at=_utc_now(),
+            )
+            self._emit_telemetry(
+                team_name=team_name,
+                run_id=active_run_id,
+                step_name=step_id,
+                status="ok",
+                latency_ms=latency_ms,
+                trace_id=run_trace_id,
+                attributes={"role": step_role, "step_index": seq},
             )
 
         self.store.update_run_status(active_run_id, "COMPLETED")
