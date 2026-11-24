@@ -208,7 +208,7 @@ def test_jsonrpc_errors_for_unknown_team_method_and_task() -> None:
     runner = LocalTeamRunner(team_cfg, store=store, agent_executor=_demo_executor)
     service = LocalA2AService({"demo_team": team_cfg}, runner, store)
     try:
-        unknown_method = service.handle_jsonrpc({"jsonrpc": "2.0", "id": 1, "method": "tasks/cancel", "params": {}})
+        unknown_method = service.handle_jsonrpc({"jsonrpc": "2.0", "id": 1, "method": "tasks/unknown", "params": {}})
         assert unknown_method["error"]["code"] == ERR_METHOD_NOT_FOUND
 
         unknown_team = service.handle_jsonrpc(

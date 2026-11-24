@@ -1,16 +1,19 @@
 """Standalone local A2A v1.0 HTTP/JSON-RPC server over LocalTeamRunner.
 
-Serves ``GET /.well-known/agent-card.json`` and ``POST /`` (or ``POST /a2a``)
-JSON-RPC 2.0 requests (``tasks/send``, ``tasks/get``) backed by
-``LocalTeamRunner`` and ``SQLiteTeamRunStore`` with zero AWS dependencies.
+Serves ``GET /.well-known/agent-card.json``, ``GET /health``,
+``GET /tasks/{run_id}/events`` (Server-Sent Events), and ``POST /`` (or
+``POST /a2a``) JSON-RPC 2.0 requests (``tasks/send``, ``tasks/get``,
+``tasks/cancel``) backed by ``LocalTeamRunner`` and ``SQLiteTeamRunStore``
+with zero AWS dependencies.
 """
 
 from __future__ import annotations
 
 import json
 import threading
+import urllib.parse
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from typing import Any
 
 from . import a2a
@@ -48,10 +51,12 @@ def _jsonrpc_error(
 
 
 def _normalize_run_status(status: str) -> str:
-    """Map LocalTeamRunner statuses (COMPLETED) to canonical a2a.py statuses (SUCCEEDED)."""
+    """Map LocalTeamRunner statuses (COMPLETED, canceled) to canonical a2a.py statuses."""
     upper = str(status or "").strip().upper()
     if upper == "COMPLETED":
         return "SUCCEEDED"
+    if upper in ("CANCELED", "CANCELLED"):
+        return "ABORTED"
     return upper
 
 
@@ -80,6 +85,19 @@ def _extract_input_payload(params: dict[str, Any]) -> dict[str, Any] | str | Non
                 pass
             return text
     return None
+
+
+def _parse_task_events_path(path: str) -> str | None:
+    """Extract ``run_id`` from ``/tasks/{run_id}/events`` or return ``None``."""
+    prefix = "/tasks/"
+    suffix = "/events"
+    if not (path.startswith(prefix) and path.endswith(suffix)):
+        return None
+    raw_id = path[len(prefix) : -len(suffix)]
+    if not raw_id or "/" in raw_id:
+        return None
+    run_id = urllib.parse.unquote(raw_id).strip()
+    return run_id or None
 
 
 class LocalA2AService:
@@ -119,6 +137,82 @@ class LocalA2AService:
             version=self.version,
             teams=self._teams_for_card(),
         )
+
+    def get_health(self) -> dict[str, Any]:
+        """Return lightweight service health metadata for probes and SystemUI."""
+        team_names = sorted(self._teams_by_name.keys())
+        with self._lock:
+            total_runs = self.store.count_runs()
+        return {
+            "status": "ok",
+            "teams_loaded": len(team_names),
+            "team_names": team_names,
+            "total_runs": total_runs,
+        }
+
+    def get_task_events(self, run_id: str) -> list[dict[str, Any]] | None:
+        """Build ordered SSE event descriptors for a persisted run's steps and terminal state.
+
+        Returns ``None`` if ``run_id`` does not exist in ``SQLiteTeamRunStore``.
+        """
+        with self._lock:
+            saved = self.store.get_run(run_id)
+        if saved is None:
+            return None
+
+        events: list[dict[str, Any]] = []
+        steps = saved.get("steps") or []
+        for idx, step in enumerate(steps, start=1):
+            events.append(
+                {
+                    "id": str(idx),
+                    "event": "task.step",
+                    "data": {
+                        "run_id": saved["run_id"],
+                        "team_id": saved["team_id"],
+                        "team_name": saved["team_name"],
+                        "step_id": step["step_id"],
+                        "seq": step["seq"],
+                        "status": step["status"],
+                        "schema_ref": step.get("schema_ref"),
+                        "output": step.get("output"),
+                        "error": step.get("error"),
+                        "started_at": step.get("started_at"),
+                        "finished_at": step.get("finished_at"),
+                    },
+                }
+            )
+
+        task_state = a2a.task_state_for(_normalize_run_status(saved["status"]))
+        if a2a.is_terminal(task_state):
+            events.append(
+                {
+                    "id": str(len(events) + 1),
+                    "event": "task.terminal",
+                    "data": {
+                        "run_id": saved["run_id"],
+                        "team_id": saved["team_id"],
+                        "team_name": saved["team_name"],
+                        "status": saved["status"],
+                        "state": task_state,
+                        "steps_count": len(steps),
+                        "error": saved.get("error"),
+                        "updated_at": saved.get("updated_at"),
+                    },
+                }
+            )
+        return events
+
+    def format_task_events_sse(self, run_id: str) -> str | None:
+        """Serialize persisted task progress events into ``text/event-stream`` wire format."""
+        events = self.get_task_events(run_id)
+        if events is None:
+            return None
+        frames: list[str] = []
+        for item in events:
+            payload = json.dumps(item["data"], ensure_ascii=False)
+            frames.append(f"id: {item['id']}\nevent: {item['event']}\ndata: {payload}\n\n")
+        return "".join(frames)
 
     def _resolve_team_name(self, params: dict[str, Any]) -> str:
         explicit = params.get("team")
@@ -215,8 +309,38 @@ class LocalA2AService:
         )
         return _jsonrpc_result(req_id, task)
 
+    def _handle_tasks_cancel(self, req_id: Any, params: dict[str, Any]) -> dict[str, Any]:
+        run_id = params.get("id") or params.get("run_id") or params.get("task_id")
+        if not isinstance(run_id, str) or not run_id.strip():
+            return _jsonrpc_error(req_id, ERR_INVALID_PARAMS, "tasks/cancel requires a non-empty 'id' or 'run_id'")
+
+        clean_id = run_id.strip()
+        reason = params.get("reason")
+        error_msg = str(reason).strip() if isinstance(reason, str) and reason.strip() else None
+
+        with self._lock:
+            saved = self.store.get_run(clean_id)
+            if saved is None:
+                return _jsonrpc_error(req_id, ERR_TASK_NOT_FOUND, f"Task not found: {run_id!r}")
+            persisted_error = error_msg if error_msg is not None else saved.get("error")
+            self.store.update_run_status(clean_id, "canceled", error=persisted_error)
+            updated = self.store.get_run(clean_id) or saved
+
+        step_outputs = {
+            step["step_id"]: step["output"]
+            for step in updated.get("steps") or []
+            if step.get("output") is not None
+        }
+        task = a2a.task_for_run(
+            updated["run_id"],
+            _normalize_run_status(updated["status"]),
+            result=step_outputs,
+            error=updated.get("error") or "",
+        )
+        return _jsonrpc_result(req_id, task)
+
     def handle_jsonrpc(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Dispatch a JSON-RPC 2.0 A2A request (``tasks/send`` or ``tasks/get``)."""
+        """Dispatch a JSON-RPC 2.0 A2A request (``tasks/send``, ``tasks/get``, ``tasks/cancel``)."""
         if not isinstance(request, dict):
             return _jsonrpc_error(None, ERR_INVALID_REQUEST, "JSON-RPC request must be a JSON object")
 
@@ -235,8 +359,14 @@ class LocalA2AService:
             return self._handle_tasks_send(req_id, params)
         if method == "tasks/get":
             return self._handle_tasks_get(req_id, params)
+        if method == "tasks/cancel":
+            return self._handle_tasks_cancel(req_id, params)
 
         return _jsonrpc_error(req_id, ERR_METHOD_NOT_FOUND, f"Unknown A2A method: {method!r}")
+
+
+class _A2AHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
 
 
 def create_http_server(
@@ -244,7 +374,7 @@ def create_http_server(
     host: str = "127.0.0.1",
     port: int = 8787,
 ) -> HTTPServer:
-    """Create a lightweight stdlib HTTPServer serving the Agent Card and JSON-RPC A2A endpoints."""
+    """Create a lightweight stdlib HTTPServer serving Agent Card, health, SSE events, and JSON-RPC A2A endpoints."""
 
     class _A2AHandler(BaseHTTPRequestHandler):
         def _send_json(self, status_code: int, payload: dict[str, Any]) -> None:
@@ -255,10 +385,31 @@ def create_http_server(
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_sse(self, sse_body: str) -> None:
+            body = sse_body.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+
         def do_GET(self) -> None:  # noqa: N802
             path = self.path.split("?", 1)[0]
             if path == a2a.AGENT_CARD_PATH:
                 self._send_json(HTTPStatus.OK, service.get_agent_card())
+                return
+            if path == "/health":
+                self._send_json(HTTPStatus.OK, service.get_health())
+                return
+            run_id = _parse_task_events_path(path)
+            if run_id is not None:
+                sse_payload = service.format_task_events_sse(run_id)
+                if sse_payload is None:
+                    self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {run_id!r}"})
+                    return
+                self._send_sse(sse_payload)
                 return
             self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Not found: {path}"})
 
@@ -294,4 +445,4 @@ def create_http_server(
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
             return
 
-    return HTTPServer((host, port), _A2AHandler)
+    return _A2AHTTPServer((host, port), _A2AHandler)

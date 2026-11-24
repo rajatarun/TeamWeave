@@ -287,6 +287,10 @@ class SQLiteTeamRunStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def count_runs(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) FROM team_runs").fetchone()
+        return int(row[0]) if row else 0
+
     def close(self) -> None:
         self._conn.close()
 
